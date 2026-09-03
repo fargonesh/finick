@@ -12,3 +12,8 @@ serde_json = "1.0.139"
 freya = { git = "https://github.com/marc2332/freya", branch = "main", features = [
     "all",
 ] }
+chrono = "0.4.45"
+image = "0.25.10"
+bytes = "1.12.1"
+tokio = { version = "1.53.1", features = ["full"] }
+ui = { version = "0.1.0", path = "../../libs/ui" }

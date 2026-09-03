@@ -11,6 +11,14 @@
     pkgs.xdotool
     pkgs.stdenv.cc
     pkgs.binutils
+    pkgs.sqlite
+    pkgs.pkg-config
+    pkgs.gtk4
+    pkgs.gtk4.dev
+    pkgs.libadwaita
+    pkgs.libadwaita.dev
+    pkgs.glib
+    pkgs.glib.dev
 ];
 
   enterShell = ''

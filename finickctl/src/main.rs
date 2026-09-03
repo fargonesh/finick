@@ -39,7 +39,7 @@ fn main() {
             println!("Searching for: {}", q);
             ipsea::send_command(
                 App::IndexService,
-                &index::ty::Request { query: q },
+                &index::ty::Request::Search { query: q },
                 Some(move |value: index::ty::SearchResult| match args.json {
                     true => println!("{}", serde_json::to_string(&value).unwrap()),
                     false => {
@@ -48,7 +48,9 @@ fn main() {
                             value.name,
                             value.path,
                             ic = {
-                                if value.is_desktop {
+                                if value.is_dir {
+                                    "/"
+                                } else if value.is_desktop {
                                     "@"
                                 } else if value.is_executable {
                                     "*"

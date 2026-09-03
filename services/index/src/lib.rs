@@ -17,11 +17,14 @@ use ty::SearchResult;
 struct ChannelData {
     name: String,
     path_str: String,
+    parent_path: Option<String>,
     timestamp: i64,
     depth: usize,
     executable: bool,
     is_desktop: bool,
     icon: Option<String>,
+    is_dir: bool,
+    size: Option<u64>,
 }
 
 pub mod ty;
@@ -44,20 +47,13 @@ fn folders() -> Vec<PathBuf> {
 }
 
 fn ignore() -> Vec<Regex> {
-    vec![
-        Regex::new("node_modules/.+").unwrap(),
-        Regex::new("target/.+").unwrap(),
-        Regex::new(r"/\..+").unwrap(),
-    ]
+    vec![Regex::new("node_modules/.+").unwrap(), Regex::new("target/.+").unwrap(), Regex::new(r"/\..+").unwrap()]
 }
 
 fn is_binary_file(path: &PathBuf) -> bool {
     if let Some(ext) = path.extension() {
         let ext = ext.to_string_lossy().to_lowercase();
-        return matches!(
-            ext.as_str(),
-            "exe" | "bin" | "o" | "dll" | "so" | "dat" | "class" | "rmeta" | "rlib" | "d"
-        );
+        return matches!(ext.as_str(), "exe" | "bin" | "o" | "dll" | "so" | "dat" | "class" | "rmeta" | "rlib" | "d");
     }
     false
 }
@@ -75,23 +71,33 @@ pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
             let conn = pool.get().unwrap();
             println!("{:?}", &data.icon);
             // Check if the file already exists and if it was indexed recently.
-            let should_index = match conn.query_row(
-                "SELECT last_accessed FROM files WHERE path = ?1",
-                params![&data.path_str],
-                |row| row.get::<_, i64>(0),
-            ) {
-                Ok(last_accessed) => {
-                    // Only re-index if the stored timestamp is older than our threshold.
-                    data.timestamp >= last_accessed + REINDEX_THRESHOLD
-                }
-                Err(_) => true, // File not indexed yet.
-            };
+            let should_index =
+                match conn.query_row("SELECT last_accessed FROM files WHERE path = ?1", params![&data.path_str], |row| {
+                    row.get::<_, i64>(0)
+                }) {
+                    Ok(last_accessed) => {
+                        // Only re-index if the stored timestamp is older than our threshold.
+                        data.timestamp >= last_accessed + REINDEX_THRESHOLD
+                    }
+                    Err(_) => true, // File not indexed yet.
+                };
 
             if should_index {
                 // Using REPLACE here so that we update if it already exists.
                 conn.execute(
-                    "REPLACE INTO files (name, path, depth, last_accessed, executable, desktop, icon) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![data.name, data.path_str, data.depth, data.timestamp, data.executable, data.is_desktop, data.icon],
+                    "REPLACE INTO files (name, path, parent_path, depth, last_accessed, executable, desktop, icon, is_dir, size) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        data.name,
+                        data.path_str,
+                        data.parent_path,
+                        data.depth,
+                        data.timestamp,
+                        data.executable,
+                        data.is_desktop,
+                        data.icon,
+                        data.is_dir,
+                        data.size.map(|s| s as i64),
+                    ],
                 )
                 .unwrap();
             }
@@ -120,23 +126,38 @@ fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>
             let mut name = entry.file_name().to_string_lossy().to_string();
             let mut icon = Option::<String>::None;
             let mut is_desktop = false;
+            let parent_path = path.parent().map(|p| p.to_string_lossy().to_string());
 
             let ft = entry.file_type().unwrap();
             if ft.is_dir() && !ignore.iter().any(|pat| pat.is_match(&path_str)) {
+                let timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as i64;
+
+                let _ = tx.send(ChannelData {
+                    name: name.clone(),
+                    path_str: path_str.clone(),
+                    parent_path,
+                    timestamp,
+                    depth,
+                    executable: false,
+                    is_desktop: false,
+                    icon: None,
+                    is_dir: true,
+                    size: None,
+                });
+
                 task(path, ignore.clone(), tx.clone(), depth + 1);
             } else if ft.is_file() && !is_binary_file(&path) {
-                let timestamp = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64;
+                let timestamp = entry
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or_else(|| SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as i64);
+                let size = entry.metadata().ok().map(|m| m.len());
                 let executable = is_executable(&path);
 
-                if path
-                    .extension()
-                    .map(|v| v.to_string_lossy().to_string())
-                    .unwrap_or_default()
-                    == "desktop".to_string()
-                {
+                if path.extension().map(|v| v.to_string_lossy().to_string()).unwrap_or_default() == "desktop".to_string() {
                     let (new_name, new_icon) = read_desktop(&path).unwrap_or_default();
                     name = if new_name.is_empty() { name } else { new_name };
                     icon = new_icon;
@@ -146,29 +167,33 @@ fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>
                 let _ = tx.send(ChannelData {
                     name,
                     path_str,
+                    parent_path,
                     timestamp,
                     depth,
                     executable,
                     is_desktop,
                     icon,
+                    is_dir: false,
+                    size,
                 });
             } else if ft.is_symlink() {
                 if let Ok(target) = fs::read_link(&path) {
                     if is_executable(&target) {
-                        let timestamp = SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs() as i64;
+                        let timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as i64;
+                        let size = fs::metadata(&path).ok().map(|m| m.len());
                         let executable = true;
                         // Send the symlink information. If the channel is full, this will block.
                         let _ = tx.send(ChannelData {
                             name,
                             path_str,
+                            parent_path,
                             timestamp,
                             depth,
                             executable,
                             is_desktop,
                             icon,
+                            is_dir: false,
+                            size,
                         });
                     }
                 }
@@ -204,9 +229,7 @@ fn read_desktop(path: &PathBuf) -> Result<(String, Option<String>), ()> {
         if let Ok(img) = ImageReader::open(Path::new(&icon)).unwrap().decode() {
             let img = img.resize(64, 64, image::imageops::FilterType::Lanczos3);
 
-            let path = config::finick_root()
-                .join("icons")
-                .join(format!("{name}.png"));
+            let path = config::finick_root().join("icons").join(format!("{name}.png"));
             fs::create_dir_all(path.parent().unwrap()).unwrap();
 
             img.save(&path).map_err(|_| ())?;
@@ -220,9 +243,7 @@ fn read_desktop(path: &PathBuf) -> Result<(String, Option<String>), ()> {
 fn resolve_icon(name: &str) -> Option<String> {
     let locations = vec![
         env::var("HOME").map(|v| format!("{v}/.icons/")).ok(),
-        env::var("XDG_DATA_HOME")
-            .map(|v| format!("{v}/icons/"))
-            .ok(),
+        env::var("XDG_DATA_HOME").map(|v| format!("{v}/icons/")).ok(),
         Some("/usr/share/pixmaps".to_string()),
     ]
     .into_iter()
@@ -230,10 +251,7 @@ fn resolve_icon(name: &str) -> Option<String> {
 
     for location in locations {
         if let Ok(dir) = read_dir(location) {
-            if let Some(icon) = dir
-                .filter_map(|f| f.ok())
-                .find(|f| f.file_name().to_string_lossy().starts_with(name))
-            {
+            if let Some(icon) = dir.filter_map(|f| f.ok()).find(|f| f.file_name().to_string_lossy().starts_with(name)) {
                 return Some(icon.path().to_string_lossy().to_string());
             }
         }
@@ -249,7 +267,7 @@ pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(Sear
     // First, search in the database
     let mut res = conn
         .prepare(
-            "SELECT name, path, icon, desktop, executable
+            "SELECT name, path, icon, desktop, executable, is_dir, size, last_accessed
              FROM files
              WHERE name LIKE ?1 OR path LIKE ?1
              ORDER BY executable DESC, last_accessed DESC, depth ASC, LENGTH(replace(name, ?1, '')) ASC
@@ -266,6 +284,9 @@ pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(Sear
         let icon: Option<String> = row.get(2).unwrap();
         let desktop: bool = row.get(3).unwrap();
         let executable: bool = row.get(4).unwrap();
+        let is_dir: bool = row.get(5).unwrap_or(false);
+        let size: Option<i64> = row.get(6).unwrap_or(None);
+        let last_accessed: Option<i64> = row.get(7).unwrap_or(None);
 
         found_paths.insert(path.clone());
         cb(SearchResult {
@@ -274,6 +295,9 @@ pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(Sear
             icon,
             is_desktop: desktop,
             is_executable: executable,
+            is_dir,
+            size: size.map(|s| s as u64),
+            modified: last_accessed.map(|t| t as u64),
         });
     }
 
@@ -287,27 +311,68 @@ pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(Sear
 
                     if path.is_file()
                         && is_executable(&path)
-                        && path
-                            .file_name()
-                            .map(|v| v.to_string_lossy())
-                            .unwrap_or_default()
-                            .to_string()
-                            .contains(query)
+                        && path.file_name().map(|v| v.to_string_lossy()).unwrap_or_default().to_string().contains(query)
                     {
                         let path_str = path.to_string_lossy().to_string();
                         if !found_paths.contains(&path_str) {
+                            let size = entry.metadata().ok().map(|m| m.len());
+                            let modified = entry
+                                .metadata()
+                                .ok()
+                                .and_then(|m| m.modified().ok())
+                                .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs());
                             cb(SearchResult {
                                 name,
                                 path: path.to_string_lossy().to_string(),
                                 is_desktop: false,
                                 is_executable: true,
                                 icon: None,
+                                is_dir: false,
+                                size,
+                                modified,
                             });
                         }
                     }
                 }
             }
         }
+    }
+}
+
+pub fn list_dir(path: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(SearchResult)) {
+    let clean_path = if path.len() > 1 && path.ends_with('/') { path.trim_end_matches('/') } else { path };
+    let conn = pool.get().unwrap();
+    let mut res = conn
+        .prepare(
+            "SELECT name, path, icon, desktop, executable, is_dir, size, last_accessed
+             FROM files
+             WHERE parent_path = ?1
+             ORDER BY is_dir DESC, name ASC",
+        )
+        .unwrap();
+
+    let mut rows = res.query(params![clean_path]).unwrap();
+    while let Some(row) = rows.next().unwrap() {
+        let name: String = row.get(0).unwrap();
+        let path: String = row.get(1).unwrap();
+        let icon: Option<String> = row.get(2).unwrap();
+        let desktop: bool = row.get(3).unwrap();
+        let executable: bool = row.get(4).unwrap();
+        let is_dir: bool = row.get(5).unwrap_or(false);
+        let size: Option<i64> = row.get(6).unwrap_or(None);
+        let last_accessed: Option<i64> = row.get(7).unwrap_or(None);
+
+        cb(SearchResult {
+            name,
+            path,
+            icon,
+            is_desktop: desktop,
+            is_executable: executable,
+            is_dir,
+            size: size.map(|s| s as u64),
+            modified: last_accessed.map(|t| t as u64),
+        });
     }
 }
 
@@ -329,10 +394,7 @@ pub fn watch(pool: Pool<SqliteConnectionManager>) {
                 EventKind::Remove(_) => {
                     event.paths.iter().for_each(|p| {
                         let param = format!("{}%", p.display());
-                        pool.get()
-                            .unwrap()
-                            .execute("DELETE FROM files WHERE path LIKE ?1", params![param])
-                            .unwrap();
+                        pool.get().unwrap().execute("DELETE FROM files WHERE path LIKE ?1", params![param]).unwrap();
                     });
                 }
                 _ => {}

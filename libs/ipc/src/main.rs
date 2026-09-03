@@ -10,12 +10,9 @@ async fn main() {
     pretty_env_logger::init();
 
     let server = spawn(async {
-        start_server(
-            "ipsea-test",
-            |i: String, o: std::sync::mpsc::Sender<String>| {
-                o.send(i).expect("Failed to eecho message");
-            },
-        )
+        start_server("ipsea-test", |i: String, o: std::sync::mpsc::Sender<String>| {
+            o.send(i).expect("Failed to eecho message");
+        })
         .expect("Failed to start server")
     });
 

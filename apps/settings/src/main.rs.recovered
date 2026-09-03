@@ -1,0 +1,248 @@
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
+use freya::{
+    prelude::*,
+    router::*,
+};
+use ui::*;
+
+fn main() {
+    launch(LaunchConfig::new().with_window(WindowConfig::new(app).with_title("Settings").with_size(800., 600.)))
+}
+
+fn app() -> impl IntoElement {
+    Router::<Route>::new(RouterConfig::default)
+}
+
+#[derive(Routable, Clone, PartialEq)]
+pub enum Route {
+    #[layout(AppSideBar)]
+    #[route("/")]
+    General,
+    #[route("/appearance")]
+    Appearance,
+    #[route("/network")]
+    Network,
+    #[route("/about")]
+    About,
+    #[route("/quick-actions")]
+    QuickActions,
+}
+
+#[derive(PartialEq)]
+struct AppSideBar;
+impl Component for AppSideBar {
+    fn render(&self) -> impl IntoElement {
+        let nav_items = rect()
+            .height(Size::fill())
+            .width(Size::fill())
+            .child(
+                ActivableRoute::new(
+                    Route::General,
+                    Link::new(Route::General).child(nav_btn("General", false)),
+                )
+                .exact(true),
+            )
+            .child(ActivableRoute::new(
+                Route::Appearance,
+                Link::new(Route::Appearance).child(nav_btn("Appearance", false)),
+            ))
+            .child(ActivableRoute::new(
+                Route::Network,
+                Link::new(Route::Network).child(nav_btn("Network", false)),
+            ))
+            .child(ActivableRoute::new(
+                Route::About,
+                Link::new(Route::About).child(nav_btn("About", false)),
+            ));
+
+        let quick_actions_btn = rect()
+            .margin((0., 0., 10., 0.))
+            .child(ActivableRoute::new(
+                Route::QuickActions,
+                Link::new(Route::QuickActions).child(nav_btn("⚡ Quick Actions", false)),
+            ));
+
+        rect()
+                .horizontal()
+                .width(Size::fill())
+                .height(Size::fill())
+                .background(BG_BASE)
+                .child(
+                    rect()
+                        .width(Size::px(220.))
+                        .height(Size::fill())
+                        .background(BG_SIDEBAR)
+                        .padding(16.)
+                        .child(
+                            rect()
+                                .height(Size::px(60.))
+                                .child(label().font_size(24.).font_weight(FontWeight::BOLD).color(TEXT_PRIMARY).text("Settings"))
+                        )
+                        .child(nav_items)
+                        .child(quick_actions_btn)
+                )
+                .child(
+                    rect()
+                        .expanded()
+                        .padding(32.)
+                        .background(BG_BASE)
+                        .child(Outlet::<Route>::new())
+                ),
+    }
+}
+
+fn nav_btn(text: &str, active: bool) -> impl IntoElement {
+    let bg = if active { BG_SELECTED } else { Color::TRANSPARENT };
+    rect()
+        .width(Size::fill())
+        .padding(12.)
+        .corner_radius(8.)
+        .background(bg)
+        .margin((0., 0., 4., 0.))
+        .child(label().font_size(14.).color(TEXT_PRIMARY).text(text.to_string()))
+}
+
+#[derive(PartialEq)]
+struct General;
+impl Component for General {
+    fn render(&self) -> impl IntoElement {
+        rect()
+            .child(page_header("General", "System-wide preferences and behaviors."))
+            .child(
+                rect()
+                    .margin((0., 0., 16., 0.))
+                    .child(label().font_size(16.).color(TEXT_PRIMARY).margin((0., 0., 8., 0.)).text("Language"))
+                    .child(secondary_button("English (US)", || {}))
+            )
+            .child(
+                rect()
+                    .margin((0., 0., 16., 0.))
+                    .child(label().font_size(16.).color(TEXT_PRIMARY).margin((0., 0., 8., 0.)).text("Timezone"))
+                    .child(secondary_button("UTC", || {}))
+            )
+    }
+}
+
+#[derive(PartialEq)]
+struct Appearance;
+impl Component for Appearance {
+    fn render(&self) -> impl IntoElement {
+        let mut is_dark_mode = use_state(|| true);
+        
+        rect()
+            .child(page_header("Appearance", "Customize how your system looks."))
+            .child(
+                rect()
+                    .horizontal()
+                    .cross_align(Alignment::Center)
+                    .margin((0., 0., 16., 0.))
+                    .child(label().font_size(16.).color(TEXT_PRIMARY).width(Size::px(150.)).text("Dark Mode"))
+                    .child(
+                        Switch::new()
+                            .toggled(*is_dark_mode.read())
+                            .on_toggle(move |_| {
+                                let current = *is_dark_mode.read();
+                                is_dark_mode.set(!current);
+                            })
+                    )
+            )
+            .child(
+                rect()
+                    .margin((0., 0., 16., 0.))
+                    .child(label().font_size(16.).color(TEXT_PRIMARY).margin((0., 0., 8., 0.)).text("Accent Color"))
+                    .child(
+                        rect()
+                            .horizontal()
+                            .spacing(8.)
+                            .child(rect().width(Size::px(32.)).height(Size::px(32.)).corner_radius(16.).background(ACCENT_BLUE))
+                            .child(rect().width(Size::px(32.)).height(Size::px(32.)).corner_radius(16.).background(ACCENT_RED))
+                            .child(rect().width(Size::px(32.)).height(Size::px(32.)).corner_radius(16.).background(ACCENT_GREEN))
+                    )
+            )
+    }
+}
+
+#[derive(PartialEq)]
+struct Network;
+impl Component for Network {
+    fn render(&self) -> impl IntoElement {
+        rect()
+            .child(page_header("Network", "Wi-Fi, Bluetooth, and internet settings."))
+            .child(
+                rect()
+                    .margin((0., 0., 16., 0.))
+                    .child(
+                        rect()
+                            .horizontal()
+                            .cross_align(Alignment::Center)
+                            .margin((0., 0., 8., 0.))
+                            .child(label().font_size(16.).color(TEXT_PRIMARY).width(Size::px(150.)).text("Wi-Fi"))
+                            .child(Switch::new().toggled(true))
+                    )
+                    .child(label().color(TEXT_SECONDARY).text("Connected to 'HomeNetwork_5G'"))
+            )
+    }
+}
+
+#[derive(PartialEq)]
+struct About;
+impl Component for About {
+    fn render(&self) -> impl IntoElement {
+        rect()
+            .child(page_header("About", "System information."))
+            .child(label().font_size(16.).color(TEXT_PRIMARY).margin((0., 0., 8., 0.)).text("OS: Finick OS"))
+            .child(label().font_size(16.).color(TEXT_PRIMARY).margin((0., 0., 8., 0.)).text("Version: 1.0.0"))
+            .child(label().font_size(16.).color(TEXT_PRIMARY).margin((0., 0., 8., 0.)).text("Kernel: Linux"))
+            .child(rect().margin((16.,0.,0.,0.)).child(primary_button("Check for Updates", || {})))
+    }
+}
+
+#[derive(PartialEq)]
+struct QuickActions;
+impl Component for QuickActions {
+    fn render(&self) -> impl IntoElement {
+        let mut is_wifi_on = use_state(|| true);
+        let mut is_bt_on = use_state(|| false);
+        let mut is_dnd_on = use_state(|| false);
+        
+        rect()
+            .child(page_header("Quick Actions", "Applet for common toggles and controls."))
+            .child(
+                rect()
+                    .horizontal()
+                    .spacing(16.)
+                    .margin((0., 0., 24., 0.))
+                    .child(quick_action_btn("Wi-Fi", *is_wifi_on.read(), move || { let c = *is_wifi_on.read(); is_wifi_on.set(!c); }))
+                    .child(quick_action_btn("Bluetooth", *is_bt_on.read(), move || { let c = *is_bt_on.read(); is_bt_on.set(!c); }))
+                    .child(quick_action_btn("Do Not Disturb", *is_dnd_on.read(), move || { let c = *is_dnd_on.read(); is_dnd_on.set(!c); }))
+            )
+            .child(
+                rect()
+                    .child(label().color(TEXT_PRIMARY).margin((0., 0., 8., 0.)).text("Volume"))
+                    .child(Slider::new(|_| {}).value(50.0))
+            )
+            .child(
+                rect()
+                    .margin((16., 0., 0., 0.))
+                    .child(label().color(TEXT_PRIMARY).margin((0., 0., 8., 0.)).text("Brightness"))
+                    .child(Slider::new(|_| {}).value(80.0))
+            )
+    }
+}
+
+fn quick_action_btn(title: &str, active: bool, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
+    let bg = if active { ACCENT_BLUE } else { BG_CARD };
+    
+    rect()
+        .width(Size::px(100.))
+        .height(Size::px(80.))
+        .corner_radius(12.)
+        .background(bg)
+        .center()
+        .on_press(move |_| on_press())
+        .child(label().color(TEXT_PRIMARY).font_weight(FontWeight::BOLD).text(title.to_string()))
+}
