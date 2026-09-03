@@ -358,8 +358,9 @@ impl Component for Printers {
                     // --- Service Status & Quick Overview Card ---
                     .child(
                         rect()
-                            .margin((0., 0., 24., 0.))
-                            .padding(24.)
+                            .width(Size::fill())
+                            .margin((0., 0., 16., 0.))
+                            .padding(16.)
                             .corner_radius(12.)
                             .background(t.bg_card)
                             .border(Border::new().width(1.).fill(t.border_card))
@@ -367,14 +368,17 @@ impl Component for Printers {
                             .child(
                                 rect()
                                     .horizontal()
+                                    .main_align(Alignment::SpaceBetween)
                                     .cross_align(Alignment::Center)
+                                    .width(Size::fill())
                                     .margin((0., 0., 12., 0.))
+                                    .content(Content::Flex)
                                     .child(
                                         rect()
-                                            .width(Size::fill())
+                                            .width(Size::flex(1.))
                                             .child(
                                                 label()
-                                                    .font_size(18.)
+                                                    .font_size(16.)
                                                     .font_weight(FontWeight::BOLD)
                                                     .color(t.text_primary)
                                                     .text("CUPS Printing Daemon")
@@ -417,30 +421,32 @@ impl Component for Printers {
                             // Overview Metrics Strip
                             .child(
                                 rect()
+                                    .width(Size::fill())
                                     .horizontal()
                                     .spacing(16.)
                                     .cross_align(Alignment::Center)
-                                    .padding((12., 16.))
-                                    .margin((8., 0., 16., 0.))
+                                    .content(Content::Flex)
+                                    .padding((10., 14.))
+                                    .margin((8., 0., 14., 0.))
                                     .corner_radius(8.)
                                     .background(t.bg_base)
                                     .border(Border::new().width(1.).fill(t.border_subtle))
                                     .child(
                                         rect()
-                                            .width(Size::fill())
-                                            .child(label().font_size(12.).color(t.text_muted).text("CONFIGURED PRINTERS"))
+                                            .width(Size::flex(1.))
+                                            .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("CONFIGURED PRINTERS"))
                                             .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(format!("{}", info.printers.len())))
                                     )
                                     .child(
                                         rect()
-                                            .width(Size::fill())
-                                            .child(label().font_size(12.).color(t.text_muted).text("SCANNERS DETECTED"))
+                                            .width(Size::flex(1.))
+                                            .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("SCANNERS DETECTED"))
                                             .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(format!("{}", info.scanners.len())))
                                     )
                                     .child(
                                         rect()
-                                            .width(Size::fill())
-                                            .child(label().font_size(12.).color(t.text_muted).text("ACTIVE QUEUE JOBS"))
+                                            .width(Size::flex(1.))
+                                            .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("ACTIVE QUEUE JOBS"))
                                             .child(
                                                 rect()
                                                     .horizontal()
@@ -484,8 +490,9 @@ impl Component for Printers {
                     // --- Printers Section ---
                     .child(
                         rect()
-                            .margin((0., 0., 24., 0.))
-                            .padding(24.)
+                            .width(Size::fill())
+                            .margin((0., 0., 16., 0.))
+                            .padding(16.)
                             .corner_radius(12.)
                             .background(t.bg_card)
                             .border(Border::new().width(1.).fill(t.border_card))
@@ -494,26 +501,27 @@ impl Component for Printers {
                                 rect()
                                     .horizontal()
                                     .cross_align(Alignment::Center)
-                                    .margin((0., 0., 16., 0.))
+                                    .margin((0., 0., 14., 0.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(13.)
                                             .font_weight(FontWeight::BOLD)
-                                            .color(t.text_primary)
-                                            .width(Size::fill())
-                                            .text(format!("Installed Printers ({})", info.printers.len()))
+                                            .color(t.text_secondary)
+                                            .text(format!("INSTALLED PRINTERS ({})", info.printers.len()))
                                     )
                             )
                             .child({
                                 if loading && info.printers.is_empty() {
                                     rect()
-                                        .padding(20.)
+                                        .width(Size::fill())
+                                        .padding(16.)
                                         .center()
                                         .child(label().font_size(14.).color(t.text_secondary).text("Discovering printers..."))
                                         .into_element()
                                 } else if info.printers.is_empty() {
                                     rect()
-                                        .padding(20.)
+                                        .width(Size::fill())
+                                        .padding(16.)
                                         .center()
                                         .child(label().font_size(14.).color(t.text_muted).text("No printers found or configured on this system."))
                                         .into_element()
@@ -528,19 +536,21 @@ impl Component for Printers {
                                             let is_ready = status_str == "Ready" || status_str == "Idle";
                                             let loc = printer.location.clone();
                                             let drv = printer.driver.clone();
-                                            let mut l = loaded.clone();
-                                            let mut ld = is_loading.clone();
-                                            let mut ps = printers_state.clone();
+                                            let l = loaded.clone();
+                                            let ld = is_loading.clone();
+                                            let ps = printers_state.clone();
 
                                             rect()
                                                 .key(printer.system_name.clone())
-                                                .margin((0., 0., 12., 0.))
-                                                .padding(16.)
+                                                .width(Size::fill())
+                                                .margin((0., 0., 8., 0.))
+                                                .padding((12., 14.))
                                                 .corner_radius(8.)
                                                 .background(if is_def { t.bg_active } else { t.bg_base })
                                                 .border(Border::new().width(1.).fill(if is_def { t.primary_accent } else { t.border_subtle }))
                                                 .child(
                                                     rect()
+                                                        .width(Size::fill())
                                                         .horizontal()
                                                         .cross_align(Alignment::Center)
                                                         .child(
@@ -615,7 +625,7 @@ impl Component for Printers {
                                                 .child(
                                                     rect()
                                                         .horizontal()
-                                                        .margin((12., 0., 0., 22.))
+                                                        .margin((10., 0., 0., 22.))
                                                         .spacing(8.)
                                                         .child({
                                                             if !is_def {
@@ -665,7 +675,7 @@ impl Component for Printers {
                                                                     std::thread::sleep(std::time::Duration::from_millis(400));
                                                                 });
                                                                 l_c.set(false);
-                                                            })
+                                                             })
                                                         })
                                                         .child({
                                                             let sys_c = p_sys.clone();
@@ -687,8 +697,9 @@ impl Component for Printers {
                     // --- Scanners Section ---
                     .child(
                         rect()
-                            .margin((0., 0., 24., 0.))
-                            .padding(24.)
+                            .width(Size::fill())
+                            .margin((0., 0., 16., 0.))
+                            .padding(16.)
                             .corner_radius(12.)
                             .background(t.bg_card)
                             .border(Border::new().width(1.).fill(t.border_card))
@@ -697,20 +708,20 @@ impl Component for Printers {
                                 rect()
                                     .horizontal()
                                     .cross_align(Alignment::Center)
-                                    .margin((0., 0., 16., 0.))
+                                    .margin((0., 0., 14., 0.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(13.)
                                             .font_weight(FontWeight::BOLD)
-                                            .color(t.text_primary)
-                                            .width(Size::fill())
-                                            .text(format!("Connected Scanners ({})", info.scanners.len()))
+                                            .color(t.text_secondary)
+                                            .text(format!("CONNECTED SCANNERS ({})", info.scanners.len()))
                                     )
                             )
                             .child({
                                 if info.scanners.is_empty() {
                                     rect()
-                                        .padding(20.)
+                                        .width(Size::fill())
+                                        .padding(16.)
                                         .center()
                                         .child(label().font_size(14.).color(t.text_muted).text("No document scanners or digital imaging units detected."))
                                         .into_element()
@@ -724,41 +735,47 @@ impl Component for Printers {
 
                                             rect()
                                                 .key(format!("scanner-{}", scanner.name))
+                                                .width(Size::fill())
                                                 .horizontal()
+                                                .main_align(Alignment::SpaceBetween)
                                                 .cross_align(Alignment::Center)
-                                                .padding(14.)
-                                                .margin((0., 0., 8., 0.))
+                                                .padding((10., 12.))
+                                                .margin((0., 0., 6., 0.))
                                                 .corner_radius(8.)
                                                 .background(t.bg_base)
                                                 .border(Border::new().width(1.).fill(t.border_subtle))
                                                 .child(
                                                     rect()
-                                                        .width(Size::px(10.))
-                                                        .height(Size::px(10.))
-                                                        .corner_radius(5.)
-                                                        .background(t.accent_green)
-                                                        .margin((0., 12., 0., 0.))
-                                                )
-                                                .child(
-                                                    rect()
-                                                        .width(Size::fill())
+                                                        .horizontal()
+                                                        .cross_align(Alignment::Center)
                                                         .child(
-                                                            label()
-                                                                .font_size(14.)
-                                                                .font_weight(FontWeight::SEMI_BOLD)
-                                                                .color(t.text_primary)
-                                                                .text(s_name)
+                                                            rect()
+                                                                .width(Size::px(10.))
+                                                                .height(Size::px(10.))
+                                                                .corner_radius(5.)
+                                                                .background(t.accent_green)
+                                                                .margin((0., 12., 0., 0.))
                                                         )
                                                         .child(
                                                             rect()
-                                                                .horizontal()
-                                                                .spacing(8.)
-                                                                .margin((2., 0., 0., 0.))
-                                                                .child(label().font_size(12.).color(t.text_secondary).text(s_model))
-                                                                .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                .child(label().font_size(12.).color(t.text_secondary).text(s_conn))
-                                                                .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                .child(label().font_size(12.).color(t.accent_green).text(s_status))
+                                                                .child(
+                                                                    label()
+                                                                        .font_size(14.)
+                                                                        .font_weight(FontWeight::SEMI_BOLD)
+                                                                        .color(t.text_primary)
+                                                                        .text(s_name)
+                                                                )
+                                                                .child(
+                                                                    rect()
+                                                                        .horizontal()
+                                                                        .spacing(8.)
+                                                                        .margin((2., 0., 0., 0.))
+                                                                        .child(label().font_size(12.).color(t.text_secondary).text(s_model))
+                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
+                                                                        .child(label().font_size(12.).color(t.text_secondary).text(s_conn))
+                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
+                                                                        .child(label().font_size(12.).color(t.accent_green).text(s_status))
+                                                                )
                                                         )
                                                 )
                                                 .child(
@@ -780,8 +797,9 @@ impl Component for Printers {
                     // --- Active Print Queue Section ---
                     .child(
                         rect()
-                            .margin((0., 0., 24., 0.))
-                            .padding(24.)
+                            .width(Size::fill())
+                            .margin((0., 0., 16., 0.))
+                            .padding(16.)
                             .corner_radius(12.)
                             .background(t.bg_card)
                             .border(Border::new().width(1.).fill(t.border_card))
@@ -790,20 +808,20 @@ impl Component for Printers {
                                 rect()
                                     .horizontal()
                                     .cross_align(Alignment::Center)
-                                    .margin((0., 0., 16., 0.))
+                                    .margin((0., 0., 14., 0.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(13.)
                                             .font_weight(FontWeight::BOLD)
-                                            .color(t.text_primary)
-                                            .width(Size::fill())
-                                            .text(format!("Active Print Queue ({})", info.active_jobs.len()))
+                                            .color(t.text_secondary)
+                                            .text(format!("ACTIVE PRINT QUEUE ({})", info.active_jobs.len()))
                                     )
                             )
                             .child({
                                 if info.active_jobs.is_empty() {
                                     rect()
-                                        .padding(20.)
+                                        .width(Size::fill())
+                                        .padding(16.)
                                         .center()
                                         .child(label().font_size(14.).color(t.text_muted).text("No active print jobs in spool."))
                                         .into_element()
@@ -815,48 +833,54 @@ impl Component for Printers {
                                             let u = job.user.clone();
                                             let sz = job.size.clone();
                                             let stat = job.status.clone();
-                                            let mut ps = printers_state.clone();
-                                            let mut l = loaded.clone();
+                                            let ps = printers_state.clone();
+                                            let l = loaded.clone();
 
                                             rect()
                                                 .key(format!("job-{}", job.id))
+                                                .width(Size::fill())
                                                 .horizontal()
+                                                .main_align(Alignment::SpaceBetween)
                                                 .cross_align(Alignment::Center)
-                                                .padding(14.)
-                                                .margin((0., 0., 8., 0.))
+                                                .padding((10., 12.))
+                                                .margin((0., 0., 6., 0.))
                                                 .corner_radius(8.)
                                                 .background(t.bg_base)
                                                 .border(Border::new().width(1.).fill(t.border_subtle))
                                                 .child(
                                                     rect()
-                                                        .width(Size::px(10.))
-                                                        .height(Size::px(10.))
-                                                        .corner_radius(5.)
-                                                        .background(t.accent_orange)
-                                                        .margin((0., 12., 0., 0.))
-                                                )
-                                                .child(
-                                                    rect()
-                                                        .width(Size::fill())
+                                                        .horizontal()
+                                                        .cross_align(Alignment::Center)
                                                         .child(
-                                                            label()
-                                                                .font_size(14.)
-                                                                .font_weight(FontWeight::SEMI_BOLD)
-                                                                .color(t.text_primary)
-                                                                .text(doc)
+                                                            rect()
+                                                                .width(Size::px(10.))
+                                                                .height(Size::px(10.))
+                                                                .corner_radius(5.)
+                                                                .background(t.accent_orange)
+                                                                .margin((0., 12., 0., 0.))
                                                         )
                                                         .child(
                                                             rect()
-                                                                .horizontal()
-                                                                .spacing(8.)
-                                                                .margin((2., 0., 0., 0.))
-                                                                .child(label().font_size(12.).color(t.accent_orange).text(stat))
-                                                                .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                .child(label().font_size(12.).color(t.text_secondary).text(format!("Job {}", j_id)))
-                                                                .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                .child(label().font_size(12.).color(t.text_secondary).text(format!("User: {}", u)))
-                                                                .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                .child(label().font_size(12.).color(t.text_secondary).text(sz))
+                                                                .child(
+                                                                    label()
+                                                                        .font_size(14.)
+                                                                        .font_weight(FontWeight::SEMI_BOLD)
+                                                                        .color(t.text_primary)
+                                                                        .text(doc)
+                                                                )
+                                                                .child(
+                                                                    rect()
+                                                                        .horizontal()
+                                                                        .spacing(8.)
+                                                                        .margin((2., 0., 0., 0.))
+                                                                        .child(label().font_size(12.).color(t.accent_orange).text(stat))
+                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
+                                                                        .child(label().font_size(12.).color(t.text_secondary).text(format!("Job {}", j_id)))
+                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
+                                                                        .child(label().font_size(12.).color(t.text_secondary).text(format!("User: {}", u)))
+                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
+                                                                        .child(label().font_size(12.).color(t.text_secondary).text(sz))
+                                                                )
                                                         )
                                                 )
                                                 .child(
@@ -886,32 +910,36 @@ impl Component for Printers {
                     // --- Global Printing Preferences Card ---
                     .child(
                         rect()
-                            .margin((0., 0., 24., 0.))
-                            .padding(24.)
+                            .width(Size::fill())
+                            .margin((0., 0., 16., 0.))
+                            .padding(16.)
                             .corner_radius(12.)
                             .background(t.bg_card)
                             .border(Border::new().width(1.).fill(t.border_card))
                             .overflow(Overflow::Clip)
                             .child(
                                 label()
-                                    .font_size(14.)
+                                    .font_size(13.)
                                     .font_weight(FontWeight::BOLD)
                                     .color(t.text_secondary)
-                                    .margin((0., 0., 16., 0.))
+                                    .margin((0., 0., 14., 0.))
                                     .text("GLOBAL PRINTING PREFERENCES")
                             )
                             // Network Discovery
                             .child(
                                 rect()
                                     .horizontal()
+                                    .main_align(Alignment::SpaceBetween)
                                     .cross_align(Alignment::Center)
-                                    .margin((0., 0., 16., 0.))
+                                    .width(Size::fill())
+                                    .margin((0., 0., 14., 0.))
+                                    .content(Content::Flex)
                                     .child(
                                         rect()
-                                            .width(Size::fill())
+                                            .width(Size::flex(1.))
                                             .child(
                                                 label()
-                                                    .font_size(16.)
+                                                    .font_size(15.)
                                                     .font_weight(FontWeight::SEMI_BOLD)
                                                     .color(t.text_primary)
                                                     .text("Automatic Network Discovery")
@@ -941,13 +969,16 @@ impl Component for Printers {
                             .child(
                                 rect()
                                     .horizontal()
+                                    .main_align(Alignment::SpaceBetween)
                                     .cross_align(Alignment::Center)
+                                    .width(Size::fill())
+                                    .content(Content::Flex)
                                     .child(
                                         rect()
-                                            .width(Size::fill())
+                                            .width(Size::flex(1.))
                                             .child(
                                                 label()
-                                                    .font_size(16.)
+                                                    .font_size(15.)
                                                     .font_weight(FontWeight::SEMI_BOLD)
                                                     .color(t.text_primary)
                                                     .text("Share Printers on Local Network")

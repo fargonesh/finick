@@ -1,9 +1,9 @@
-use core::panic;
-use std::{process, time::Duration};
-
-use tokio::{select, spawn, time::sleep};
-
-use ipsea::{send_command, start_server};
+use {
+    core::panic,
+    ipsea::{send_command, start_server},
+    std::{process, time::Duration},
+    tokio::{select, spawn, time::sleep},
+};
 
 #[tokio::main]
 async fn main() {

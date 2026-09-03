@@ -1,18 +1,21 @@
-use image::ImageReader;
-use ipsea::log::trace;
-use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
-use regex::Regex;
-use rusqlite::params;
-use std::env::{self, var};
-use std::fs::{self, read_dir};
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-use std::sync::{mpsc, Arc};
-use std::time::Duration;
-use std::{path::PathBuf, time::SystemTime};
-use ty::SearchResult;
+use {
+    image::ImageReader,
+    ipsea::log::trace,
+    notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher},
+    r2d2::Pool,
+    r2d2_sqlite::SqliteConnectionManager,
+    regex::Regex,
+    rusqlite::params,
+    std::{
+        env::{self, var},
+        fs::{self, read_dir},
+        os::unix::fs::PermissionsExt,
+        path::{Path, PathBuf},
+        sync::{mpsc, Arc},
+        time::{Duration, SystemTime},
+    },
+    ty::SearchResult,
+};
 
 struct ChannelData {
     name: String,
@@ -69,7 +72,7 @@ pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
         let pool = pool.clone();
         while let Ok(data) = rx.recv() {
             let conn = pool.get().unwrap();
-            println!("{:?}", &data.icon);
+            println!("{:?}", data.icon);
             // Check if the file already exists and if it was indexed recently.
             let should_index =
                 match conn.query_row("SELECT last_accessed FROM files WHERE path = ?1", params![&data.path_str], |row| {
@@ -85,7 +88,8 @@ pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
             if should_index {
                 // Using REPLACE here so that we update if it already exists.
                 conn.execute(
-                    "REPLACE INTO files (name, path, parent_path, depth, last_accessed, executable, desktop, icon, is_dir, size) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    "REPLACE INTO files (name, path, parent_path, depth, last_accessed, executable, desktop, icon, is_dir, \
+                     size) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     params![
                         data.name,
                         data.path_str,
@@ -157,7 +161,7 @@ fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>
                 let size = entry.metadata().ok().map(|m| m.len());
                 let executable = is_executable(&path);
 
-                if path.extension().map(|v| v.to_string_lossy().to_string()).unwrap_or_default() == "desktop".to_string() {
+                if path.extension().map(|v| v.to_string_lossy().to_string()).unwrap_or_default() == "desktop" {
                     let (new_name, new_icon) = read_desktop(&path).unwrap_or_default();
                     name = if new_name.is_empty() { name } else { new_name };
                     icon = new_icon;
@@ -214,7 +218,7 @@ fn is_executable(path: &PathBuf) -> bool {
 }
 
 fn read_desktop(path: &PathBuf) -> Result<(String, Option<String>), ()> {
-    let desktop = fs::read_to_string(&path).map_err(|_| ())?;
+    let desktop = fs::read_to_string(path).map_err(|_| ())?;
 
     let name = desktop
         .lines()
@@ -223,7 +227,7 @@ fn read_desktop(path: &PathBuf) -> Result<(String, Option<String>), ()> {
         .ok_or(())?;
 
     let icon = desktop.lines().find(|l| l.starts_with("Icon="));
-    let icon = icon.map(|i| i.split('=').last().unwrap_or_default().to_string());
+    let icon = icon.map(|i| i.split('=').next_back().unwrap_or_default().to_string());
 
     if let Some(icon) = icon.and_then(|icon| resolve_icon(&icon)) {
         if let Ok(img) = ImageReader::open(Path::new(&icon)).unwrap().decode() {
@@ -247,7 +251,7 @@ fn resolve_icon(name: &str) -> Option<String> {
         Some("/usr/share/pixmaps".to_string()),
     ]
     .into_iter()
-    .filter_map(|v| v);
+    .flatten();
 
     for location in locations {
         if let Ok(dir) = read_dir(location) {
@@ -386,8 +390,8 @@ pub fn watch(pool: Pool<SqliteConnectionManager>) {
     }
 
     std::thread::spawn(move || loop {
-        match rx.recv() {
-            Ok(Ok(event)) => match event.kind {
+        if let Ok(Ok(event)) = rx.recv() {
+            match event.kind {
                 EventKind::Create(_) => {
                     index(Some(event.paths), pool.clone());
                 }
@@ -398,8 +402,7 @@ pub fn watch(pool: Pool<SqliteConnectionManager>) {
                     });
                 }
                 _ => {}
-            },
-            _ => {}
+            }
         }
     });
 }

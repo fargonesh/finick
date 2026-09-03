@@ -175,8 +175,9 @@ impl Component for Privacy {
             // Firewall & Network Security Card
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
@@ -184,18 +185,16 @@ impl Component for Privacy {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .margin((0., 0., 14., 0.))
                             .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::BOLD)
-                                            .color(t.text_secondary)
-                                            .text("FIREWALL & NETWORK SECURITY"),
-                                    ),
+                                label()
+                                    .font_size(13.)
+                                    .font_weight(FontWeight::BOLD)
+                                    .color(t.text_secondary)
+                                    .text("FIREWALL & NETWORK SECURITY"),
                             )
                             .child(secondary_button("Refresh", {
                                 let mut l = loaded.clone();
@@ -205,14 +204,17 @@ impl Component for Privacy {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .margin((0., 0., 14., 0.))
+                            .content(Content::Flex)
                             .child(
                                 rect()
-                                    .width(Size::fill())
+                                    .width(Size::flex(1.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(15.)
                                             .font_weight(FontWeight::SEMI_BOLD)
                                             .color(t.text_primary)
                                             .text("Firewall Protection"),
@@ -245,7 +247,8 @@ impl Component for Privacy {
                     )
                     .child(
                         rect()
-                            .padding(14.)
+                            .width(Size::fill())
+                            .padding((12., 14.))
                             .corner_radius(8.)
                             .background(t.bg_base)
                             .border(Border::new().width(1.).fill(t.border_subtle))
@@ -261,7 +264,6 @@ impl Component for Privacy {
                             )
                             .child(
                                 rect()
-                                    .width(Size::fill())
                                     .child(
                                         label()
                                             .font_size(14.)
@@ -281,32 +283,36 @@ impl Component for Privacy {
             // Hardware Access & Permissions Card
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
                     .overflow(Overflow::Clip)
                     .child(
                         label()
-                            .font_size(14.)
+                            .font_size(13.)
                             .font_weight(FontWeight::BOLD)
                             .color(t.text_secondary)
-                            .margin((0., 0., 16., 0.))
+                            .margin((0., 0., 14., 0.))
                             .text("HARDWARE PERMISSIONS"),
                     )
                     // Camera
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .margin((0., 0., 14., 0.))
+                            .content(Content::Flex)
                             .child(
                                 rect()
-                                    .width(Size::fill())
+                                    .width(Size::flex(1.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(15.)
                                             .font_weight(FontWeight::SEMI_BOLD)
                                             .color(t.text_primary)
                                             .text("Camera Access"),
@@ -339,13 +345,16 @@ impl Component for Privacy {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
+                            .width(Size::fill())
+                            .content(Content::Flex)
                             .child(
                                 rect()
-                                    .width(Size::fill())
+                                    .width(Size::flex(1.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(15.)
                                             .font_weight(FontWeight::SEMI_BOLD)
                                             .color(t.text_primary)
                                             .text("Microphone Access"),
@@ -374,32 +383,36 @@ impl Component for Privacy {
             // Location & Sandboxing Card
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
                     .overflow(Overflow::Clip)
                     .child(
                         label()
-                            .font_size(14.)
+                            .font_size(13.)
                             .font_weight(FontWeight::BOLD)
                             .color(t.text_secondary)
-                            .margin((0., 0., 16., 0.))
+                            .margin((0., 0., 14., 0.))
                             .text("LOCATION & SANDBOXING"),
                     )
                     // Location Services
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .margin((0., 0., 14., 0.))
+                            .content(Content::Flex)
                             .child(
                                 rect()
-                                    .width(Size::fill())
+                                    .width(Size::flex(1.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(15.)
                                             .font_weight(FontWeight::SEMI_BOLD)
                                             .color(t.text_primary)
                                             .text("Location Services"),
@@ -428,13 +441,16 @@ impl Component for Privacy {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
+                            .width(Size::fill())
+                            .content(Content::Flex)
                             .child(
                                 rect()
-                                    .width(Size::fill())
+                                    .width(Size::flex(1.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(15.)
                                             .font_weight(FontWeight::SEMI_BOLD)
                                             .color(t.text_primary)
                                             .text("Application Sandboxing & Isolation"),

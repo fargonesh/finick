@@ -229,11 +229,13 @@ impl Component for About {
         let current = info.read().clone();
 
         rect()
+            .width(Size::fill())
             .child(page_header("About", "System and device specifications."))
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
@@ -241,15 +243,15 @@ impl Component for About {
                     .cross_align(Alignment::Center)
                     .child(
                         rect()
-                            .width(Size::px(56.))
-                            .height(Size::px(56.))
-                            .corner_radius(28.)
+                            .width(Size::px(48.))
+                            .height(Size::px(48.))
+                            .corner_radius(24.)
                             .background(t.primary_accent)
                             .center()
-                            .margin((0., 20., 0., 0.))
+                            .margin((0., 16., 0., 0.))
                             .child(
                                 label()
-                                    .font_size(24.)
+                                    .font_size(22.)
                                     .font_weight(FontWeight::BOLD)
                                     .color(t.bg_base)
                                     .text("⚡"),
@@ -257,17 +259,16 @@ impl Component for About {
                     )
                     .child(
                         rect()
-                            .width(Size::fill())
                             .child(
                                 label()
-                                    .font_size(20.)
+                                    .font_size(18.)
                                     .font_weight(FontWeight::BOLD)
                                     .color(t.text_primary)
                                     .text(current.os_version.clone()),
                             )
                             .child(
                                 label()
-                                    .font_size(14.)
+                                    .font_size(13.)
                                     .color(t.text_secondary)
                                     .margin((4., 0., 0., 0.))
                                     .text("Finick Desktop Environment"),
@@ -276,17 +277,18 @@ impl Component for About {
             )
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
                     .child(
                         label()
-                            .font_size(14.)
+                            .font_size(13.)
                             .font_weight(FontWeight::BOLD)
                             .color(t.text_secondary)
-                            .margin((0., 0., 16., 0.))
+                            .margin((0., 0., 14., 0.))
                             .text("SYSTEM SPECIFICATIONS"),
                     )
                     .child(info_row("Device Name", &current.hostname, &t))
@@ -298,7 +300,7 @@ impl Component for About {
                     .child(
                         rect()
                             .horizontal()
-                            .margin((12., 0., 0., 0.))
+                            .margin((8., 0., 0., 0.))
                             .spacing(12.)
                             .child(secondary_button("Refresh Info", {
                                 let mut l = loaded.clone();
@@ -312,22 +314,20 @@ impl Component for About {
 fn info_row(label_text: &str, value_text: &str, t: &ui::Theme) -> impl IntoElement {
     rect()
         .horizontal()
+        .main_align(Alignment::SpaceBetween)
         .cross_align(Alignment::Center)
-        .padding(14.)
-        .margin((0., 0., 8., 0.))
+        .width(Size::fill())
+        .padding((10., 14.))
+        .margin((0., 0., 6., 0.))
         .corner_radius(8.)
         .background(t.bg_base)
         .border(Border::new().width(1.).fill(t.border_subtle))
         .child(
-            rect()
-                .width(Size::fill())
-                .child(
-                    label()
-                        .font_size(14.)
-                        .font_weight(FontWeight::SEMI_BOLD)
-                        .color(t.text_primary)
-                        .text(label_text.to_string()),
-                ),
+            label()
+                .font_size(14.)
+                .font_weight(FontWeight::SEMI_BOLD)
+                .color(t.text_primary)
+                .text(label_text.to_string()),
         )
         .child(
             label()

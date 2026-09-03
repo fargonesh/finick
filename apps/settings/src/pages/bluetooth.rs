@@ -17,9 +17,9 @@ impl Component for Bluetooth {
     fn render(&self) -> impl IntoElement {
         let t = use_app_theme();
 
-        let mut devices = use_state(|| Vec::<BluetoothDevice>::new());
-        let mut is_enabled = use_state(|| false);
-        let mut is_loading = use_state(|| true);
+        let devices = use_state(|| Vec::<BluetoothDevice>::new());
+        let is_enabled = use_state(|| false);
+        let is_loading = use_state(|| true);
         let mut loaded = use_state(|| false);
 
         if !*loaded.read() {
@@ -100,14 +100,16 @@ impl Component for Bluetooth {
         let loading = *is_loading.read();
 
         rect()
+            .width(Size::fill())
             .child(page_header(
                 "Bluetooth",
                 "Manage Bluetooth adapter, paired devices, and connections.",
             ))
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
@@ -115,14 +117,15 @@ impl Component for Bluetooth {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
+                            .width(Size::fill())
                             .margin((0., 0., 8., 0.))
                             .child(
                                 label()
-                                    .font_size(16.)
+                                    .font_size(15.)
                                     .font_weight(FontWeight::BOLD)
                                     .color(t.text_primary)
-                                    .width(Size::fill())
                                     .text("Bluetooth Adapter"),
                             )
                             .child(
@@ -150,8 +153,8 @@ impl Component for Bluetooth {
                     .child(
                         label()
                             .color(t.text_secondary)
-                            .font_size(14.)
-                            .margin((0., 0., 16., 0.))
+                            .font_size(13.)
+                            .margin((0., 0., 14., 0.))
                             .text(if bt_active {
                                 "Bluetooth is powered on and ready to connect."
                             } else {
@@ -174,8 +177,9 @@ impl Component for Bluetooth {
             )
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
@@ -184,20 +188,20 @@ impl Component for Bluetooth {
                         rect()
                             .horizontal()
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .margin((0., 0., 14., 0.))
                             .child(
                                 label()
-                                    .font_size(16.)
+                                    .font_size(13.)
                                     .font_weight(FontWeight::BOLD)
-                                    .color(t.text_primary)
-                                    .width(Size::fill())
-                                    .text(format!("Paired Devices ({})", paired_devices.len())),
+                                    .color(t.text_secondary)
+                                    .text(format!("PAIRED DEVICES ({})", paired_devices.len())),
                             ),
                     )
                     .child({
                         if loading {
                             rect()
-                                .padding(24.)
+                                .width(Size::fill())
+                                .padding(16.)
                                 .center()
                                 .child(
                                     label()
@@ -208,7 +212,8 @@ impl Component for Bluetooth {
                                 .into_element()
                         } else if paired_devices.is_empty() {
                             rect()
-                                .padding(24.)
+                                .width(Size::fill())
+                                .padding(16.)
                                 .center()
                                 .child(
                                     label()
@@ -223,45 +228,51 @@ impl Component for Bluetooth {
                                     let is_conn = dev.connected;
                                     let mac = dev.mac.clone();
                                     let name = dev.name.clone();
-                                    let mut l = loaded.clone();
-                                    let mut load_state = is_loading.clone();
+                                    let l = loaded.clone();
+                                    let load_state = is_loading.clone();
 
                                     rect()
                                         .key(dev.mac.clone())
+                                        .width(Size::fill())
                                         .horizontal()
+                                        .main_align(Alignment::SpaceBetween)
                                         .cross_align(Alignment::Center)
-                                        .padding(12.)
-                                        .margin((0., 0., 8., 0.))
+                                        .padding((10., 12.))
+                                        .margin((0., 0., 6., 0.))
                                         .corner_radius(8.)
                                         .background(if is_conn { t.bg_active } else { t.bg_base })
                                         .border(Border::new().width(1.).fill(if is_conn { t.primary_accent } else { t.border_subtle }))
                                         .child(
                                             rect()
-                                                .width(Size::px(10.))
-                                                .height(Size::px(10.))
-                                                .corner_radius(5.)
-                                                .background(if is_conn { t.accent_green } else { t.text_disabled })
-                                                .margin((0., 12., 0., 0.)),
-                                        )
-                                        .child(
-                                            rect()
-                                                .width(Size::fill())
+                                                .horizontal()
+                                                .cross_align(Alignment::Center)
                                                 .child(
-                                                    label()
-                                                        .font_size(14.)
-                                                        .font_weight(FontWeight::SEMI_BOLD)
-                                                        .color(t.text_primary)
-                                                        .text(name),
+                                                    rect()
+                                                        .width(Size::px(10.))
+                                                        .height(Size::px(10.))
+                                                        .corner_radius(5.)
+                                                        .background(if is_conn { t.accent_green } else { t.text_disabled })
+                                                        .margin((0., 12., 0., 0.)),
                                                 )
                                                 .child(
-                                                    label()
-                                                        .font_size(12.)
-                                                        .color(if is_conn { t.accent_green } else { t.text_secondary })
-                                                        .text(if is_conn {
-                                                            format!("Connected • {}", mac)
-                                                        } else {
-                                                            format!("Paired • {}", mac)
-                                                        }),
+                                                    rect()
+                                                        .child(
+                                                            label()
+                                                                .font_size(14.)
+                                                                .font_weight(FontWeight::SEMI_BOLD)
+                                                                .color(t.text_primary)
+                                                                .text(name),
+                                                        )
+                                                        .child(
+                                                            label()
+                                                                .font_size(12.)
+                                                                .color(if is_conn { t.accent_green } else { t.text_secondary })
+                                                                .text(if is_conn {
+                                                                    format!("Connected • {}", mac)
+                                                                } else {
+                                                                    format!("Paired • {}", mac)
+                                                                }),
+                                                        ),
                                                 ),
                                         )
                                         .child(

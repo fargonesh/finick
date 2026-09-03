@@ -1,5 +1,4 @@
-use std::collections::HashSet;
-use std::process::Command;
+use std::{collections::HashSet, process::Command};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayInfo {
@@ -91,7 +90,7 @@ pub struct HyprlandBackend;
 impl SystemBackend for HyprlandBackend {
     fn get_displays(&self) -> Vec<DisplayInfo> {
         let mut res = Vec::new();
-        if let Ok(output) = Command::new("hyprctl").args(&["monitors", "-j"]).output() {
+        if let Ok(output) = Command::new("hyprctl").args(["monitors", "-j"]).output() {
             let out = String::from_utf8_lossy(&output.stdout);
 
             let mut current_name = String::new();
@@ -118,25 +117,24 @@ impl SystemBackend for HyprlandBackend {
                     current_scale =
                         l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
                 }
-                if l == "}," || l == "}" {
-                    if !current_name.is_empty() {
-                        res.push(DisplayInfo {
-                            name: current_name.clone(),
-                            resolution: format!("{}x{}", current_w, current_h),
-                            refresh_rate: current_hz.clone(),
-                            scale: current_scale.clone(),
-                        });
-                        current_name.clear();
-                    }
+                if (l == "}," || l == "}") && !current_name.is_empty() {
+                    res.push(DisplayInfo {
+                        name: current_name.clone(),
+                        resolution: format!("{}x{}", current_w, current_h),
+                        refresh_rate: current_hz.clone(),
+                        scale: current_scale.clone(),
+                    });
+                    current_name.clear();
                 }
             }
         }
         res
     }
+
     fn get_input_devices(&self) -> InputDevices {
         let mut mice = Vec::new();
         let mut keyboards = Vec::new();
-        if let Ok(output) = Command::new("hyprctl").args(&["devices", "-j"]).output() {
+        if let Ok(output) = Command::new("hyprctl").args(["devices", "-j"]).output() {
             let out = String::from_utf8_lossy(&output.stdout);
             let mut in_mice = false;
             let mut in_kb = false;
@@ -162,14 +160,9 @@ impl SystemBackend for HyprlandBackend {
                             .trim_matches(|c| c == '\"' || c == ',' || c == ' ')
                             .to_string();
                     }
-                    if l == "}," || l == "}" {
-                        if !current_name.is_empty() {
-                            mice.push(InputDevice {
-                                name: current_name.clone(),
-                                layout_or_type: "Pointer Device".to_string(),
-                            });
-                            current_name.clear();
-                        }
+                    if (l == "}," || l == "}") && !current_name.is_empty() {
+                        mice.push(InputDevice { name: current_name.clone(), layout_or_type: "Pointer Device".to_string() });
+                        current_name.clear();
                     }
                 }
                 if in_kb {
@@ -189,41 +182,40 @@ impl SystemBackend for HyprlandBackend {
                             .trim_matches(|c| c == '\"' || c == ',' || c == ' ')
                             .to_string();
                     }
-                    if l == "}," || l == "}" {
-                        if !current_name.is_empty() {
-                            keyboards.push(InputDevice {
-                                name: current_name.clone(),
-                                layout_or_type: if current_layout.is_empty() {
-                                    "Keyboard".to_string()
-                                } else {
-                                    current_layout.clone()
-                                },
-                            });
-                            current_name.clear();
-                            current_layout.clear();
-                        }
+                    if (l == "}," || l == "}") && !current_name.is_empty() {
+                        keyboards.push(InputDevice {
+                            name: current_name.clone(),
+                            layout_or_type: if current_layout.is_empty() {
+                                "Keyboard".to_string()
+                            } else {
+                                current_layout.clone()
+                            },
+                        });
+                        current_name.clear();
+                        current_layout.clear();
                     }
                 }
             }
         }
         InputDevices { mice, keyboards }
     }
+
     fn get_audio_info(&self) -> AudioInfo {
         let mut current_vol = 50.0;
         let mut current_mute = false;
         let mut sink_name = "Unknown Device".to_string();
-        if let Ok(output) = Command::new("wpctl").args(&["get-volume", "@DEFAULT_AUDIO_SINK@"]).output() {
+        if let Ok(output) = Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SINK@"]).output() {
             let out = String::from_utf8_lossy(&output.stdout);
             if out.contains("[MUTED]") {
                 current_mute = true;
             }
-            if let Some(vol_str) = out.split_whitespace().nth(1) {
-                if let Ok(v) = vol_str.parse::<f64>() {
-                    current_vol = v * 100.0;
-                }
+            if let Some(vol_str) = out.split_whitespace().nth(1)
+                && let Ok(v) = vol_str.parse::<f64>()
+            {
+                current_vol = v * 100.0;
             }
         }
-        if let Ok(output) = Command::new("wpctl").args(&["status"]).output() {
+        if let Ok(output) = Command::new("wpctl").args(["status"]).output() {
             let out = String::from_utf8_lossy(&output.stdout);
             let mut in_sinks = false;
             for line in out.lines() {
@@ -234,23 +226,25 @@ impl SystemBackend for HyprlandBackend {
                 if in_sinks && line.contains("Sources:") {
                     break;
                 }
-                if in_sinks && line.trim_start().starts_with('*') {
-                    if let Some(name_part) = line.split('.').nth(1) {
-                        sink_name = name_part.split('[').next().unwrap_or_default().trim().to_string();
-                        break;
-                    }
+                if in_sinks
+                    && line.trim_start().starts_with('*')
+                    && let Some(name_part) = line.split('.').nth(1)
+                {
+                    sink_name = name_part.split('[').next().unwrap_or_default().trim().to_string();
+                    break;
                 }
             }
         }
         AudioInfo { volume: current_vol, is_muted: current_mute, default_sink_name: sink_name }
     }
+
     fn set_volume(&self, percent: i32) {
         let v_str = format!("{}%", percent);
-        let _ = Command::new("wpctl").args(&["set-volume", "@DEFAULT_AUDIO_SINK@", &v_str]).output();
+        let _ = Command::new("wpctl").args(["set-volume", "@DEFAULT_AUDIO_SINK@", &v_str]).output();
     }
-    fn toggle_mute(&self) {
-        let _ = Command::new("wpctl").args(&["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]).output();
-    }
+
+    fn toggle_mute(&self) { let _ = Command::new("wpctl").args(["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]).output(); }
+
     fn get_power_info(&self) -> PowerInfo {
         let mut capacity = "Unknown".to_string();
         let mut status = "Unknown".to_string();
@@ -270,6 +264,7 @@ impl SystemBackend for HyprlandBackend {
         }
         PowerInfo { capacity, status }
     }
+
     fn get_general_info(&self) -> GeneralInfo {
         let locale = Command::new("locale")
             .output()
@@ -290,6 +285,7 @@ impl SystemBackend for HyprlandBackend {
         }
         GeneralInfo { locale, timezone }
     }
+
     fn get_host_info(&self) -> HostInfo {
         let hostname =
             std::fs::read_to_string("/etc/hostname").unwrap_or_else(|_| "finick-os".to_string()).trim().to_string();
@@ -323,28 +319,33 @@ impl SystemBackend for HyprlandBackend {
             .unwrap_or_else(|| "Unknown".to_string());
         HostInfo { hostname, os_name, kernel, uptime, memory }
     }
+
     fn get_wifi_status(&self) -> bool {
         Command::new("nmcli")
-            .args(&["radio", "wifi"])
+            .args(["radio", "wifi"])
             .output()
             .ok()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "enabled")
             .unwrap_or(false)
     }
+
     fn set_wifi_status(&self, enabled: bool) {
-        let _ = Command::new("nmcli").args(&["radio", "wifi", if enabled { "on" } else { "off" }]).output();
+        let _ = Command::new("nmcli").args(["radio", "wifi", if enabled { "on" } else { "off" }]).output();
     }
+
     fn get_bluetooth_status(&self) -> bool {
         Command::new("rfkill")
-            .args(&["list", "bluetooth"])
+            .args(["list", "bluetooth"])
             .output()
             .ok()
             .map(|o| !String::from_utf8_lossy(&o.stdout).contains("Soft blocked: yes"))
             .unwrap_or(false)
     }
+
     fn set_bluetooth_status(&self, enabled: bool) {
-        let _ = Command::new("rfkill").args(&[if enabled { "unblock" } else { "block" }, "bluetooth"]).output();
+        let _ = Command::new("rfkill").args([if enabled { "unblock" } else { "block" }, "bluetooth"]).output();
     }
+
     fn get_storage_info(&self) -> StorageInfo {
         let mut disks = Vec::new();
         let mut root_disk = DiskInfo {
@@ -355,7 +356,7 @@ impl SystemBackend for HyprlandBackend {
             available: "Unknown".to_string(),
             use_percent: 0.0,
         };
-        if let Ok(output) = std::process::Command::new("df").args(&["-hP"]).output() {
+        if let Ok(output) = std::process::Command::new("df").args(["-hP"]).output() {
             let out = String::from_utf8_lossy(&output.stdout);
             for line in out.lines().skip(1) {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -397,20 +398,21 @@ impl SystemBackend for HyprlandBackend {
             disks,
         }
     }
+
     fn get_paired_bluetooth_devices(&self) -> Vec<BluetoothDevice> {
         let mut devices = Vec::new();
         let mut connected_macs = HashSet::new();
-        if let Ok(output) = Command::new("bluetoothctl").args(&["devices", "Connected"]).output() {
+        if let Ok(output) = Command::new("bluetoothctl").args(["devices", "Connected"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
-                let parts: Vec<&str> = line.trim().split_whitespace().collect();
+                let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 && parts[0] == "Device" {
                     connected_macs.insert(parts[1].to_uppercase());
                 }
             }
         }
         let out_str = Command::new("bluetoothctl")
-            .args(&["devices"])
+            .args(["devices"])
             .output()
             .ok()
             .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
@@ -435,13 +437,12 @@ impl SystemBackend for HyprlandBackend {
         }
         devices
     }
-    fn connect_bluetooth_device(&self, mac: &str) {
-        let _ = Command::new("bluetoothctl").args(&["connect", mac]).output();
-    }
+
+    fn connect_bluetooth_device(&self, mac: &str) { let _ = Command::new("bluetoothctl").args(["connect", mac]).output(); }
+
     fn disconnect_bluetooth_device(&self, mac: &str) {
-        let _ = Command::new("bluetoothctl").args(&["disconnect", mac]).output();
+        let _ = Command::new("bluetoothctl").args(["disconnect", mac]).output();
     }
-    fn remove_bluetooth_device(&self, mac: &str) {
-        let _ = Command::new("bluetoothctl").args(&["remove", mac]).output();
-    }
+
+    fn remove_bluetooth_device(&self, mac: &str) { let _ = Command::new("bluetoothctl").args(["remove", mac]).output(); }
 }

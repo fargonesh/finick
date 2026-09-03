@@ -1,12 +1,13 @@
-use std::{
-    env::var,
-    fs::{self, File, OpenOptions},
-    path::{Path, PathBuf},
+use {
+    anyhow::{anyhow, Result},
+    serde::{de::DeserializeOwned, Serialize},
+    std::{
+        env::var,
+        fs::{self, File, OpenOptions},
+        path::{Path, PathBuf},
+    },
+    ty::*,
 };
-
-use anyhow::{anyhow, Result};
-use serde::{de::DeserializeOwned, Serialize};
-use ty::*;
 
 pub mod ty;
 

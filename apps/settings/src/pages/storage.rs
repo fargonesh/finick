@@ -96,9 +96,10 @@ pub struct Storage;
 impl Component for Storage {
     fn render(&self) -> impl IntoElement {
         let t = use_app_theme();
-        let mut storage_data = use_state(|| Some(fetch_storage_info()));
+        let storage_data = use_state(|| Some(fetch_storage_info()));
 
         rect()
+            .width(Size::fill())
             .child(page_header(
                 "Storage",
                 "Disk space, mount points, and drive capacity.",
@@ -115,10 +116,12 @@ impl Component for Storage {
                     };
 
                     rect()
+                        .width(Size::fill())
                         .child(
                             rect()
-                                .margin((0., 0., 24., 0.))
-                                .padding(24.)
+                                .width(Size::fill())
+                                .margin((0., 0., 16., 0.))
+                                .padding(16.)
                                 .corner_radius(12.)
                                 .background(t.bg_card)
                                 .border(Border::new().width(1.).fill(t.border_card))
@@ -126,18 +129,16 @@ impl Component for Storage {
                                 .child(
                                     rect()
                                         .horizontal()
+                                        .main_align(Alignment::SpaceBetween)
                                         .cross_align(Alignment::Center)
-                                        .margin((0., 0., 16., 0.))
+                                        .width(Size::fill())
+                                        .margin((0., 0., 14., 0.))
                                         .child(
-                                            rect()
-                                                .width(Size::fill())
-                                                .child(
-                                                    label()
-                                                        .font_size(14.)
-                                                        .font_weight(FontWeight::BOLD)
-                                                        .color(t.text_secondary)
-                                                        .text("SYSTEM STORAGE (/)"),
-                                                ),
+                                            label()
+                                                .font_size(13.)
+                                                .font_weight(FontWeight::BOLD)
+                                                .color(t.text_secondary)
+                                                .text("SYSTEM STORAGE (/)"),
                                         )
                                         .child(secondary_button("Refresh", {
                                             let mut setter = storage_data.clone();
@@ -147,35 +148,35 @@ impl Component for Storage {
                                 .child(
                                     rect()
                                         .horizontal()
+                                        .main_align(Alignment::SpaceBetween)
                                         .cross_align(Alignment::End)
+                                        .width(Size::fill())
                                         .margin((0., 0., 12., 0.))
                                         .child(
-                                            rect().width(Size::fill()).child(
-                                                rect()
-                                                    .horizontal()
-                                                    .cross_align(Alignment::End)
-                                                    .child(
-                                                        label()
-                                                            .font_size(26.)
-                                                            .font_weight(FontWeight::BOLD)
-                                                            .color(t.text_primary)
-                                                            .text(storage.used.clone()),
-                                                    )
-                                                    .child(
-                                                        label()
-                                                            .font_size(16.)
-                                                            .color(t.text_secondary)
-                                                            .margin((0., 0., 2., 4.))
-                                                            .text(format!(
-                                                                " used of {}",
-                                                                storage.total
-                                                            )),
-                                                    ),
-                                            ),
+                                            rect()
+                                                .horizontal()
+                                                .cross_align(Alignment::End)
+                                                .child(
+                                                    label()
+                                                        .font_size(24.)
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .color(t.text_primary)
+                                                        .text(storage.used.clone()),
+                                                )
+                                                .child(
+                                                    label()
+                                                        .font_size(15.)
+                                                        .color(t.text_secondary)
+                                                        .margin((0., 0., 2., 4.))
+                                                        .text(format!(
+                                                            " used of {}",
+                                                            storage.total
+                                                        )),
+                                                ),
                                         )
                                         .child(
                                             label()
-                                                .font_size(20.)
+                                                .font_size(18.)
                                                 .font_weight(FontWeight::BOLD)
                                                 .color(bar_color)
                                                 .text(format!("{:.0}%", pct)),
@@ -253,17 +254,19 @@ impl Component for Storage {
                         )
                         .child(
                             rect()
-                                .padding(24.)
+                                .width(Size::fill())
+                                .padding(16.)
+                                .margin((0., 0., 16., 0.))
                                 .corner_radius(12.)
                                 .background(t.bg_card)
                                 .border(Border::new().width(1.).fill(t.border_card))
                                 .overflow(Overflow::Clip)
                                 .child(
                                     label()
-                                        .font_size(14.)
+                                        .font_size(13.)
                                         .font_weight(FontWeight::BOLD)
                                         .color(t.text_secondary)
-                                        .margin((0., 0., 16., 0.))
+                                        .margin((0., 0., 14., 0.))
                                         .text("MOUNTED DRIVES & PARTITIONS"),
                                 )
                                 .children(storage.disks.into_iter().map(|disk| {
@@ -277,39 +280,40 @@ impl Component for Storage {
                                     };
 
                                     rect()
-                                        .margin((0., 0., 16., 0.))
-                                        .padding(14.)
+                                        .width(Size::fill())
+                                        .margin((0., 0., 10., 0.))
+                                        .padding((12., 14.))
                                         .corner_radius(8.)
                                         .background(t.bg_base)
                                         .border(Border::new().width(1.).fill(t.border_subtle))
                                         .child(
                                             rect()
                                                 .horizontal()
+                                                .main_align(Alignment::SpaceBetween)
                                                 .cross_align(Alignment::Center)
+                                                .width(Size::fill())
                                                 .margin((0., 0., 8., 0.))
                                                 .child(
-                                                    rect().width(Size::fill()).child(
-                                                        rect()
-                                                            .horizontal()
-                                                            .spacing(8.)
-                                                            .cross_align(Alignment::Center)
-                                                            .child(
-                                                                label()
-                                                                    .font_size(15.)
-                                                                    .font_weight(FontWeight::BOLD)
-                                                                    .color(t.text_primary)
-                                                                    .text(disk.mount_point.clone()),
-                                                            )
-                                                            .child(
-                                                                label()
-                                                                    .font_size(12.)
-                                                                    .color(t.text_secondary)
-                                                                    .text(format!(
-                                                                        "({})",
-                                                                        disk.filesystem
-                                                                    )),
-                                                            ),
-                                                    ),
+                                                    rect()
+                                                        .horizontal()
+                                                        .spacing(8.)
+                                                        .cross_align(Alignment::Center)
+                                                        .child(
+                                                            label()
+                                                                .font_size(15.)
+                                                                .font_weight(FontWeight::BOLD)
+                                                                .color(t.text_primary)
+                                                                .text(disk.mount_point.clone()),
+                                                        )
+                                                        .child(
+                                                            label()
+                                                                .font_size(12.)
+                                                                .color(t.text_secondary)
+                                                                .text(format!(
+                                                                    "({})",
+                                                                    disk.filesystem
+                                                                )),
+                                                        ),
                                                 )
                                                 .child(
                                                     label()
@@ -342,7 +346,8 @@ impl Component for Storage {
                         .into_element()
                 } else {
                     rect()
-                        .padding(24.)
+                        .width(Size::fill())
+                        .padding(16.)
                         .corner_radius(12.)
                         .background(t.bg_card)
                         .border(Border::new().width(1.).fill(t.border_card))

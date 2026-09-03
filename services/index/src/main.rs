@@ -1,10 +1,11 @@
-use std::{sync::mpsc::Sender, thread};
-
-use config::ty::App;
-use index::ty::{Request, SearchResult};
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::params;
+use {
+    config::ty::App,
+    index::ty::{Request, SearchResult},
+    r2d2::Pool,
+    r2d2_sqlite::SqliteConnectionManager,
+    rusqlite::params,
+    std::{sync::mpsc::Sender, thread},
+};
 
 #[tokio::main]
 async fn main() {

@@ -1,9 +1,11 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
-use config::ty::App;
-use freya::prelude::*;
-use std::{env, path::PathBuf};
-use ui::*;
+use {
+    config::ty::App,
+    freya::prelude::*,
+    std::{env, path::PathBuf},
+    ui::*,
+};
 
 #[derive(Clone, PartialEq, Debug)]
 enum ItemType {
@@ -642,6 +644,4 @@ fn sidebar_item(
         .into_element()
 }
 
-fn main() {
-    launch(LaunchConfig::new().with_window(WindowConfig::new(app).with_title("Files").with_size(1100., 700.)))
-}
+fn main() { launch(LaunchConfig::new().with_window(WindowConfig::new(app).with_title("Files").with_size(1100., 700.))) }

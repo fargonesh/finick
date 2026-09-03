@@ -22,22 +22,25 @@ impl PageHeader {
 impl Component for PageHeader {
     fn render(&self) -> impl IntoElement {
         let t = use_app_theme();
-        let mut el = rect().margin((0., 0., 24., 0.)).child(
-            label()
-                .font_size(28.)
-                .font_weight(FontWeight::BOLD)
-                .color(t.text_primary)
-                .margin((0., 0., 8., 0.))
-                .text(self.title.clone()),
-        );
-
-        if let Some(desc) = &self.description {
-            el = el.child(label().font_size(14.).color(t.text_secondary).text(desc.clone()));
-        }
-
-        el
+        rect()
+            .margin((0., 0., 24., 0.))
+            .child(
+                label()
+                    .font_size(28.)
+                    .font_weight(FontWeight::BOLD)
+                    .color(t.text_primary)
+                    .margin((0., 0., 8., 0.))
+                    .text(self.title.clone()),
+            )
+            .maybe_child(self.description.as_ref().map(|desc| {
+                label()
+                    .font_size(14.)
+                    .color(t.text_secondary)
+                    .text(desc.clone())
+            }))
     }
 }
+
 
 /// Helper function to create a standard `PageHeader`.
 pub fn page_header(title: impl Into<String>, description: impl Into<String>) -> impl IntoElement {

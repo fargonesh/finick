@@ -5,3 +5,7 @@ devenv:files
 devenv:files:cleanup
 devenv:git-hooks:install
 devenv:git-hooks:run
+devenv:processes:devtools
+devenv:processes:index
+devenv:processes:settings
+devenv:processes:settings-daemon

@@ -1,19 +1,19 @@
 #[cfg(feature = "bincode")]
 use bincode;
-
-#[cfg(not(feature = "bincode"))]
-use serde_json;
-
-use log::{error, info, trace};
-use serde::{Deserialize, Serialize};
-use std::fmt::Display;
-use std::io::{BufReader, Read, Write};
-use std::marker::PhantomData;
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
-use std::sync::mpsc::{self, Sender};
-
 pub use log;
+#[cfg(not(feature = "bincode"))]
+use {
+    log::{error, info, trace},
+    serde::{Deserialize, Serialize},
+    std::{
+        fmt::Display,
+        io::{BufReader, Read, Write},
+        marker::PhantomData,
+        os::unix::net::{UnixListener, UnixStream},
+        path::PathBuf,
+        sync::mpsc::{self, Sender},
+    },
+};
 
 const MAX_FRAME_SIZE: usize = 8 * 1024 * 1024;
 

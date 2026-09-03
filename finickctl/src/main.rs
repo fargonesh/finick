@@ -1,5 +1,4 @@
-use clap::Parser;
-use config::ty::App;
+use {clap::Parser, config::ty::App};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]

@@ -1,5 +1,5 @@
 use freya::prelude::*;
-use crate::theme;
+use crate::theme::use_app_theme;
 
 /// A row item with an icon and label, commonly used in lists and file browsers.
 pub fn list_item(
@@ -7,6 +7,7 @@ pub fn list_item(
     title: impl Into<String>,
     mut on_press: impl FnMut() + 'static,
 ) -> impl IntoElement {
+    let t = use_app_theme();
     let icon_str = icon.into();
     let title_str = title.into();
 
@@ -26,7 +27,7 @@ pub fn list_item(
         .child(
             label()
                 .font_size(14.)
-                .color(theme::TEXT_PRIMARY)
+                .color(t.text_primary)
                 .text(title_str),
         )
 }
@@ -38,6 +39,7 @@ pub fn list_item_with_subtitle(
     subtitle: impl Into<String>,
     mut on_press: impl FnMut() + 'static,
 ) -> impl IntoElement {
+    let t = use_app_theme();
     let icon_str = icon.into();
     let title_str = title.into();
     let subtitle_str = subtitle.into();
@@ -62,14 +64,15 @@ pub fn list_item_with_subtitle(
                     label()
                         .font_size(14.)
                         .font_weight(FontWeight::SEMI_BOLD)
-                        .color(theme::TEXT_PRIMARY)
+                        .color(t.text_primary)
                         .text(title_str),
                 )
                 .child(
                     label()
                         .font_size(12.)
-                        .color(theme::TEXT_SECONDARY)
+                        .color(t.text_secondary)
                         .text(subtitle_str),
                 ),
         )
 }
+

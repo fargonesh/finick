@@ -9,14 +9,13 @@ ipsea = { path = "../../libs/ipc" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.43", features = ["full"] }
-freya = { git = "https://github.com/marc2332/freya", branch = "main", features = ["all"] }
 ui = { version = "0.1.0", path = "../../libs/ui" }
 system = { path = "../../libs/system" }
+
+freya = { git = "https://github.com/marc2332/freya", branch = "main", features = ["all"] }
+freya-performance-plugin = { git = "https://github.com/marc2332/freya", branch = "main"}
+freya-devtools = { git = "https://github.com/marc2332/freya", branch = "main", features = ["server"] }
 
 [[bin]]
 name = "settings"
 path = "src/main.rs"
-
-[[bin]]
-name = "finick-settings-daemon"
-path = "src/daemon.rs"

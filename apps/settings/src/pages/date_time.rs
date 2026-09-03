@@ -84,9 +84,9 @@ impl Component for DateTime {
     fn render(&self) -> impl IntoElement {
         let t = use_app_theme();
 
-        let mut date_time_data = use_state(fetch_date_time_info);
-        let mut is_24_hour = use_state(|| true);
-        let mut auto_sync = use_state(|| true);
+        let date_time_data = use_state(fetch_date_time_info);
+        let is_24_hour = use_state(|| true);
+        let auto_sync = use_state(|| true);
         let mut loaded = use_state(|| true);
 
         if !*loaded.read() {
@@ -124,8 +124,9 @@ impl Component for DateTime {
             // Clock & Date Card
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
@@ -133,18 +134,16 @@ impl Component for DateTime {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .margin((0., 0., 14., 0.))
                             .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::BOLD)
-                                            .color(t.text_secondary)
-                                            .text("CURRENT TIME & DATE"),
-                                    ),
+                                label()
+                                    .font_size(13.)
+                                    .font_weight(FontWeight::BOLD)
+                                    .color(t.text_secondary)
+                                    .text("CURRENT TIME & DATE"),
                             )
                             .child(secondary_button("Sync / Refresh", {
                                 let mut l = loaded.clone();
@@ -163,7 +162,7 @@ impl Component for DateTime {
                             )
                             .child(
                                 label()
-                                    .font_size(16.)
+                                    .font_size(15.)
                                     .color(t.text_secondary)
                                     .margin((4., 0., 0., 0.))
                                     .text(info.date.clone()),
@@ -173,7 +172,7 @@ impl Component for DateTime {
                         rect()
                             .horizontal()
                             .cross_align(Alignment::Center)
-                            .margin((8., 0., 0., 0.))
+                            .margin((4., 0., 0., 0.))
                             .child(
                                 rect()
                                     .width(Size::px(8.))
@@ -205,31 +204,35 @@ impl Component for DateTime {
             // Time Format Settings Card
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
                     .overflow(Overflow::Clip)
                     .child(
                         label()
-                            .font_size(14.)
+                            .font_size(13.)
                             .font_weight(FontWeight::BOLD)
                             .color(t.text_secondary)
-                            .margin((0., 0., 16., 0.))
+                            .margin((0., 0., 14., 0.))
                             .text("TIME FORMAT & SYNCHRONIZATION"),
                     )
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .margin((0., 0., 14., 0.))
+                            .content(Content::Flex)
                             .child(
                                 rect()
-                                    .width(Size::fill())
+                                    .width(Size::flex(1.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(15.)
                                             .font_weight(FontWeight::SEMI_BOLD)
                                             .color(t.text_primary)
                                             .text("24-Hour Time"),
@@ -257,13 +260,16 @@ impl Component for DateTime {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
+                            .width(Size::fill())
+                            .content(Content::Flex)
                             .child(
                                 rect()
-                                    .width(Size::fill())
+                                    .width(Size::flex(1.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(15.)
                                             .font_weight(FontWeight::SEMI_BOLD)
                                             .color(t.text_primary)
                                             .text("Automatic Date & Time"),
@@ -299,39 +305,38 @@ impl Component for DateTime {
             // Time Zone & Hardware Details Card
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
                     .overflow(Overflow::Clip)
                     .child(
                         label()
-                            .font_size(14.)
+                            .font_size(13.)
                             .font_weight(FontWeight::BOLD)
                             .color(t.text_secondary)
-                            .margin((0., 0., 16., 0.))
+                            .margin((0., 0., 14., 0.))
                             .text("TIME ZONE & DETAILS"),
                     )
                     .child(
                         rect()
-                            .margin((0., 0., 12., 0.))
-                            .padding(14.)
+                            .width(Size::fill())
+                            .padding((10., 14.))
+                            .margin((0., 0., 6., 0.))
                             .corner_radius(8.)
                             .background(t.bg_base)
                             .border(Border::new().width(1.).fill(t.border_subtle))
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
                             .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("Time Zone"),
-                                    ),
+                                label()
+                                    .font_size(14.)
+                                    .font_weight(FontWeight::SEMI_BOLD)
+                                    .color(t.text_primary)
+                                    .text("Time Zone"),
                             )
                             .child(
                                 label()
@@ -342,23 +347,21 @@ impl Component for DateTime {
                     )
                     .child(
                         rect()
-                            .margin((0., 0., 12., 0.))
-                            .padding(14.)
+                            .width(Size::fill())
+                            .padding((10., 14.))
+                            .margin((0., 0., 6., 0.))
                             .corner_radius(8.)
                             .background(t.bg_base)
                             .border(Border::new().width(1.).fill(t.border_subtle))
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
                             .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("Universal Time (UTC)"),
-                                    ),
+                                label()
+                                    .font_size(14.)
+                                    .font_weight(FontWeight::SEMI_BOLD)
+                                    .color(t.text_primary)
+                                    .text("Universal Time (UTC)"),
                             )
                             .child(
                                 label()
@@ -369,22 +372,20 @@ impl Component for DateTime {
                     )
                     .child(
                         rect()
-                            .padding(14.)
+                            .width(Size::fill())
+                            .padding((10., 14.))
                             .corner_radius(8.)
                             .background(t.bg_base)
                             .border(Border::new().width(1.).fill(t.border_subtle))
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
                             .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("RTC (Hardware Clock)"),
-                                    ),
+                                label()
+                                    .font_size(14.)
+                                    .font_weight(FontWeight::SEMI_BOLD)
+                                    .color(t.text_primary)
+                                    .text("RTC (Hardware Clock)"),
                             )
                             .child(
                                 label()

@@ -226,8 +226,9 @@ impl Component for Language {
             // Primary Display Language Card
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
@@ -235,18 +236,16 @@ impl Component for Language {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .margin((0., 0., 14., 0.))
                             .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::BOLD)
-                                            .color(t.text_secondary)
-                                            .text("DISPLAY LANGUAGE"),
-                                    ),
+                                label()
+                                    .font_size(13.)
+                                    .font_weight(FontWeight::BOLD)
+                                    .color(t.text_secondary)
+                                    .text("DISPLAY LANGUAGE"),
                             )
                             .child(secondary_button("Refresh", {
                                 let mut l = loaded.clone();
@@ -257,7 +256,8 @@ impl Component for Language {
                         rect()
                             .horizontal()
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .margin((0., 0., 14., 0.))
                             .child(
                                 rect()
                                     .width(Size::px(48.))
@@ -276,7 +276,6 @@ impl Component for Language {
                             )
                             .child(
                                 rect()
-                                    .width(Size::fill())
                                     .child(
                                         label()
                                             .font_size(18.)
@@ -298,22 +297,23 @@ impl Component for Language {
                             .font_size(13.)
                             .font_weight(FontWeight::SEMI_BOLD)
                             .color(t.text_secondary)
-                            .margin((8., 0., 12., 0.))
+                            .margin((4., 0., 10., 0.))
                             .text("PREFERRED LANGUAGES"),
                     )
                     .children(current.preferred_languages.iter().map(|lang| {
                         let is_prim = lang.is_primary;
                         rect()
+                            .width(Size::fill())
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .padding(14.)
-                            .margin((0., 0., 8., 0.))
+                            .padding((10., 12.))
+                            .margin((0., 0., 6., 0.))
                             .corner_radius(8.)
                             .background(if is_prim { t.bg_active } else { t.bg_base })
                             .border(Border::new().width(1.).fill(if is_prim { t.primary_accent } else { t.border_subtle }))
                             .child(
                                 rect()
-                                    .width(Size::fill())
                                     .child(
                                         label()
                                             .font_size(14.)
@@ -347,25 +347,27 @@ impl Component for Language {
             // Regional Formats & Standards Card
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
                     .overflow(Overflow::Clip)
                     .child(
                         label()
-                            .font_size(14.)
+                            .font_size(13.)
                             .font_weight(FontWeight::BOLD)
                             .color(t.text_secondary)
-                            .margin((0., 0., 16., 0.))
+                            .margin((0., 0., 14., 0.))
                             .text("REGIONAL FORMATS & PREVIEWS"),
                     )
                     // Format Preview Box
                     .child(
                         rect()
-                            .padding(16.)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .padding((12., 14.))
+                            .margin((0., 0., 14., 0.))
                             .corner_radius(8.)
                             .background(t.bg_base)
                             .border(Border::new().width(1.).fill(t.border_subtle))
@@ -402,14 +404,17 @@ impl Component for Language {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .margin((0., 0., 14., 0.))
+                            .content(Content::Flex)
                             .child(
                                 rect()
-                                    .width(Size::fill())
+                                    .width(Size::flex(1.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(15.)
                                             .font_weight(FontWeight::SEMI_BOLD)
                                             .color(t.text_primary)
                                             .text("Measurement System"),
@@ -441,23 +446,21 @@ impl Component for Language {
                     // First Day of Week Row
                     .child(
                         rect()
-                            .padding(14.)
-                            .margin((0., 0., 8., 0.))
+                            .width(Size::fill())
+                            .padding((10., 14.))
+                            .margin((0., 0., 6., 0.))
                             .corner_radius(8.)
                             .background(t.bg_base)
                             .border(Border::new().width(1.).fill(t.border_subtle))
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
                             .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("First Day of Week"),
-                                    ),
+                                label()
+                                    .font_size(14.)
+                                    .font_weight(FontWeight::SEMI_BOLD)
+                                    .color(t.text_primary)
+                                    .text("First Day of Week"),
                             )
                             .child(
                                 label()
@@ -469,22 +472,21 @@ impl Component for Language {
                     // Region Locale Row
                     .child(
                         rect()
-                            .padding(14.)
+                            .width(Size::fill())
+                            .padding((10., 14.))
+                            .margin((0., 0., 6., 0.))
                             .corner_radius(8.)
                             .background(t.bg_base)
                             .border(Border::new().width(1.).fill(t.border_subtle))
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
                             .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("Regional Formats Locale"),
-                                    ),
+                                label()
+                                    .font_size(14.)
+                                    .font_weight(FontWeight::SEMI_BOLD)
+                                    .color(t.text_primary)
+                                    .text("Regional Formats Locale"),
                             )
                             .child(
                                 label()
@@ -497,39 +499,38 @@ impl Component for Language {
             // Keyboard & Input Sources Card
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
                     .overflow(Overflow::Clip)
                     .child(
                         label()
-                            .font_size(14.)
+                            .font_size(13.)
                             .font_weight(FontWeight::BOLD)
                             .color(t.text_secondary)
-                            .margin((0., 0., 16., 0.))
+                            .margin((0., 0., 14., 0.))
                             .text("INPUT & KEYBOARD LAYOUT"),
                     )
                     .child(
                         rect()
-                            .padding(14.)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .padding((10., 14.))
+                            .margin((0., 0., 12., 0.))
                             .corner_radius(8.)
                             .background(t.bg_base)
                             .border(Border::new().width(1.).fill(t.border_subtle))
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
                             .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("Active Keyboard Layout"),
-                                    ),
+                                label()
+                                    .font_size(14.)
+                                    .font_weight(FontWeight::SEMI_BOLD)
+                                    .color(t.text_primary)
+                                    .text("Active Keyboard Layout"),
                             )
                             .child(
                                 label()
@@ -542,14 +543,17 @@ impl Component for Language {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .margin((0., 0., 16., 0.))
+                            .width(Size::fill())
+                            .margin((0., 0., 14., 0.))
+                            .content(Content::Flex)
                             .child(
                                 rect()
-                                    .width(Size::fill())
+                                    .width(Size::flex(1.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(15.)
                                             .font_weight(FontWeight::SEMI_BOLD)
                                             .color(t.text_primary)
                                             .text("Spell Checking"),
@@ -578,13 +582,16 @@ impl Component for Language {
                     .child(
                         rect()
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
+                            .width(Size::fill())
+                            .content(Content::Flex)
                             .child(
                                 rect()
-                                    .width(Size::fill())
+                                    .width(Size::flex(1.))
                                     .child(
                                         label()
-                                            .font_size(16.)
+                                            .font_size(15.)
                                             .font_weight(FontWeight::SEMI_BOLD)
                                             .color(t.text_primary)
                                             .text("Automatic Capitalization"),
@@ -613,32 +620,34 @@ impl Component for Language {
             // Available Locales Card
             .child(
                 rect()
-                    .margin((0., 0., 24., 0.))
-                    .padding(24.)
+                    .width(Size::fill())
+                    .margin((0., 0., 16., 0.))
+                    .padding(16.)
                     .corner_radius(12.)
                     .background(t.bg_card)
                     .border(Border::new().width(1.).fill(t.border_card))
                     .overflow(Overflow::Clip)
                     .child(
                         label()
-                            .font_size(14.)
+                            .font_size(13.)
                             .font_weight(FontWeight::BOLD)
                             .color(t.text_secondary)
-                            .margin((0., 0., 16., 0.))
+                            .margin((0., 0., 14., 0.))
                             .text("INSTALLED LOCALES & PACKS"),
                     )
                     .children(current.installed_locales.iter().map(|loc| {
                         rect()
+                            .width(Size::fill())
                             .horizontal()
+                            .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .padding(12.)
-                            .margin((0., 0., 8., 0.))
+                            .padding((10., 12.))
+                            .margin((0., 0., 6., 0.))
                             .corner_radius(8.)
                             .background(t.bg_base)
                             .border(Border::new().width(1.).fill(t.border_subtle))
                             .child(
                                 rect()
-                                    .width(Size::fill())
                                     .child(
                                         label()
                                             .font_size(14.)

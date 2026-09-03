@@ -1,4 +1,8 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 pub mod network;
+
 pub mod bluetooth;
 pub mod storage;
 pub mod about;
