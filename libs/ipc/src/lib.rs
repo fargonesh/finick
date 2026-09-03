@@ -1,6 +1,13 @@
 #[cfg(feature = "bincode")]
 use bincode;
 pub use log;
+
+pub mod settings;
+pub use settings::*;
+
+#[doc(hidden)]
+pub use crate as ipsea;
+
 #[cfg(not(feature = "bincode"))]
 use {
     log::{error, info, trace},

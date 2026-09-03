@@ -192,8 +192,8 @@ pub fn fetch_printers_info() -> PrintersInfo {
     if let Ok(output) = Command::new("lpstat").arg("-v").output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
-            if let Some(rest) = line.strip_prefix("device for ") {
-                if let Some((pname, uri)) = rest.split_once(':') {
+            if let Some(rest) = line.strip_prefix("device for ")
+                && let Some((pname, uri)) = rest.split_once(':') {
                     let sys_name = pname.trim();
                     let uri_val = uri.trim();
                     if let Some(p) = found_printers.iter_mut().find(|p| p.system_name == sys_name) {
@@ -205,7 +205,6 @@ pub fn fetch_printers_info() -> PrintersInfo {
                         }
                     }
                 }
-            }
         }
     }
 
@@ -321,8 +320,8 @@ impl Component for Printers {
 
         if !*loaded.read() {
             loaded.set(true);
-            let mut state_clone = printers_state.clone();
-            let mut loading_clone = is_loading.clone();
+            let mut state_clone = printers_state;
+            let mut loading_clone = is_loading;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PrintersInfo>();
 
             std::thread::spawn(move || {
@@ -399,9 +398,9 @@ impl Component for Printers {
                                         Switch::new()
                                             .toggled(cups_on)
                                             .on_toggle({
-                                                let mut ps = printers_state.clone();
-                                                let mut l = loaded.clone();
-                                                let mut ld = is_loading.clone();
+                                                let mut ps = printers_state;
+                                                let mut l = loaded;
+                                                let mut ld = is_loading;
                                                 move |_| {
                                                     let next_val = !cups_on;
                                                     let mut curr = ps.read().clone();
@@ -476,8 +475,8 @@ impl Component for Printers {
                                     .spacing(8.)
                                     .child(
                                         secondary_button(if loading { "Refreshing..." } else { "Refresh Devices" }, {
-                                            let mut l = loaded.clone();
-                                            let mut ld = is_loading.clone();
+                                            let mut l = loaded;
+                                            let mut ld = is_loading;
                                             move || {
                                                 ld.set(true);
                                                 l.set(false);
@@ -536,9 +535,9 @@ impl Component for Printers {
                                             let is_ready = status_str == "Ready" || status_str == "Idle";
                                             let loc = printer.location.clone();
                                             let drv = printer.driver.clone();
-                                            let l = loaded.clone();
-                                            let ld = is_loading.clone();
-                                            let ps = printers_state.clone();
+                                            let l = loaded;
+                                            let ld = is_loading;
+                                            let ps = printers_state;
 
                                             rect()
                                                 .key(printer.system_name.clone())
@@ -630,9 +629,9 @@ impl Component for Printers {
                                                         .child({
                                                             if !is_def {
                                                                 let sys_c = p_sys.clone();
-                                                                let mut ps_c = ps.clone();
-                                                                let mut l_c = l.clone();
-                                                                let mut ld_c = ld.clone();
+                                                                let mut ps_c = ps;
+                                                                let mut l_c = l;
+                                                                let mut ld_c = ld;
                                                                 secondary_button("Set Default", move || {
                                                                     let s = sys_c.clone();
                                                                     let mut curr = ps_c.read().clone();
@@ -653,9 +652,9 @@ impl Component for Printers {
                                                         })
                                                         .child({
                                                             let sys_c = p_sys.clone();
-                                                            let mut ps_c = ps.clone();
-                                                            let mut l_c = l.clone();
-                                                            let mut ld_c = ld.clone();
+                                                            let mut ps_c = ps;
+                                                            let mut l_c = l;
+                                                            let mut ld_c = ld;
                                                             let action_label = if is_paused { "Resume Queue" } else { "Pause Queue" };
                                                             secondary_button(action_label, move || {
                                                                 let s = sys_c.clone();
@@ -833,8 +832,8 @@ impl Component for Printers {
                                             let u = job.user.clone();
                                             let sz = job.size.clone();
                                             let stat = job.status.clone();
-                                            let ps = printers_state.clone();
-                                            let l = loaded.clone();
+                                            let ps = printers_state;
+                                            let l = loaded;
 
                                             rect()
                                                 .key(format!("job-{}", job.id))
@@ -886,8 +885,8 @@ impl Component for Printers {
                                                 .child(
                                                     secondary_button("Cancel Job", {
                                                         let j_c = j_id.clone();
-                                                        let mut ps_c = ps.clone();
-                                                        let mut l_c = l.clone();
+                                                        let mut ps_c = ps;
+                                                        let mut l_c = l;
                                                         move || {
                                                             let job = j_c.clone();
                                                             let mut curr = ps_c.read().clone();
@@ -956,7 +955,7 @@ impl Component for Printers {
                                         Switch::new()
                                             .toggled(discovery_on)
                                             .on_toggle({
-                                                let mut ps = printers_state.clone();
+                                                let mut ps = printers_state;
                                                 move |_| {
                                                     let mut curr = ps.read().clone();
                                                     curr.network_discovery = !curr.network_discovery;
@@ -995,7 +994,7 @@ impl Component for Printers {
                                         Switch::new()
                                             .toggled(info.share_printers)
                                             .on_toggle({
-                                                let mut ps = printers_state.clone();
+                                                let mut ps = printers_state;
                                                 move |_| {
                                                     let mut curr = ps.read().clone();
                                                     curr.share_printers = !curr.share_printers;

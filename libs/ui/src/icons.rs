@@ -61,6 +61,8 @@ pub const SUN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" heig
 
 pub const MOON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z"/></svg>"#;
 
+pub const LOCK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>"#;
+
 use freya::prelude::*;
 
 pub fn icon(svg_str: &'static str, size: f32, color: Color) -> impl IntoElement {

@@ -69,8 +69,8 @@ fn query_firewall_status() -> FirewallInfo {
     }
 
     // 3. Try iptables
-    if let Ok(output) = Command::new("iptables").args(["-L", "-n"]).output() {
-        if output.status.success() {
+    if let Ok(output) = Command::new("iptables").args(["-L", "-n"]).output()
+        && output.status.success() {
             return FirewallInfo {
                 is_active: true,
                 status_text: "Active (iptables)".to_string(),
@@ -78,7 +78,6 @@ fn query_firewall_status() -> FirewallInfo {
                 outgoing: "Allow".to_string(),
             };
         }
-    }
 
     // 4. Default clean fallback
     FirewallInfo {
@@ -140,8 +139,8 @@ impl Component for Privacy {
 
         if !*loaded.read() {
             loaded.set(true);
-            let mut fw_state = firewall_info.clone();
-            let mut dev_state = devices.clone();
+            let mut fw_state = firewall_info;
+            let mut dev_state = devices;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             std::thread::spawn(move || {
@@ -197,7 +196,7 @@ impl Component for Privacy {
                                     .text("FIREWALL & NETWORK SECURITY"),
                             )
                             .child(secondary_button("Refresh", {
-                                let mut l = loaded.clone();
+                                let mut l = loaded;
                                 move || l.set(false)
                             })),
                     )
@@ -231,7 +230,7 @@ impl Component for Privacy {
                                 Switch::new()
                                     .toggled(fw.is_active)
                                     .on_toggle({
-                                        let mut fw_state = firewall_info.clone();
+                                        let mut fw_state = firewall_info;
                                         move |_| {
                                             let mut current = fw_state.read().clone();
                                             current.is_active = !current.is_active;
@@ -333,7 +332,7 @@ impl Component for Privacy {
                                 Switch::new()
                                     .toggled(is_cam)
                                     .on_toggle({
-                                        let mut cam = camera_enabled.clone();
+                                        let mut cam = camera_enabled;
                                         move |_| {
                                             let next = !*cam.read();
                                             cam.set(next);
@@ -371,7 +370,7 @@ impl Component for Privacy {
                                 Switch::new()
                                     .toggled(is_mic)
                                     .on_toggle({
-                                        let mut mic = mic_enabled.clone();
+                                        let mut mic = mic_enabled;
                                         move |_| {
                                             let next = !*mic.read();
                                             mic.set(next);
@@ -429,7 +428,7 @@ impl Component for Privacy {
                                 Switch::new()
                                     .toggled(is_loc)
                                     .on_toggle({
-                                        let mut loc = location_enabled.clone();
+                                        let mut loc = location_enabled;
                                         move |_| {
                                             let next = !*loc.read();
                                             loc.set(next);
@@ -467,7 +466,7 @@ impl Component for Privacy {
                                 Switch::new()
                                     .toggled(is_sandboxing)
                                     .on_toggle({
-                                        let mut s = sandboxing_enabled.clone();
+                                        let mut s = sandboxing_enabled;
                                         move |_| {
                                             let next = !*s.read();
                                             s.set(next);

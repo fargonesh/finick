@@ -1942,7 +1942,7 @@ dependencies = [
  "freya",
  "image 0.25.10",
  "index",
- "ipsea",
+ "ipc",
  "serde_json",
  "tokio",
  "ui",
@@ -1971,7 +1971,7 @@ dependencies = [
  "clap",
  "config",
  "index",
- "ipsea",
+ "ipc",
  "serde_json",
  "strum",
 ]
@@ -3523,7 +3523,7 @@ version = "0.1.0"
 dependencies = [
  "config",
  "image 0.25.10",
- "ipsea",
+ "ipc",
  "notify",
  "pretty_env_logger",
  "r2d2",
@@ -3606,13 +3606,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ipnet"
-version = "2.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a756c3fac73139e83f14c2d742155dd2b78d3ee56597b419a0579b7bdd6dd78"
-
-[[package]]
-name = "ipsea"
+name = "ipc"
 version = "1.3.0"
 dependencies = [
  "bincode",
@@ -3623,6 +3617,12 @@ dependencies = [
  "serde_json",
  "tokio",
 ]
+
+[[package]]
+name = "ipnet"
+version = "2.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a756c3fac73139e83f14c2d742155dd2b78d3ee56597b419a0579b7bdd6dd78"
 
 [[package]]
 name = "is-docker"
@@ -6394,7 +6394,7 @@ dependencies = [
  "freya",
  "freya-devtools",
  "freya-performance-plugin",
- "ipsea",
+ "ipc",
  "serde",
  "serde_json",
  "system",
@@ -6407,9 +6407,10 @@ name = "settings-daemon"
 version = "0.1.0"
 dependencies = [
  "config",
- "ipsea",
+ "ipc",
  "serde",
  "serde_json",
+ "system",
  "tokio",
 ]
 

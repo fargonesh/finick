@@ -57,22 +57,20 @@ pub fn fetch_date_time_info() -> DateTimeInfo {
                 info.rtc_time = rest.trim().to_string();
             } else if let Some(rest) = l.strip_prefix("System clock synchronized:") {
                 info.ntp_synced = rest.trim().eq_ignore_ascii_case("yes");
-            } else if let Some(rest) = l.strip_prefix("NTP service:") {
-                if !info.ntp_synced {
+            } else if let Some(rest) = l.strip_prefix("NTP service:")
+                && !info.ntp_synced {
                     info.ntp_synced = rest.trim().eq_ignore_ascii_case("active");
                 }
-            }
         }
     }
 
-    if info.timezone == "UTC" || info.timezone.is_empty() {
-        if let Ok(out) = Command::new("date").arg("+%:z (%Z)").output() {
+    if (info.timezone == "UTC" || info.timezone.is_empty())
+        && let Ok(out) = Command::new("date").arg("+%:z (%Z)").output() {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !s.is_empty() {
                 info.timezone = s;
             }
         }
-    }
 
     info
 }
@@ -91,7 +89,7 @@ impl Component for DateTime {
 
         if !*loaded.read() {
             loaded.set(true);
-            let mut setter = date_time_data.clone();
+            let mut setter = date_time_data;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             std::thread::spawn(move || {
@@ -146,7 +144,7 @@ impl Component for DateTime {
                                     .text("CURRENT TIME & DATE"),
                             )
                             .child(secondary_button("Sync / Refresh", {
-                                let mut l = loaded.clone();
+                                let mut l = loaded;
                                 move || l.set(false)
                             })),
                     )
@@ -249,7 +247,7 @@ impl Component for DateTime {
                                 Switch::new()
                                     .toggled(use_24h)
                                     .on_toggle({
-                                        let mut h = is_24_hour.clone();
+                                        let mut h = is_24_hour;
                                         move |_| {
                                             let curr = *h.read();
                                             h.set(!curr);
@@ -286,8 +284,8 @@ impl Component for DateTime {
                                 Switch::new()
                                     .toggled(is_auto_sync)
                                     .on_toggle({
-                                        let mut s = auto_sync.clone();
-                                        let mut l = loaded.clone();
+                                        let mut s = auto_sync;
+                                        let mut l = loaded;
                                         move |_| {
                                             let next = !*s.read();
                                             s.set(next);

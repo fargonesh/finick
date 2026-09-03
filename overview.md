@@ -6,9 +6,9 @@ builds on top of hyperland to provide things every system needs in a pretty + ni
 | Thing       | Category | Path                                                    |
 | ----------- | -------- | ------------------------------------------------------- |
 | Settings    | App      | [apps/settings](./apps/settings/)                       |
-| \ (D)       | Service  | [services/settings-daemon](./services/settings-daemon/) |
+| ⤷ Daemon    | Service  | [services/settings-daemon](./services/settings-daemon/) |
 | Files       | App      | [apps/files](./apps/files/)                             |
-| \ Index     | Service  | [services/index](./services/index/)                     |
+| ⤷ Index     | Service  | [services/index](./services/index/)                     |
 | Top Bar     | Shell    | n/a                                                     |
 | UI          | Lib      | [libs/ui](./libs/ui)                                    |
 | IPC         | Lib      | [libs/ipc](./libs/ipc/)                                 |

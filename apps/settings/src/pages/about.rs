@@ -211,7 +211,7 @@ impl Component for About {
 
         if !*loaded.read() {
             loaded.set(true);
-            let mut info_state = info.clone();
+            let mut info_state = info;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             std::thread::spawn(move || {
@@ -303,7 +303,7 @@ impl Component for About {
                             .margin((8., 0., 0., 0.))
                             .spacing(12.)
                             .child(secondary_button("Refresh Info", {
-                                let mut l = loaded.clone();
+                                let mut l = loaded;
                                 move || l.set(false)
                             })),
                     ),

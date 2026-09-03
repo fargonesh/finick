@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1.43", features = ["full"] }
 config = { path = "../../libs/config" }
-ipsea = { path = "../../libs/ipc" }
+ipsea = { path = "../../libs/ipc", package = "ipc" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+system = { path = "../../libs/system" }
+

@@ -141,7 +141,7 @@ impl Component for Storage {
                                                 .text("SYSTEM STORAGE (/)"),
                                         )
                                         .child(secondary_button("Refresh", {
-                                            let mut setter = storage_data.clone();
+                                            let mut setter = storage_data;
                                             move || setter.set(Some(fetch_storage_info()))
                                         })),
                                 )

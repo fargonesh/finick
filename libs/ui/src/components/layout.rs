@@ -66,7 +66,7 @@ where
     rect()
         .width(Size::fill())
         .on_sized({
-            let mut width_state = width.clone();
+            let mut width_state = width;
             move |e: Event<SizedEventData>| {
                 let current = e.area.width();
                 if (*width_state.read() - current).abs() > 1.0 {

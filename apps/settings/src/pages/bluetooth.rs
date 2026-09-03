@@ -17,16 +17,16 @@ impl Component for Bluetooth {
     fn render(&self) -> impl IntoElement {
         let t = use_app_theme();
 
-        let devices = use_state(|| Vec::<BluetoothDevice>::new());
+        let devices = use_state(Vec::<BluetoothDevice>::new);
         let is_enabled = use_state(|| false);
         let is_loading = use_state(|| true);
         let mut loaded = use_state(|| false);
 
         if !*loaded.read() {
             loaded.set(true);
-            let mut dev_state = devices.clone();
-            let mut bt_state = is_enabled.clone();
-            let mut loading_state = is_loading.clone();
+            let mut dev_state = devices;
+            let mut bt_state = is_enabled;
+            let mut loading_state = is_loading;
 
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -49,7 +49,7 @@ impl Component for Bluetooth {
                 if let Ok(output) = Command::new("bluetoothctl").args(["devices", "Connected"]).output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     for line in stdout.lines() {
-                        let parts: Vec<&str> = line.trim().split_whitespace().collect();
+                        let parts: Vec<&str> = line.split_whitespace().collect();
                         if parts.len() >= 2 && parts[0] == "Device" {
                             connected_macs.insert(parts[1].to_uppercase());
                         }
@@ -132,9 +132,9 @@ impl Component for Bluetooth {
                                 Switch::new()
                                     .toggled(bt_active)
                                     .on_toggle({
-                                        let mut enabled_state = is_enabled.clone();
-                                        let mut l = loaded.clone();
-                                        let mut load_state = is_loading.clone();
+                                        let mut enabled_state = is_enabled;
+                                        let mut l = loaded;
+                                        let mut load_state = is_loading;
                                         move |_| {
                                             let next = !*enabled_state.read();
                                             enabled_state.set(next);
@@ -166,8 +166,8 @@ impl Component for Bluetooth {
                             .horizontal()
                             .spacing(8.)
                             .child(secondary_button("Refresh", {
-                                let mut l = loaded.clone();
-                                let mut load_state = is_loading.clone();
+                                let mut l = loaded;
+                                let mut load_state = is_loading;
                                 move || {
                                     load_state.set(true);
                                     l.set(false);
@@ -228,8 +228,8 @@ impl Component for Bluetooth {
                                     let is_conn = dev.connected;
                                     let mac = dev.mac.clone();
                                     let name = dev.name.clone();
-                                    let l = loaded.clone();
-                                    let load_state = is_loading.clone();
+                                    let l = loaded;
+                                    let load_state = is_loading;
 
                                     rect()
                                         .key(dev.mac.clone())
@@ -283,8 +283,8 @@ impl Component for Bluetooth {
                                                     if is_conn { "Disconnect" } else { "Connect" },
                                                     {
                                                         let mac_c = mac.clone();
-                                                        let mut l_c = l.clone();
-                                                        let mut ls_c = load_state.clone();
+                                                        let mut l_c = l;
+                                                        let mut ls_c = load_state;
                                                         move || {
                                                             let m = mac_c.clone();
                                                             ls_c.set(true);
@@ -306,8 +306,8 @@ impl Component for Bluetooth {
                                                 ))
                                                 .child(secondary_button("Forget", {
                                                     let mac_c = mac.clone();
-                                                    let mut l_c = l.clone();
-                                                    let mut ls_c = load_state.clone();
+                                                    let mut l_c = l;
+                                                    let mut ls_c = load_state;
                                                     move || {
                                                         let m = mac_c.clone();
                                                         ls_c.set(true);

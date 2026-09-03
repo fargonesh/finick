@@ -43,38 +43,62 @@
     pkgs.libv4l
     pkgs.libv4l.dev
     pkgs.libxkbcommon
+    pkgs.wayland
+    pkgs.vulkan-loader
+    pkgs.libglvnd
+
+    # System CLI tools & utilities (shelled out by libs/system & apps)
+    pkgs.hyprland        # hyprctl (monitors, devices)
+    pkgs.wireplumber     # wpctl (audio volume/mute/status)
+    pkgs.networkmanager  # nmcli (wifi, networking)
+    pkgs.bluez           # bluetoothctl (bluetooth devices)
+    pkgs.util-linux      # rfkill
+    pkgs.coreutils       # df, uname, date
+    pkgs.procps          # free, uptime
+    pkgs.systemd         # timedatectl, systemctl
+    pkgs.iproute2        # ip
+    pkgs.xdg-utils       # xdg-open
+    pkgs.hostname        # hostname
+    pkgs.cups            # lpstat, lpoptions, cupsenable, cupsdisable, lpr, cancel (printers)
+    pkgs.sane-backends   # scanimage (scanners)
+    pkgs.iptables        # iptables (firewall & privacy)
+    pkgs.firewalld       # firewall-cmd (firewall & privacy)
+    pkgs.tailscale       # tailscale (VPN management)
   ];
 
   env = {
     LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
     BINDGEN_EXTRA_CLANG_ARGS = "-isystem ${pkgs.glibc.dev}/include -isystem ${pkgs.linuxHeaders}/include";
-    LD_LIBRARY_PATH = "${pkgs.libxkbcommon}/lib";
+    LD_LIBRARY_PATH = lib.makeLibraryPath [
+      pkgs.libxkbcommon
+      pkgs.wayland
+      pkgs.vulkan-loader
+      pkgs.libglvnd
+    ];
   };
 
   enterShell = ''
     export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
     export BINDGEN_EXTRA_CLANG_ARGS="-isystem ${pkgs.glibc.dev}/include -isystem ${pkgs.linuxHeaders}/include"
+    export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.libxkbcommon pkgs.wayland pkgs.vulkan-loader pkgs.libglvnd ]}:$LD_LIBRARY_PATH"
     echo ""
     echo "Rust toolchain: $(rustc --version)"
     echo ""
   '';
 
-  # Services in ./services
+  # Services in ./services (e.g. index, settings-daemon)
   processes = lib.mapAttrs' (name: _:
     lib.nameValuePair name {
       exec = "cargo run -p ${name}";
     }
-  ) (lib.filterAttrs (_name: type: type == "directory") (builtins.readDir ./services))
-  // {
-    # Settings app (hooks up the Freya devtools server on 127.0.0.1:7354)
-    settings = {
-      exec = "cargo run -p settings";
-    };
-    # Freya DevTools companion app; connects to the settings app's inspector server.
-    # `settings` must be running for devtools to connect.
-    devtools = {
-      exec = "./.devenv/state/cargo-install/bin/freya-devtools-app";
-    };
+  ) (lib.filterAttrs (_name: type: type == "directory") (builtins.readDir ./services));
+
+  scripts = {
+    devtools.exec = "if [ ! -f ./.devenv/state/cargo-install/bin/freya-devtools-app ]; then cargo install --git https://github.com/marc2332/freya freya-devtools-app --root ./.devenv/state/cargo-install; fi; ./.devenv/state/cargo-install/bin/freya-devtools-app \"$@\"";
+    settings.exec = "cargo run -p settings -- \"$@\"";
+    settings-daemon.exec = "cargo run -p settings-daemon -- \"$@\"";
+    files.exec = "cargo run -p files -- \"$@\"";
+    finickctl.exec = "cargo run -p finickctl -- \"$@\"";
   };
 
   languages.rust = {

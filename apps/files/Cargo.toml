@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ipsea = { path = "../../libs/ipc" }
+ipsea = { path = "../../libs/ipc", package = "ipc" }
 config = { path = "../../libs/config" }
 index = { path = "../../services/index" }
 

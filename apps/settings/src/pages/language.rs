@@ -197,7 +197,7 @@ impl Component for Language {
 
         if !*loaded.read() {
             loaded.set(true);
-            let mut info_state = lang_info.clone();
+            let mut info_state = lang_info;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             std::thread::spawn(move || {
@@ -248,7 +248,7 @@ impl Component for Language {
                                     .text("DISPLAY LANGUAGE"),
                             )
                             .child(secondary_button("Refresh", {
-                                let mut l = loaded.clone();
+                                let mut l = loaded;
                                 move || l.set(false)
                             })),
                     )
@@ -435,7 +435,7 @@ impl Component for Language {
                                 Switch::new()
                                     .toggled(use_metric)
                                     .on_toggle({
-                                        let mut m = is_metric.clone();
+                                        let mut m = is_metric;
                                         move |_| {
                                             let next = !*m.read();
                                             m.set(next);
@@ -570,7 +570,7 @@ impl Component for Language {
                                 Switch::new()
                                     .toggled(use_spell_check)
                                     .on_toggle({
-                                        let mut sc = spell_check.clone();
+                                        let mut sc = spell_check;
                                         move |_| {
                                             let next = !*sc.read();
                                             sc.set(next);
@@ -608,7 +608,7 @@ impl Component for Language {
                                 Switch::new()
                                     .toggled(use_auto_correct)
                                     .on_toggle({
-                                        let mut ac = auto_correct.clone();
+                                        let mut ac = auto_correct;
                                         move |_| {
                                             let next = !*ac.read();
                                             ac.set(next);

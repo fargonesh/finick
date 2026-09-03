@@ -230,7 +230,7 @@ pub const LIGHT_THEME: AppTheme = AppTheme {
 
 pub fn use_init_app_theme(theme: AppTheme) -> State<AppTheme> {
     let st = use_state(|| theme);
-    provide_context(st.clone());
+    provide_context(st);
     st
 }
 

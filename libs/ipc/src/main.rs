@@ -1,6 +1,6 @@
 use {
     core::panic,
-    ipsea::{send_command, start_server},
+    ipc::{send_command, start_server},
     std::{process, time::Duration},
     tokio::{select, spawn, time::sleep},
 };
@@ -31,7 +31,7 @@ async fn main() {
                 move |res: String| {
                     assert_eq!(res, message);
                     server.abort();
-                    let _ = tx.send(());
+                    let _ = tx.try_send(());
                 }
             }),
         )

@@ -54,8 +54,8 @@ fn load_dir(path: String, mut items_state: State<Vec<Item>>) {
         drop(inner_tx);
 
         let mut result: Vec<Item> = inner_rx.into_iter().collect();
-        if result.is_empty() || res.is_err() {
-            if let Ok(entries) = std::fs::read_dir(&path) {
+        if (result.is_empty() || res.is_err())
+            && let Ok(entries) = std::fs::read_dir(&path) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let md = entry.metadata().ok();
                     let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
@@ -68,7 +68,6 @@ fn load_dir(path: String, mut items_state: State<Vec<Item>>) {
                     });
                 }
             }
-        }
 
         result.sort_by(|a, b| {
             if a.ty == ItemType::Folder && b.ty == ItemType::File {
@@ -144,14 +143,14 @@ fn format_size(size: u64) -> String {
 fn app() -> Element {
     let _st = use_init_app_theme(get_theme());
     let t = use_app_theme();
-    let mut current_path = use_state(|| env::home_dir().map(|v| v.to_str().unwrap().to_string()).unwrap_or("/".to_string()));
-    let items = use_state(|| Vec::<Item>::new());
-    let mut selected_item = use_state(|| Option::<Item>::None);
-    let mut view_mode = use_state(|| ViewMode::Grid);
+    let current_path = use_state(|| env::home_dir().map(|v| v.to_str().unwrap().to_string()).unwrap_or("/".to_string()));
+    let items = use_state(Vec::<Item>::new);
+    let selected_item = use_state(|| Option::<Item>::None);
+    let view_mode = use_state(|| ViewMode::Grid);
 
-    let mut show_uri_bar = use_state(|| false);
-    let mut uri_input = use_state(|| String::new());
-    let search_query = use_state(|| String::new());
+    let _show_uri_bar = use_state(|| false);
+    let mut uri_input = use_state(String::new);
+    let search_query = use_state(String::new);
 
     let cp = current_path.read().clone();
     let mut last_cp = use_state(|| cp.clone());
@@ -160,12 +159,12 @@ fn app() -> Element {
         uri_input.set(cp.clone());
     }
 
-    let mut pinned = use_state(|| Vec::<(String, String)>::new());
+    let pinned = use_state(Vec::<(String, String)>::new);
 
     let mut loaded = use_state(|| false);
     if !*loaded.read() {
         loaded.set(true);
-        load_dir(current_path.read().clone(), items.clone());
+        load_dir(current_path.read().clone(), items);
     }
 
     let sidebar = rect()
@@ -187,28 +186,28 @@ fn app() -> Element {
             HOME,
             &current_path,
             env::home_dir().map(|v| v.to_str().unwrap().to_string()).unwrap_or("/".to_string()),
-            items.clone(),
+            items,
         ))
         .child(sidebar_item(
             "Documents",
             DOCUMENT,
             &current_path,
             env::home_dir().map(|v| v.join("Documents").to_str().unwrap().to_string()).unwrap_or("/".to_string()),
-            items.clone(),
+            items,
         ))
         .child(sidebar_item(
             "Downloads",
             DOWNLOAD,
             &current_path,
             env::home_dir().map(|v| v.join("Downloads").to_str().unwrap().to_string()).unwrap_or("/".to_string()),
-            items.clone(),
+            items,
         ))
         .child(sidebar_item(
             "Pictures",
             PICTURE,
             &current_path,
             env::home_dir().map(|v| v.join("Pictures").to_str().unwrap().to_string()).unwrap_or("/".to_string()),
-            items.clone(),
+            items,
         ))
         .child(if !pinned.read().is_empty() {
             let el: Element = rect()
@@ -225,7 +224,7 @@ fn app() -> Element {
                     pinned
                         .read()
                         .iter()
-                        .map(|(name, path)| sidebar_item(name, PIN, &current_path, path.clone(), items.clone())),
+                        .map(|(name, path)| sidebar_item(name, PIN, &current_path, path.clone(), items)),
                 )
                 .into_element();
             el
@@ -234,7 +233,7 @@ fn app() -> Element {
             el
         });
 
-    let path_str = current_path.read().clone();
+    let _path_str = current_path.read().clone();
 
     let top_bar = rect()
         .height(Size::px(80.))
@@ -254,14 +253,14 @@ fn app() -> Element {
                         .corner_radius(8.)
                         .background(t.bg_card)
                         .on_press({
-                            let mut current = current_path.clone();
-                            let items = items.clone();
+                            let mut current = current_path;
+                            let items = items;
                             move |_| {
                                 let path = PathBuf::from(current.read().clone());
                                 if let Some(parent) = path.parent() {
                                     let new_path = parent.to_string_lossy().to_string();
                                     current.set(new_path.clone());
-                                    load_dir(new_path, items.clone());
+                                    load_dir(new_path, items);
                                 }
                             }
                         })
@@ -272,17 +271,17 @@ fn app() -> Element {
                         .horizontal()
                         .cross_align(Alignment::Center)
                         .spacing(8.)
-                        .child(Input::new(uri_input.clone()))
+                        .child(Input::new(uri_input))
                         .child(
                             Button::new()
                                 .on_press({
-                                    let mut current = current_path.clone();
-                                    let items = items.clone();
-                                    let uri = uri_input.clone();
+                                    let mut current = current_path;
+                                    let items = items;
+                                    let uri = uri_input;
                                     move |_| {
                                         let target = uri.read().clone();
                                         current.set(target.clone());
-                                        load_dir(target, items.clone());
+                                        load_dir(target, items);
                                     }
                                 })
                                 .child(label().text("Go").color(t.text_primary)),
@@ -300,17 +299,17 @@ fn app() -> Element {
                         .horizontal()
                         .cross_align(Alignment::Center)
                         .spacing(4.)
-                        .child(Input::new(search_query.clone()))
+                        .child(Input::new(search_query))
                         .child(
                             rect()
                                 .padding(8.)
                                 .corner_radius(8.)
                                 .background(t.bg_card)
                                 .on_press({
-                                    let items = items.clone();
-                                    let query = search_query.clone();
+                                    let items = items;
+                                    let query = search_query;
                                     move |_| {
-                                        perform_search(query.read().clone(), items.clone());
+                                        perform_search(query.read().clone(), items);
                                     }
                                 })
                                 .child(icon(SEARCH, 16., t.text_primary)),
@@ -322,7 +321,7 @@ fn app() -> Element {
                         .corner_radius(8.)
                         .background(if *view_mode.read() == ViewMode::Grid { t.bg_active } else { t.bg_card })
                         .on_press({
-                            let mut vm = view_mode.clone();
+                            let mut vm = view_mode;
                             move |_| vm.set(ViewMode::Grid)
                         })
                         .child(icon(
@@ -337,7 +336,7 @@ fn app() -> Element {
                         .corner_radius(8.)
                         .background(if *view_mode.read() == ViewMode::List { t.bg_active } else { t.bg_card })
                         .on_press({
-                            let mut vm = view_mode.clone();
+                            let mut vm = view_mode;
                             move |_| vm.set(ViewMode::List)
                         })
                         .child(icon(
@@ -352,8 +351,8 @@ fn app() -> Element {
                         .corner_radius(8.)
                         .background(t.primary_accent)
                         .on_press({
-                            let path_state = current_path.clone();
-                            let items_state = items.clone();
+                            let path_state = current_path;
+                            let items_state = items;
                             move |_| {
                                 let target_path = PathBuf::from(path_state.read().clone()).join("New Folder");
                                 let mut unique_path = target_path.clone();
@@ -364,7 +363,7 @@ fn app() -> Element {
                                     counter += 1;
                                 }
                                 let _ = std::fs::create_dir_all(&unique_path);
-                                load_dir(path_state.read().clone(), items_state.clone());
+                                load_dir(path_state.read().clone(), items_state);
                             }
                         })
                         .child(icon(PLUS, 16., t.bg_base)),
@@ -380,12 +379,12 @@ fn app() -> Element {
             .width(Size::fill())
             .padding(24.)
             .children(items_read.into_iter().map(|item| {
-                let mut path_state = current_path.clone();
-                let items_state = items.clone();
-                let mut sel_state = selected_item.clone();
+                let mut path_state = current_path;
+                let items_state = items;
+                let mut sel_state = selected_item;
                 let path = item.path.clone();
                 let is_folder = item.ty == ItemType::Folder;
-                let is_selected = sel_state.read().as_ref().map_or(false, |s| s.path == path);
+                let is_selected = sel_state.read().as_ref().is_some_and(|s| s.path == path);
                 let item_clone = item.clone();
 
                 let bg = if is_selected { t.bg_selected } else { Color::TRANSPARENT };
@@ -404,7 +403,7 @@ fn app() -> Element {
                         .on_press(move |_| {
                             if is_folder && is_selected {
                                 path_state.set(path.clone());
-                                load_dir(path.clone(), items_state.clone());
+                                load_dir(path.clone(), items_state);
                             }
                             sel_state.set(Some(item_clone.clone()));
                         })
@@ -432,7 +431,7 @@ fn app() -> Element {
                         .on_press(move |_| {
                             if is_folder && is_selected {
                                 path_state.set(path.clone());
-                                load_dir(path.clone(), items_state.clone());
+                                load_dir(path.clone(), items_state);
                             }
                             sel_state.set(Some(item_clone.clone()));
                         })
@@ -530,15 +529,15 @@ fn app() -> Element {
             )
             .child({
                 let s_path = sel.path.clone();
-                let mut path_state = current_path.clone();
-                let items_state = items.clone();
+                let mut path_state = current_path;
+                let items_state = items;
 
                 rect()
                     .margin((16., 0., 0., 0.))
                     .child(primary_button(if is_folder { "Open Directory" } else { "Open File" }, move || {
                         if is_folder {
                             path_state.set(s_path.clone());
-                            load_dir(s_path.clone(), items_state.clone());
+                            load_dir(s_path.clone(), items_state);
                         } else {
                             let _ = std::process::Command::new("xdg-open").arg(&s_path).spawn();
                         }
@@ -547,7 +546,7 @@ fn app() -> Element {
             })
             .child({
                 if is_folder {
-                    let mut pin_state = pinned.clone();
+                    let mut pin_state = pinned;
                     let s_name = sel.name.clone();
                     let s_path = sel.path.clone();
                     let is_pinned = pin_state.read().iter().any(|(_, p)| p == &s_path);
@@ -574,9 +573,9 @@ fn app() -> Element {
             })
             .child({
                 let s_path = sel.path.clone();
-                let mut path_state = current_path.clone();
-                let items_state = items.clone();
-                let mut sel_state = selected_item.clone();
+                let path_state = current_path;
+                let items_state = items;
+                let mut sel_state = selected_item;
 
                 rect()
                     .margin((16., 0., 0., 0.))
@@ -587,7 +586,7 @@ fn app() -> Element {
                             let _ = std::fs::remove_file(&s_path);
                         }
                         sel_state.set(None);
-                        load_dir(path_state.read().clone(), items_state.clone());
+                        load_dir(path_state.read().clone(), items_state);
                     }))
                     .into_element()
             })
@@ -615,7 +614,7 @@ fn sidebar_item(
     items_state: State<Vec<Item>>,
 ) -> Element {
     let t = use_app_theme();
-    let mut cp = current_path.clone();
+    let mut cp = *current_path;
     let tp = target_path.clone();
     let is_active = *cp.read() == tp;
 
@@ -631,7 +630,7 @@ fn sidebar_item(
         .margin((0., 0., 8., 0.))
         .on_press(move |_| {
             cp.set(tp.clone());
-            load_dir(tp.clone(), items_state.clone());
+            load_dir(tp.clone(), items_state);
         })
         .child(rect().margin((0., 12., 0., 0.)).child(icon(icon_svg, 16., t.text_primary)))
         .child(

@@ -53,7 +53,7 @@ fn ignore() -> Vec<Regex> {
     vec![Regex::new("node_modules/.+").unwrap(), Regex::new("target/.+").unwrap(), Regex::new(r"/\..+").unwrap()]
 }
 
-fn is_binary_file(path: &PathBuf) -> bool {
+fn is_binary_file(path: &Path) -> bool {
     if let Some(ext) = path.extension() {
         let ext = ext.to_string_lossy().to_lowercase();
         return matches!(ext.as_str(), "exe" | "bin" | "o" | "dll" | "so" | "dat" | "class" | "rmeta" | "rlib" | "d");

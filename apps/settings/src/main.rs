@@ -9,8 +9,9 @@ use {
 mod detail_pages;
 mod overview;
 mod pages;
+mod state;
 
-use {detail_pages::*, overview::overview_page};
+use {detail_pages::*, overview::overview_page, state::*};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Route {
@@ -201,77 +202,18 @@ fn app() -> impl IntoElement {
     let search_a11y_id = use_hook(AccessibilityId::new_unique);
     let search_focus = use_focus(search_a11y_id);
 
-    // Reactive shared system state
-    let wifi_power = use_state(|| true);
-    let bt_power = use_state(|| true);
-    let focus_mode = use_state(|| "off");
-    let brightness = use_state(|| 72.0);
-    let audio_info = HyprlandBackend.get_audio_info();
-    let volume = use_state(|| audio_info.volume);
-    let is_mute = use_state(|| audio_info.is_muted);
-    let battery_pct = use_state(|| {
-        let p = HyprlandBackend.get_power_info();
-        p.capacity.trim().trim_end_matches('%').parse::<u8>().unwrap_or(78)
-    });
+    // Centralized SettingsStore initialized and connected to daemon via IPC
+    let store = use_init_settings_store();
 
-    let battery_mode = use_state(|| "balanced");
-    let wallpaper_idx = use_state(|| 0usize);
-    let scrollbar_pref = use_state(|| 0usize);
-    let icon_size_pref = use_state(|| 1usize);
-
-    // Notification toggles
-    let notif_messages = use_state(|| true);
-    let notif_calendar = use_state(|| true);
-    let notif_mail = use_state(|| false);
-    let notif_photos = use_state(|| true);
-    let notif_weather = use_state(|| false);
-    let allow_notif = use_state(|| true);
-    let notif_style = use_state(|| 0usize);
-    let silence_sleep = use_state(|| true);
-
-    // Bluetooth devices
+    // Local UI peripheral state
     let kb_connected = use_state(|| true);
     let hp_connected = use_state(|| false);
     let tp_connected = use_state(|| true);
-    let bt_discoverable = use_state(|| true);
 
-    // Wi-Fi preferences
-    let ask_to_join = use_state(|| true);
-    let limit_tracking = use_state(|| true);
-
-    // Display preferences
-    let auto_brightness = use_state(|| true);
-    let true_tone = use_state(|| true);
-    let res_choice = use_state(|| ResolutionChoice::Default);
-    let night_shift = use_state(|| false);
-    let night_shift_mode = use_state(|| 0usize);
-    let color_temp = use_state(|| 30.0);
-
-    // Sound preferences
-    let feedback_on_change = use_state(|| true);
-
-    // Focus preferences
+    // Local schedule preferences
     let work_sched = use_state(|| true);
     let sleep_sched = use_state(|| true);
     let share_devices = use_state(|| true);
-
-    // General preferences
-    let time_24h = use_state(|| true);
-    let auto_updates = use_state(|| true);
-
-    // Storage preferences
-    let empty_trash_auto = use_state(|| true);
-    let save_cloud = use_state(|| false);
-
-    // Battery preferences
-    let opt_charging = use_state(|| true);
-
-    // Accessibility preferences
-    let text_size = use_state(|| 40.0);
-    let reduce_motion = use_state(|| false);
-    let increase_contrast = use_state(|| false);
-    let reduce_transparency = use_state(|| false);
-    let screen_reader = use_state(|| false);
 
     let query_str = search_query.read().to_lowercase();
     let filtered_routes: Vec<RouteInfo> = ALL_NAV_ROUTES
@@ -296,11 +238,11 @@ fn app() -> impl IntoElement {
         .content(Content::Flex)
         .background(t.bg)
         .on_global_key_down({
-            let mut current_route = current_route.clone();
-            let mut search_query = search_query.clone();
-            let mut focused_nav_idx = focused_nav_idx.clone();
-            let search_focus = search_focus.clone();
-            let search_a11y_id = search_a11y_id.clone();
+            let mut current_route = current_route;
+            let mut search_query = search_query;
+            let mut focused_nav_idx = focused_nav_idx;
+            let search_focus = search_focus;
+            let search_a11y_id = search_a11y_id;
             let routes = filtered_routes.clone();
 
             move |e: Event<KeyboardEventData>| {
@@ -349,12 +291,11 @@ fn app() -> impl IntoElement {
                             search_a11y_id.request_unfocus();
                         }
                     }
-                    Key::Character(s) if s == " " && !is_search_focused => {
-                        if count > 0 {
+                    Key::Character(s) if s == " " && !is_search_focused
+                        && count > 0 => {
                             let idx = (*focused_nav_idx.read()).min(count - 1);
                             current_route.set(routes[idx].route);
                         }
-                    }
                     _ => {}
                 }
             }
@@ -372,7 +313,7 @@ fn app() -> impl IntoElement {
                 // Brand avatar row matching ui_demo.html
                 .child(brand_row("F", "Flora", "Studio · connected"))
                 // Search bar
-                .child(sidebar_search(search_query.clone(), "Search"))
+                .child(sidebar_search(search_query, "Search"))
                 // Scrollable nav list
                 .child(ScrollView::new().width(Size::fill()).height(Size::fill()).child(
                     rect().width(Size::fill()).vertical().spacing(2.).children({
@@ -394,7 +335,7 @@ fn app() -> impl IntoElement {
 
                             let is_active = *current_route.read() == item.route;
                             let route_val = item.route;
-                            let mut cr = current_route.clone();
+                            let mut cr = current_route;
 
                             elements.push(
                                 nav_item(item.icon_svg, item.title, is_active, move || cr.set(route_val)).into_element(),
@@ -412,7 +353,7 @@ fn app() -> impl IntoElement {
                         .border(Border::new().width(1.).fill(t.border))
                         .child({
                             let is_active = *current_route.read() == Route::About;
-                            let mut cr = current_route.clone();
+                            let mut cr = current_route;
                             nav_item(ABOUT, "About", is_active, move || cr.set(Route::About))
                         }),
                 ),
@@ -441,7 +382,7 @@ fn app() -> impl IntoElement {
                                 .spacing(10.)
                                 .child({
                                     if *current_route.read() != Route::Overview {
-                                        let mut cr = current_route.clone();
+                                        let mut cr = current_route;
                                         rect()
                                             .cursor(CursorIcon::Pointer)
                                             .padding((4., 8.))
@@ -481,86 +422,56 @@ fn app() -> impl IntoElement {
                         rect().width(Size::fill()).padding((30., 34., 64., 34.)).child({
                             match *current_route.read() {
                                 Route::Overview => overview_page(
-                                    current_route.clone(),
-                                    theme_state.clone(),
-                                    wifi_power.clone(),
-                                    bt_power.clone(),
-                                    focus_mode.clone(),
-                                    brightness.clone(),
-                                    volume.clone(),
-                                    battery_pct.clone(),
-                                    battery_mode.clone(),
-                                    wallpaper_idx.clone(),
-                                    notif_messages.clone(),
-                                    notif_calendar.clone(),
-                                    notif_mail.clone(),
+                                    current_route,
+                                    theme_state,
+                                    store,
                                 )
                                 .into_element(),
                                 Route::Appearance => appearance_detail_page(
-                                    theme_state.clone(),
-                                    wallpaper_idx.clone(),
-                                    scrollbar_pref.clone(),
-                                    icon_size_pref.clone(),
+                                    theme_state,
+                                    store,
                                 )
                                 .into_element(),
                                 Route::Wifi => {
-                                    wifi_detail_page(wifi_power.clone(), ask_to_join.clone(), limit_tracking.clone())
+                                    wifi_detail_page(store)
                                         .into_element()
                                 }
                                 Route::Bluetooth => bluetooth_detail_page(
-                                    bt_power.clone(),
-                                    bt_discoverable.clone(),
-                                    kb_connected.clone(),
-                                    hp_connected.clone(),
-                                    tp_connected.clone(),
+                                    store,
+                                    kb_connected,
+                                    hp_connected,
+                                    tp_connected,
                                 )
                                 .into_element(),
                                 Route::Display => display_detail_page(
-                                    brightness.clone(),
-                                    auto_brightness.clone(),
-                                    true_tone.clone(),
-                                    res_choice.clone(),
-                                    night_shift.clone(),
-                                    night_shift_mode.clone(),
-                                    color_temp.clone(),
+                                    store,
                                 )
                                 .into_element(),
                                 Route::Sound => {
-                                    sound_detail_page(volume.clone(), is_mute.clone(), feedback_on_change.clone())
+                                    sound_detail_page(store)
                                         .into_element()
                                 }
                                 Route::Focus => focus_detail_page(
-                                    focus_mode.clone(),
-                                    work_sched.clone(),
-                                    sleep_sched.clone(),
-                                    share_devices.clone(),
+                                    store,
+                                    work_sched,
+                                    sleep_sched,
+                                    share_devices,
                                 )
                                 .into_element(),
                                 Route::Notifications => notifications_detail_page(
-                                    allow_notif.clone(),
-                                    notif_style.clone(),
-                                    notif_messages.clone(),
-                                    notif_calendar.clone(),
-                                    notif_mail.clone(),
-                                    notif_photos.clone(),
-                                    notif_weather.clone(),
-                                    silence_sleep.clone(),
+                                    store,
                                 )
                                 .into_element(),
-                                Route::General => general_detail_page(time_24h.clone(), auto_updates.clone()).into_element(),
+                                Route::General => general_detail_page(store).into_element(),
                                 Route::Storage => {
-                                    storage_detail_page(empty_trash_auto.clone(), save_cloud.clone()).into_element()
+                                    storage_detail_page(store).into_element()
                                 }
                                 Route::Battery => {
-                                    battery_detail_page(battery_pct.clone(), battery_mode.clone(), opt_charging.clone())
+                                    battery_detail_page(store)
                                         .into_element()
                                 }
                                 Route::Accessibility => accessibility_detail_page(
-                                    text_size.clone(),
-                                    reduce_motion.clone(),
-                                    increase_contrast.clone(),
-                                    reduce_transparency.clone(),
-                                    screen_reader.clone(),
+                                    store,
                                 )
                                 .into_element(),
                                 Route::About => about_detail_page().into_element(),

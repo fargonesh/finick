@@ -359,8 +359,8 @@ impl Component for Network {
 
         if !*loaded.read() {
             loaded.set(true);
-            let mut state_clone = network_state.clone();
-            let mut loading_clone = is_loading.clone();
+            let mut state_clone = network_state;
+            let mut loading_clone = is_loading;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<NetworkInfo>();
 
             std::thread::spawn(move || {
@@ -437,9 +437,9 @@ impl Component for Network {
                                         Switch::new()
                                             .toggled(wifi_on)
                                             .on_toggle({
-                                                let mut ns = network_state.clone();
-                                                let mut l = loaded.clone();
-                                                let mut ld = is_loading.clone();
+                                                let mut ns = network_state;
+                                                let mut l = loaded;
+                                                let mut ld = is_loading;
                                                 move |_| {
                                                     let next_val = !wifi_on;
                                                     let mut curr = ns.read().clone();
@@ -513,8 +513,8 @@ impl Component for Network {
                                     .spacing(8.)
                                     .child(
                                         secondary_button(if loading { "Scanning..." } else { "Scan & Refresh" }, {
-                                            let mut l = loaded.clone();
-                                            let mut ld = is_loading.clone();
+                                            let mut l = loaded;
+                                            let mut ld = is_loading;
                                             move || {
                                                 ld.set(true);
                                                 l.set(false);
@@ -576,8 +576,8 @@ impl Component for Network {
                                             let is_conn = net.connected;
                                             let sig = net.signal;
                                             let sec = net.security.clone();
-                                            let l = loaded.clone();
-                                            let ld = is_loading.clone();
+                                            let l = loaded;
+                                            let ld = is_loading;
 
                                             rect()
                                                 .key(net.ssid.clone())
@@ -634,8 +634,8 @@ impl Component for Network {
                                                         .child(
                                                             secondary_button(if is_conn { "Disconnect" } else { "Connect" }, {
                                                                 let ssid_c = ssid.clone();
-                                                                let mut l_c = l.clone();
-                                                                let mut ld_c = ld.clone();
+                                                                let mut l_c = l;
+                                                                let mut ld_c = ld;
                                                                 move || {
                                                                     let s = ssid_c.clone();
                                                                     ld_c.set(true);
@@ -696,8 +696,8 @@ impl Component for Network {
                                             let ssid = net.ssid.clone();
                                             let is_conn = net.connected;
                                             let sec = net.security.clone();
-                                            let l = loaded.clone();
-                                            let ld = is_loading.clone();
+                                            let l = loaded;
+                                            let ld = is_loading;
 
                                             rect()
                                                 .key(format!("known-{}", net.ssid))
@@ -747,8 +747,8 @@ impl Component for Network {
                                                         .child(
                                                             secondary_button(if is_conn { "Disconnect" } else { "Connect" }, {
                                                                 let ssid_c = ssid.clone();
-                                                                let mut l_c = l.clone();
-                                                                let mut ld_c = ld.clone();
+                                                                let mut l_c = l;
+                                                                let mut ld_c = ld;
                                                                 move || {
                                                                     let s = ssid_c.clone();
                                                                     ld_c.set(true);
@@ -767,8 +767,8 @@ impl Component for Network {
                                                         .child(
                                                             secondary_button("Forget", {
                                                                 let ssid_c = ssid.clone();
-                                                                let mut l_c = l.clone();
-                                                                let mut ld_c = ld.clone();
+                                                                let mut l_c = l;
+                                                                let mut ld_c = ld;
                                                                 move || {
                                                                     let s = ssid_c.clone();
                                                                     ld_c.set(true);
@@ -825,8 +825,8 @@ impl Component for Network {
                                             let vpn_clone = vpn.clone();
                                             let is_conn = vpn.connected;
                                             let ip_str = vpn.ip_address.clone().unwrap_or_else(|| "No IP assigned".to_string());
-                                            let l = loaded.clone();
-                                            let ld = is_loading.clone();
+                                            let l = loaded;
+                                            let ld = is_loading;
 
                                             rect()
                                                 .key(format!("vpn-{}", vpn.interface))
@@ -885,8 +885,8 @@ impl Component for Network {
                                                         .child(
                                                             secondary_button(if is_conn { "Disconnect" } else { "Connect" }, {
                                                                 let v = vpn_clone.clone();
-                                                                let mut l_c = l.clone();
-                                                                let mut ld_c = ld.clone();
+                                                                let mut l_c = l;
+                                                                let mut ld_c = ld;
                                                                 move || {
                                                                     let v_act = v.clone();
                                                                     ld_c.set(true);
