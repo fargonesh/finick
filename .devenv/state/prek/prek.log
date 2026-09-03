@@ -1,10 +1,10 @@
-2026-08-31T00:09:58.282820Z DEBUG prek: 0.3.11
-2026-08-31T00:09:58.282855Z DEBUG Args: ["/nix/store/py2m9vglskggcyyarm0nha16siw346af-prek-0.3.11/bin/prek", "install", "-c", ".pre-commit-config.yaml", "-t", "pre-commit"]
-2026-08-31T00:09:58.282930Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/bin/git config --includes --null --get core.hooksPath`
-2026-08-31T00:09:58.285161Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/bin/git config --get core.sharedRepository`
-2026-08-31T00:09:58.287917Z TRACE get_root: close time.busy=1.42ms time.idle=5.00µs
-2026-08-31T00:09:58.287954Z DEBUG Git root: /home/flora/Projects/finick
-2026-08-31T00:09:58.287960Z DEBUG Loading project configuration path=.pre-commit-config.yaml
-2026-08-31T00:09:58.288661Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/bin/git rev-parse --git-path hooks`
-2026-08-31T00:09:58.290553Z TRACE Include selectors: ``
-2026-08-31T00:09:58.290576Z TRACE Skip selectors: ``
+2026-09-03T01:25:48.145379Z DEBUG prek: 0.3.11
+2026-09-03T01:25:48.145403Z DEBUG Args: ["/nix/store/py2m9vglskggcyyarm0nha16siw346af-prek-0.3.11/bin/prek", "install", "-c", ".pre-commit-config.yaml", "-t", "pre-commit"]
+2026-09-03T01:25:48.145478Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/bin/git config --includes --null --get core.hooksPath`
+2026-09-03T01:25:48.146510Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/bin/git config --get core.sharedRepository`
+2026-09-03T01:25:48.148123Z TRACE get_root: close time.busy=779µs time.idle=2.15µs
+2026-09-03T01:25:48.148151Z DEBUG Git root: /home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick
+2026-09-03T01:25:48.148157Z DEBUG Loading project configuration path=.pre-commit-config.yaml
+2026-09-03T01:25:48.148650Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/bin/git rev-parse --git-path hooks`
+2026-09-03T01:25:48.149633Z TRACE Include selectors: ``
+2026-09-03T01:25:48.149642Z TRACE Skip selectors: ``
