@@ -56,6 +56,15 @@ pub fn responsive_stack(
     }
 }
 
+pub fn grid2(children: impl IntoIterator<Item = impl IntoElement>) -> impl IntoElement {
+    rect()
+        .width(Size::fill())
+        .horizontal()
+        .spacing(GAP)
+        .children(children)
+        .content(Content::Flex)
+}
+
 pub fn responsive_view<F, T>(breakpoint: f32, mut render: F) -> impl IntoElement
 where
     F: FnMut(bool) -> T,

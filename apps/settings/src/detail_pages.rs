@@ -1,6 +1,8 @@
 use freya::prelude::*;
 use ipsea::settings::SettingKey;
+use system::{DisplayInfo, SystemBackend};
 use ui::*;
+use ui::displays_mock_reorderable;
 use crate::state::*;
 
 /// 2-column grid container helper matching .grid2 in ui_demo.html
@@ -430,6 +432,26 @@ pub fn display_detail_page(store: SettingsStore) -> impl IntoElement {
     let is_ns_locked = ns_lock.is_some();
     let ct_lock = store.lock_label(&SettingKey::DisplayColorTemp);
     let is_ct_locked = ct_lock.is_some();
+    // Arrangement state — top-level hooks for stable order
+    let mut displays: State<Option<Vec<DisplayInfo>>> = use_state(|| None);
+    let mut loaded = use_state(|| false);
+    let mut order_status: State<Option<Result<(), String>>> = use_state(|| None);
+    if !*loaded.read() {
+        loaded.set(true);
+        let mut ds = displays;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        std::thread::spawn(move || {
+            let d = system::HyprlandBackend.get_displays();
+            let _ = tx.send(d);
+        });
+        freya::prelude::spawn(async move {
+            if let Some(d) = rx.recv().await {
+                ds.set(Some(d));
+            }
+        });
+    }
+    let t = use_app_theme();
+    let is_arrangement_locked = is_res_locked;
 
     rect()
         .width(Size::fill())
@@ -568,15 +590,112 @@ pub fn display_detail_page(store: SettingsStore) -> impl IntoElement {
                             ),
                     ]),
                 )
-                // Wide: Arrangement
-                .child(
-                    tile()
-                        .child(tile_head(None, "Arrangement", None::<String>))
-                        .child(displays_mock(vec![
-                            DisplayMockItem { name: "Studio Display".into(), height_px: 60. },
-                            DisplayMockItem { name: "Built-in Display".into(), height_px: 44. },
-                        ])),
-                ),
+                // Wide: Arrangement — interactive reorderable
+                .child({
+                    let displays_len = displays.read().as_ref().map(|v| v.len()).unwrap_or(0);
+                    let status_chip_text: Option<Element> = match &*order_status.read() {
+                        Some(Ok(())) => Some(status_chip("Order saved", false, None).into_element()),
+                        Some(Err(e)) => {
+                            let msg = if e.len() > 48 { format!("{}…", &e[..48]) } else { e.clone() };
+                            Some(status_chip(format!("Error: {msg}"), true, None).into_element())
+                        }
+                        None => None,
+                    };
+                    let header_right: Option<Element> = {
+                        let lock = res_lock.clone().map(|l| lock_badge(l).into_element());
+                        match (lock, status_chip_text) {
+                            (Some(l), Some(s)) => Some(
+                                rect()
+                                    .horizontal()
+                                    .cross_align(Alignment::Center)
+                                    .spacing(8.)
+                                    .child(l)
+                                    .child(s)
+                                    .into_element(),
+                            ),
+                            (Some(l), None) => Some(l),
+                            (None, Some(s)) => Some(s),
+                            (None, None) => None,
+                        }
+                    };
+                    let arrangement_tile = tile().child(tile_head(None, "Arrangement", header_right))
+                        .child({
+                            if displays.read().is_none() {
+                                tile_sub("Scanning displays…").into_element()
+                            } else if displays_len == 0 {
+                                rect()
+                                    .width(Size::fill())
+                                    .center()
+                                    .padding((18., 12.))
+                                    .child(
+                                        rect()
+                                            .vertical()
+                                            .cross_align(Alignment::Center)
+                                            .spacing(6.)
+                                            .child(icon(DISPLAY, 20., t.text_dim))
+                                            .child(label().font_size(12.).color(t.text_dim).text("No displays detected")),
+                                    )
+                                    .into_element()
+                            } else {
+                                let items: Vec<DisplayMockItem> = displays
+                                    .read()
+                                    .as_ref()
+                                    .map(|v| {
+                                        v.iter()
+                                            .enumerate()
+                                            .map(|(i, d)| DisplayMockItem {
+                                                name: d.name.clone(),
+                                                height_px: 60. - (i as f32 * 8.).min(28.),
+                                            })
+                                            .collect::<Vec<_>>()
+                                    })
+                                    .unwrap_or_default();
+                                let on_swap = {
+                                    let mut displays_state = displays;
+                                    let mut status_state = order_status;
+                                    let locked = is_arrangement_locked;
+                                    EventHandler::new(move |(from, to): (usize, usize)| {
+                                        if locked {
+                                            return;
+                                        }
+                                        let len = displays_state.read().as_ref().map(|v| v.len()).unwrap_or(0);
+                                        if from >= len || to >= len {
+                                            return;
+                                        }
+                                        let mut new_order = displays_state.read().as_ref().unwrap().clone();
+                                        new_order.swap(from, to);
+                                        let prev = displays_state.read().as_ref().unwrap().clone();
+                                        displays_state.set(Some(new_order.clone()));
+                                        status_state.set(None);
+                                        let names: Vec<String> = new_order.iter().map(|d| d.name.clone()).collect();
+                                        freya::prelude::spawn(async move {
+                                            let res = tokio::task::spawn_blocking(move || {
+                                                system::HyprlandBackend.set_display_order(&names)
+                                            })
+                                            .await;
+                                            match res {
+                                                Ok(Ok(())) => status_state.set(Some(Ok(()))),
+                                                Ok(Err(e)) => {
+                                                    displays_state.set(Some(prev));
+                                                    status_state.set(Some(Err(e)));
+                                                }
+                                                Err(e) => {
+                                                    displays_state.set(Some(prev));
+                                                    status_state.set(Some(Err(format!("join error: {e}"))));
+                                                }
+                                            }
+                                        });
+                                    })
+                                };
+                                rect()
+                                    .width(Size::fill())
+                                    .opacity(if is_arrangement_locked { 0.45 } else { 1.0 })
+                                    .child(displays_mock_reorderable(items, on_swap))
+                                    .into_element()
+                            }
+                        });
+                    arrangement_tile.into_element()
+                }),
         )
 }
 

@@ -1,6 +1,8 @@
 use freya::prelude::*;
 use ipsea::settings::SettingKey;
+use system::WiredInfo;
 use ui::*;
+use crate::pages::about::AboutInfo;
 use crate::state::SettingsStore;
 
 /// Responsive overview page for the settings app.
@@ -8,6 +10,8 @@ pub fn overview_page(
     current_route: State<crate::Route>,
     theme_state: State<AppTheme>,
     store: SettingsStore,
+    wired: Option<WiredInfo>,
+    about: AboutInfo,
 ) -> impl IntoElement {
     let t = use_app_theme();
 
@@ -159,6 +163,37 @@ pub fn overview_page(
                         .on_press(move |_| route.set(crate::Route::Wifi))
                         .child(label().font_size(12.).color(t.text_dim).text("→")),
                 ))
+        };
+
+        let wired_card = {
+            tile()
+                .child(tile_head(None, "Wired", None::<String>))
+                .child(match wired.clone() {
+                    Some(info) => {
+                        let name = if info.profile.trim().is_empty() {
+                            info.interface.clone()
+                        } else {
+                            info.profile.clone()
+                        };
+                        let detail = if info.ip_address.trim().is_empty() {
+                            info.interface.clone()
+                        } else {
+                            format!("{} · {}", info.interface, info.ip_address)
+                        };
+                        setting_row(
+                            name,
+                            Some(detail),
+                            false,
+                            label().font_size(12.).color(t.accent).text("Connected"),
+                        )
+                    }
+                    None => setting_row(
+                        "No wired connection",
+                        None::<String>,
+                        false,
+                        label().font_size(12.).color(t.text_dim).text(""),
+                    ),
+                })
         };
 
         let bluetooth_card = {
@@ -455,7 +490,7 @@ pub fn overview_page(
                             .child(label().font_size(12.).color(t.text_dim).text("→")),
                     ),
                 ))
-                .child(setting_row("Version", Some("14.6.1 (Finick OS)"), false, label().font_size(12.).color(t.text_dim).text("Linux 6.x")))
+                .child(setting_row("Version", Some(about.os_version.clone()), false, label().font_size(12.).color(t.text_dim).text(about.kernel.clone())))
                 .child(setting_row("Software", None::<String>, true, status_chip("Up to date", false, None)))
         };
 
@@ -466,6 +501,7 @@ pub fn overview_page(
                 .spacing(GAP)
                 .child(appearance_card)
                 .child(wifi_card)
+                .child(wired_card)
                 .child(bluetooth_card)
                 .child(focus_card)
                 .child(display_card)
@@ -486,7 +522,14 @@ pub fn overview_page(
                         .spacing(GAP)
                         .content(Content::Flex)
                         .child(rect().width(Size::flex(1.)).child(appearance_card))
-                        .child(rect().width(Size::flex(1.)).child(wifi_card)),
+                        .child(
+                            rect()
+                                .width(Size::flex(1.))
+                                .vertical()
+                                .spacing(GAP)
+                                .child(wifi_card)
+                                .child(wired_card),
+                        ),
                 )
                 .child(
                     rect()

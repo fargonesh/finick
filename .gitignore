@@ -11,6 +11,8 @@ result-*
 
 # IDE
 .vscode/
+.opencode/
+.omo/
 .idea/
 
 # OS

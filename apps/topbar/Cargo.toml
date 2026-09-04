@@ -1,0 +1,22 @@
+[package]
+name = "topbar"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+config = { path = "../../libs/config" }
+ipsea = { path = "../../libs/ipc", package = "ipc" }
+ui = { version = "0.1.0", path = "../../libs/ui" }
+system = { path = "../../libs/system" }
+chrono = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+freya = { git = "https://github.com/marc2332/freya", branch = "main", features = [
+    "all",
+] }
+tokio = { version = "1.43", features = ["full"] }
+
+[[bin]]
+name = "topbar"
+path = "src/main.rs"

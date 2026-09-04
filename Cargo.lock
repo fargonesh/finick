@@ -7253,6 +7253,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
+name = "topbar"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "config",
+ "freya",
+ "ipc",
+ "serde",
+ "serde_json",
+ "system",
+ "tokio",
+ "ui",
+]
+
+[[package]]
 name = "torin"
 version = "0.5.0-rc.4"
 source = "git+https://github.com/marc2332/freya?branch=main#b647af7f4c393fcc12c44eccf7275a4c4b470348"
@@ -7378,9 +7393,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-language"
-version = "0.1.8"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca0d1bf6fdd806e43ae5198f82f527056d359def39e54e67a0f478ac09dac081"
+checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 
 [[package]]
 name = "try-lock"

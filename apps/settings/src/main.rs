@@ -194,6 +194,10 @@ fn app() -> impl IntoElement {
     let initial_theme = get_theme();
     let theme_state = use_init_app_theme(initial_theme);
     let t = use_app_theme();
+    let wired_info = use_state(|| HyprlandBackend.get_wired_info());
+    let displays = use_state(|| HyprlandBackend.get_displays());
+    let about_info = use_state(|| crate::pages::about::fetch_about_info());
+    let update_task = use_future(check_updates::check_system_updates);
 
     let current_route = use_state(|| Route::Overview);
     let search_query = use_state(String::new);
@@ -204,11 +208,6 @@ fn app() -> impl IntoElement {
 
     // Centralized SettingsStore initialized and connected to daemon via IPC
     let store = use_init_settings_store();
-
-    // Local UI peripheral state
-    let kb_connected = use_state(|| true);
-    let hp_connected = use_state(|| false);
-    let tp_connected = use_state(|| true);
 
     // Local schedule preferences
     let work_sched = use_state(|| true);
