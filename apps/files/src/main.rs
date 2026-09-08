@@ -55,19 +55,20 @@ fn load_dir(path: String, mut items_state: State<Vec<Item>>) {
 
         let mut result: Vec<Item> = inner_rx.into_iter().collect();
         if (result.is_empty() || res.is_err())
-            && let Ok(entries) = std::fs::read_dir(&path) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    let md = entry.metadata().ok();
-                    let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                    let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
-                    result.push(Item {
-                        ty: if is_dir { ItemType::Folder } else { ItemType::File },
-                        name: entry.file_name().to_string_lossy().to_string(),
-                        path: entry.path().to_string_lossy().to_string(),
-                        size,
-                    });
-                }
+            && let Ok(entries) = std::fs::read_dir(&path)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let md = entry.metadata().ok();
+                let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
+                result.push(Item {
+                    ty: if is_dir { ItemType::Folder } else { ItemType::File },
+                    name: entry.file_name().to_string_lossy().to_string(),
+                    path: entry.path().to_string_lossy().to_string(),
+                    size,
+                });
             }
+        }
 
         result.sort_by(|a, b| {
             if a.ty == ItemType::Folder && b.ty == ItemType::File {
@@ -221,10 +222,7 @@ fn app() -> Element {
                         .text("PINNED"),
                 )
                 .children(
-                    pinned
-                        .read()
-                        .iter()
-                        .map(|(name, path)| sidebar_item(name, PIN, &current_path, path.clone(), items)),
+                    pinned.read().iter().map(|(name, path)| sidebar_item(name, PIN, &current_path, path.clone(), items)),
                 )
                 .into_element();
             el
@@ -267,25 +265,20 @@ fn app() -> Element {
                         .child(icon(ARROW_LEFT, 16., t.text_primary)),
                 )
                 .child(
-                    rect()
-                        .horizontal()
-                        .cross_align(Alignment::Center)
-                        .spacing(8.)
-                        .child(Input::new(uri_input))
-                        .child(
-                            Button::new()
-                                .on_press({
-                                    let mut current = current_path;
-                                    let items = items;
-                                    let uri = uri_input;
-                                    move |_| {
-                                        let target = uri.read().clone();
-                                        current.set(target.clone());
-                                        load_dir(target, items);
-                                    }
-                                })
-                                .child(label().text("Go").color(t.text_primary)),
-                        ),
+                    rect().horizontal().cross_align(Alignment::Center).spacing(8.).child(Input::new(uri_input)).child(
+                        Button::new()
+                            .on_press({
+                                let mut current = current_path;
+                                let items = items;
+                                let uri = uri_input;
+                                move |_| {
+                                    let target = uri.read().clone();
+                                    current.set(target.clone());
+                                    load_dir(target, items);
+                                }
+                            })
+                            .child(label().text("Go").color(t.text_primary)),
+                    ),
                 ),
         )
         .child(
@@ -295,25 +288,20 @@ fn app() -> Element {
                 .main_align(Alignment::End)
                 .spacing(8.)
                 .child(
-                    rect()
-                        .horizontal()
-                        .cross_align(Alignment::Center)
-                        .spacing(4.)
-                        .child(Input::new(search_query))
-                        .child(
-                            rect()
-                                .padding(8.)
-                                .corner_radius(8.)
-                                .background(t.bg_card)
-                                .on_press({
-                                    let items = items;
-                                    let query = search_query;
-                                    move |_| {
-                                        perform_search(query.read().clone(), items);
-                                    }
-                                })
-                                .child(icon(SEARCH, 16., t.text_primary)),
-                        ),
+                    rect().horizontal().cross_align(Alignment::Center).spacing(4.).child(Input::new(search_query)).child(
+                        rect()
+                            .padding(8.)
+                            .corner_radius(8.)
+                            .background(t.bg_card)
+                            .on_press({
+                                let items = items;
+                                let query = search_query;
+                                move |_| {
+                                    perform_search(query.read().clone(), items);
+                                }
+                            })
+                            .child(icon(SEARCH, 16., t.text_primary)),
+                    ),
                 )
                 .child(
                     rect()

@@ -2,9 +2,8 @@ use {
     config::{self, SettingsPayload},
     ipsea::{
         settings::{
-            ChangeSource, DenialReason, LockSource, LockState, SettingEntry, SettingKey,
-            SettingValue, SettingsEvent, SettingsRequest, SettingsResponse, SubscriptionFilter,
-            SETTINGS_SOCKET_NAME,
+            ChangeSource, DenialReason, LockSource, LockState, SettingEntry, SettingKey, SettingValue, SettingsEvent,
+            SettingsRequest, SettingsResponse, SubscriptionFilter, SETTINGS_SOCKET_NAME,
         },
         start_server,
     },
@@ -129,17 +128,11 @@ pub fn is_locked(payload: &SettingsPayload, key: &SettingKey) -> bool {
 /// Retrieves the typed `LockState` for a setting key.
 pub fn get_lock_state(payload: &SettingsPayload, key: &SettingKey) -> LockState {
     let path = setting_key_to_config_path(key);
-    let lock = payload
-        .get_lock(path)
-        .or_else(|| payload.get_lock(key.as_str()));
+    let lock = payload.get_lock(path).or_else(|| payload.get_lock(key.as_str()));
 
     if let Some(l) = lock {
         if l.is_locked() {
-            let reason = l
-                .message
-                .as_deref()
-                .unwrap_or("Setting is locked by system policy")
-                .to_string();
+            let reason = l.message.as_deref().unwrap_or("Setting is locked by system policy").to_string();
             if l.is_nix_locked() {
                 return LockState::nix(reason);
             } else if let Some(config::LockReason::SystemPolicy) = l.reason {
@@ -153,11 +146,7 @@ pub fn get_lock_state(payload: &SettingsPayload, key: &SettingKey) -> LockState 
 }
 
 /// Constructs a full `SettingEntry` from the in-memory `SettingsPayload` and system status.
-pub fn get_setting_entry(
-    payload: &SettingsPayload,
-    backend: &HyprlandBackend,
-    key: &SettingKey,
-) -> Option<SettingEntry> {
+pub fn get_setting_entry(payload: &SettingsPayload, backend: &HyprlandBackend, key: &SettingKey) -> Option<SettingEntry> {
     let lock_state = get_lock_state(payload, key);
     let val: Option<SettingValue> = match key {
         SettingKey::ThemeMode => {
@@ -168,117 +157,49 @@ pub fn get_setting_entry(
             };
             Some(SettingValue::String(mode_str.to_string()))
         }
-        SettingKey::AccentColor => {
-            Some(SettingValue::String((*payload.personalization.appearance.accent_color).clone()))
-        }
-        SettingKey::Wallpaper => {
-            Some(SettingValue::Int(*payload.personalization.appearance.wallpaper_idx as i64))
-        }
-        SettingKey::Scrollbars => {
-            Some(SettingValue::Int(*payload.personalization.appearance.scrollbar_pref as i64))
-        }
-        SettingKey::IconSize => {
-            Some(SettingValue::Int(*payload.personalization.appearance.icon_size_pref as i64))
-        }
-        SettingKey::WindowGapsIn => {
-            Some(SettingValue::Int(*payload.personalization.appearance.gaps_in as i64))
-        }
-        SettingKey::WindowGapsOut => {
-            Some(SettingValue::Int(*payload.personalization.appearance.gaps_out as i64))
-        }
-        SettingKey::WindowBorderSize => {
-            Some(SettingValue::Int(*payload.personalization.appearance.border_size as i64))
-        }
-        SettingKey::WifiEnabled => {
-            Some(SettingValue::Bool(*payload.connectivity.wifi.enabled))
-        }
-        SettingKey::WifiNetwork => {
-            Some(SettingValue::Bool(*payload.connectivity.wifi.ask_to_join))
-        }
-        SettingKey::BluetoothEnabled => {
-            Some(SettingValue::Bool(*payload.connectivity.bluetooth.enabled))
-        }
-        SettingKey::AudioVolume => {
-            Some(SettingValue::Int(*payload.personalization.sound.volume as i64))
-        }
-        SettingKey::AudioMuted => {
-            Some(SettingValue::Bool(*payload.personalization.sound.muted))
-        }
-        SettingKey::AudioDefaultSink => {
-            Some(SettingValue::String(backend.get_audio_info().default_sink_name))
-        }
+        SettingKey::AccentColor => Some(SettingValue::String((*payload.personalization.appearance.accent_color).clone())),
+        SettingKey::Wallpaper => Some(SettingValue::Int(*payload.personalization.appearance.wallpaper_idx as i64)),
+        SettingKey::Scrollbars => Some(SettingValue::Int(*payload.personalization.appearance.scrollbar_pref as i64)),
+        SettingKey::IconSize => Some(SettingValue::Int(*payload.personalization.appearance.icon_size_pref as i64)),
+        SettingKey::WindowGapsIn => Some(SettingValue::Int(*payload.personalization.appearance.gaps_in as i64)),
+        SettingKey::WindowGapsOut => Some(SettingValue::Int(*payload.personalization.appearance.gaps_out as i64)),
+        SettingKey::WindowBorderSize => Some(SettingValue::Int(*payload.personalization.appearance.border_size as i64)),
+        SettingKey::WifiEnabled => Some(SettingValue::Bool(*payload.connectivity.wifi.enabled)),
+        SettingKey::WifiNetwork => Some(SettingValue::Bool(*payload.connectivity.wifi.ask_to_join)),
+        SettingKey::BluetoothEnabled => Some(SettingValue::Bool(*payload.connectivity.bluetooth.enabled)),
+        SettingKey::AudioVolume => Some(SettingValue::Int(*payload.personalization.sound.volume as i64)),
+        SettingKey::AudioMuted => Some(SettingValue::Bool(*payload.personalization.sound.muted)),
+        SettingKey::AudioDefaultSink => Some(SettingValue::String(backend.get_audio_info().default_sink_name)),
         SettingKey::DisplayResolution => {
             Some(SettingValue::String((*payload.personalization.display.resolution_choice).clone()))
         }
-        SettingKey::DisplayBrightness => {
-            Some(SettingValue::Float(*payload.personalization.display.brightness as f64))
-        }
-        SettingKey::DisplayAutoBrightness => {
-            Some(SettingValue::Bool(*payload.personalization.display.auto_brightness))
-        }
-        SettingKey::DisplayNightShift => {
-            Some(SettingValue::Bool(*payload.personalization.display.night_shift))
-        }
-        SettingKey::DisplayColorTemp => {
-            Some(SettingValue::Float(*payload.personalization.display.color_temp as f64))
-        }
-        SettingKey::Hostname => {
-            Some(SettingValue::String(backend.get_host_info().hostname))
-        }
-        SettingKey::Locale => {
-            Some(SettingValue::String((*payload.system.language.primary_locale).clone()))
-        }
-        SettingKey::Timezone => {
-            Some(SettingValue::String((*payload.system.date_time.timezone).clone()))
-        }
-        SettingKey::TimeFormat24h => {
-            Some(SettingValue::Bool(*payload.system.date_time.time_format_24h))
-        }
-        SettingKey::NtpEnabled => {
-            Some(SettingValue::Bool(*payload.system.date_time.ntp_sync))
-        }
-        SettingKey::PowerProfile => {
-            Some(SettingValue::String((*payload.system.battery.mode).clone()))
-        }
-        SettingKey::SystemAutoUpdates => {
-            Some(SettingValue::Bool(*payload.system.general.auto_updates))
-        }
-        SettingKey::CameraAccess => {
-            Some(SettingValue::Bool(*payload.system.privacy.camera_enabled))
-        }
-        SettingKey::MicAccess => {
-            Some(SettingValue::Bool(*payload.system.privacy.microphone_enabled))
-        }
-        SettingKey::LocationAccess => {
-            Some(SettingValue::Bool(*payload.system.privacy.location_enabled))
-        }
-        SettingKey::AccessibilityReduceMotion => {
-            Some(SettingValue::Bool(*payload.system.accessibility.reduce_motion))
-        }
+        SettingKey::DisplayBrightness => Some(SettingValue::Float(*payload.personalization.display.brightness as f64)),
+        SettingKey::DisplayAutoBrightness => Some(SettingValue::Bool(*payload.personalization.display.auto_brightness)),
+        SettingKey::DisplayNightShift => Some(SettingValue::Bool(*payload.personalization.display.night_shift)),
+        SettingKey::DisplayColorTemp => Some(SettingValue::Float(*payload.personalization.display.color_temp as f64)),
+        SettingKey::Hostname => Some(SettingValue::String(backend.get_host_info().hostname)),
+        SettingKey::Locale => Some(SettingValue::String((*payload.system.language.primary_locale).clone())),
+        SettingKey::Timezone => Some(SettingValue::String((*payload.system.date_time.timezone).clone())),
+        SettingKey::TimeFormat24h => Some(SettingValue::Bool(*payload.system.date_time.time_format_24h)),
+        SettingKey::NtpEnabled => Some(SettingValue::Bool(*payload.system.date_time.ntp_sync)),
+        SettingKey::PowerProfile => Some(SettingValue::String((*payload.system.battery.mode).clone())),
+        SettingKey::SystemAutoUpdates => Some(SettingValue::Bool(*payload.system.general.auto_updates)),
+        SettingKey::CameraAccess => Some(SettingValue::Bool(*payload.system.privacy.camera_enabled)),
+        SettingKey::MicAccess => Some(SettingValue::Bool(*payload.system.privacy.microphone_enabled)),
+        SettingKey::LocationAccess => Some(SettingValue::Bool(*payload.system.privacy.location_enabled)),
+        SettingKey::AccessibilityReduceMotion => Some(SettingValue::Bool(*payload.system.accessibility.reduce_motion)),
         SettingKey::AccessibilityIncreaseContrast => {
             Some(SettingValue::Bool(*payload.system.accessibility.increase_contrast))
         }
         SettingKey::AccessibilityReduceTransparency => {
             Some(SettingValue::Bool(*payload.system.accessibility.reduce_transparency))
         }
-        SettingKey::AccessibilityScreenReader => {
-            Some(SettingValue::Bool(*payload.system.accessibility.screen_reader))
-        }
-        SettingKey::AccessibilityTextSize => {
-            Some(SettingValue::Float(*payload.system.accessibility.text_size as f64))
-        }
-        SettingKey::StorageEmptyTrashAuto => {
-            Some(SettingValue::Bool(*payload.system.storage.empty_trash_auto))
-        }
-        SettingKey::KeyboardLayout => {
-            Some(SettingValue::String((*payload.system.language.keyboard_layout).clone()))
-        }
-        SettingKey::DoNotDisturb => {
-            Some(SettingValue::String((*payload.personalization.focus.mode).clone()))
-        }
-        SettingKey::NotificationBanners => {
-            Some(SettingValue::Bool(*payload.personalization.notifications.enabled))
-        }
+        SettingKey::AccessibilityScreenReader => Some(SettingValue::Bool(*payload.system.accessibility.screen_reader)),
+        SettingKey::AccessibilityTextSize => Some(SettingValue::Float(*payload.system.accessibility.text_size as f64)),
+        SettingKey::StorageEmptyTrashAuto => Some(SettingValue::Bool(*payload.system.storage.empty_trash_auto)),
+        SettingKey::KeyboardLayout => Some(SettingValue::String((*payload.system.language.keyboard_layout).clone())),
+        SettingKey::DoNotDisturb => Some(SettingValue::String((*payload.personalization.focus.mode).clone())),
+        SettingKey::NotificationBanners => Some(SettingValue::Bool(*payload.personalization.notifications.enabled)),
         SettingKey::NotificationSounds => {
             Some(SettingValue::Bool(*payload.personalization.notifications.silence_during_sleep))
         }
@@ -288,11 +209,7 @@ pub fn get_setting_entry(
 }
 
 /// Mutates the given `SettingsPayload` with a new value for `key`.
-pub fn set_setting_value(
-    payload: &mut SettingsPayload,
-    key: &SettingKey,
-    value: &SettingValue,
-) -> Result<(), DenialReason> {
+pub fn set_setting_value(payload: &mut SettingsPayload, key: &SettingKey, value: &SettingValue) -> Result<(), DenialReason> {
     match key {
         SettingKey::ThemeMode => {
             let mode = match value {
@@ -307,18 +224,12 @@ pub fn set_setting_value(
                 SettingValue::Int(2) => config::ThemeMode::Dark,
                 _ => return Err(DenialReason::InvalidValue("Invalid theme mode value".to_string())),
             };
-            payload
-                .personalization
-                .appearance
-                .mode
-                .set(mode)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.personalization.appearance.mode.set(mode).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::AccentColor => {
-            let s = value
-                .as_str()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected string for accent color".to_string()))?;
+            let s =
+                value.as_str().ok_or_else(|| DenialReason::InvalidValue("Expected string for accent color".to_string()))?;
             payload
                 .personalization
                 .appearance
@@ -328,9 +239,8 @@ pub fn set_setting_value(
             Ok(())
         }
         SettingKey::Wallpaper => {
-            let i = value
-                .as_i64()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected int for wallpaper index".to_string()))?;
+            let i =
+                value.as_i64().ok_or_else(|| DenialReason::InvalidValue("Expected int for wallpaper index".to_string()))?;
             payload
                 .personalization
                 .appearance
@@ -352,9 +262,7 @@ pub fn set_setting_value(
             Ok(())
         }
         SettingKey::IconSize => {
-            let i = value
-                .as_i64()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected int for icon size".to_string()))?;
+            let i = value.as_i64().ok_or_else(|| DenialReason::InvalidValue("Expected int for icon size".to_string()))?;
             payload
                 .personalization
                 .appearance
@@ -364,81 +272,42 @@ pub fn set_setting_value(
             Ok(())
         }
         SettingKey::WindowGapsIn => {
-            let i = value
-                .as_i64()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected int for gaps_in".to_string()))?;
-            payload
-                .personalization
-                .appearance
-                .gaps_in
-                .set(i as u32)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let i = value.as_i64().ok_or_else(|| DenialReason::InvalidValue("Expected int for gaps_in".to_string()))?;
+            payload.personalization.appearance.gaps_in.set(i as u32).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::WindowGapsOut => {
-            let i = value
-                .as_i64()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected int for gaps_out".to_string()))?;
-            payload
-                .personalization
-                .appearance
-                .gaps_out
-                .set(i as u32)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let i = value.as_i64().ok_or_else(|| DenialReason::InvalidValue("Expected int for gaps_out".to_string()))?;
+            payload.personalization.appearance.gaps_out.set(i as u32).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::WindowBorderSize => {
-            let i = value
-                .as_i64()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected int for border_size".to_string()))?;
-            payload
-                .personalization
-                .appearance
-                .border_size
-                .set(i as u32)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let i = value.as_i64().ok_or_else(|| DenialReason::InvalidValue("Expected int for border_size".to_string()))?;
+            payload.personalization.appearance.border_size.set(i as u32).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::WifiEnabled => {
-            let b = value
-                .as_bool()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for wifi_enabled".to_string()))?;
-            payload
-                .connectivity
-                .wifi
-                .enabled
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let b =
+                value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for wifi_enabled".to_string()))?;
+            payload.connectivity.wifi.enabled.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::WifiNetwork => {
             let b = value
                 .as_bool()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected bool for wifi ask_to_join".to_string()))?;
-            payload
-                .connectivity
-                .wifi
-                .ask_to_join
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.connectivity.wifi.ask_to_join.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::BluetoothEnabled => {
             let b = value
                 .as_bool()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected bool for bluetooth_enabled".to_string()))?;
-            payload
-                .connectivity
-                .bluetooth
-                .enabled
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.connectivity.bluetooth.enabled.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::AudioVolume => {
-            let i = value
-                .as_i64()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected int for audio volume".to_string()))?;
+            let i = value.as_i64().ok_or_else(|| DenialReason::InvalidValue("Expected int for audio volume".to_string()))?;
             payload
                 .personalization
                 .sound
@@ -448,15 +317,9 @@ pub fn set_setting_value(
             Ok(())
         }
         SettingKey::AudioMuted => {
-            let b = value
-                .as_bool()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for audio muted".to_string()))?;
-            payload
-                .personalization
-                .sound
-                .muted
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let b =
+                value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for audio muted".to_string()))?;
+            payload.personalization.sound.muted.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::DisplayResolution => {
@@ -475,264 +338,133 @@ pub fn set_setting_value(
             let f = value
                 .as_f64()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected float for display brightness".to_string()))?;
-            payload
-                .personalization
-                .display
-                .brightness
-                .set(f as f32)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.personalization.display.brightness.set(f as f32).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::DisplayAutoBrightness => {
             let b = value
                 .as_bool()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected bool for display auto brightness".to_string()))?;
-            payload
-                .personalization
-                .display
-                .auto_brightness
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.personalization.display.auto_brightness.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::DisplayNightShift => {
             let b = value
                 .as_bool()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected bool for display night shift".to_string()))?;
-            payload
-                .personalization
-                .display
-                .night_shift
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.personalization.display.night_shift.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::DisplayColorTemp => {
-            let f = value
-                .as_f64()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected float for color temp".to_string()))?;
-            payload
-                .personalization
-                .display
-                .color_temp
-                .set(f as f32)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let f = value.as_f64().ok_or_else(|| DenialReason::InvalidValue("Expected float for color temp".to_string()))?;
+            payload.personalization.display.color_temp.set(f as f32).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::Locale => {
-            let s = value
-                .as_str()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected string for locale".to_string()))?;
-            payload
-                .system
-                .language
-                .primary_locale
-                .set(s.to_string())
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let s = value.as_str().ok_or_else(|| DenialReason::InvalidValue("Expected string for locale".to_string()))?;
+            payload.system.language.primary_locale.set(s.to_string()).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::Timezone => {
-            let s = value
-                .as_str()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected string for timezone".to_string()))?;
-            payload
-                .system
-                .date_time
-                .timezone
-                .set(s.to_string())
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let s = value.as_str().ok_or_else(|| DenialReason::InvalidValue("Expected string for timezone".to_string()))?;
+            payload.system.date_time.timezone.set(s.to_string()).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::TimeFormat24h => {
-            let b = value
-                .as_bool()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for 24h format".to_string()))?;
-            payload
-                .system
-                .date_time
-                .time_format_24h
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let b = value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for 24h format".to_string()))?;
+            payload.system.date_time.time_format_24h.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::NtpEnabled => {
-            let b = value
-                .as_bool()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for NTP sync".to_string()))?;
-            payload
-                .system
-                .date_time
-                .ntp_sync
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let b = value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for NTP sync".to_string()))?;
+            payload.system.date_time.ntp_sync.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::PowerProfile => {
-            let s = value
-                .as_str()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected string for power profile".to_string()))?;
-            payload
-                .system
-                .battery
-                .mode
-                .set(s.to_string())
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let s =
+                value.as_str().ok_or_else(|| DenialReason::InvalidValue("Expected string for power profile".to_string()))?;
+            payload.system.battery.mode.set(s.to_string()).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::SystemAutoUpdates => {
-            let b = value
-                .as_bool()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for auto updates".to_string()))?;
-            payload
-                .system
-                .general
-                .auto_updates
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let b =
+                value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for auto updates".to_string()))?;
+            payload.system.general.auto_updates.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::CameraAccess => {
-            let b = value
-                .as_bool()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for camera access".to_string()))?;
-            payload
-                .system
-                .privacy
-                .camera_enabled
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let b =
+                value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for camera access".to_string()))?;
+            payload.system.privacy.camera_enabled.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::MicAccess => {
-            let b = value
-                .as_bool()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for mic access".to_string()))?;
-            payload
-                .system
-                .privacy
-                .microphone_enabled
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let b = value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for mic access".to_string()))?;
+            payload.system.privacy.microphone_enabled.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::LocationAccess => {
             let b = value
                 .as_bool()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected bool for location access".to_string()))?;
-            payload
-                .system
-                .privacy
-                .location_enabled
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.system.privacy.location_enabled.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::AccessibilityReduceMotion => {
-            let b = value
-                .as_bool()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for reduce motion".to_string()))?;
-            payload
-                .system
-                .accessibility
-                .reduce_motion
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let b =
+                value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for reduce motion".to_string()))?;
+            payload.system.accessibility.reduce_motion.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::AccessibilityIncreaseContrast => {
             let b = value
                 .as_bool()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected bool for increase contrast".to_string()))?;
-            payload
-                .system
-                .accessibility
-                .increase_contrast
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.system.accessibility.increase_contrast.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::AccessibilityReduceTransparency => {
             let b = value
                 .as_bool()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected bool for reduce transparency".to_string()))?;
-            payload
-                .system
-                .accessibility
-                .reduce_transparency
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.system.accessibility.reduce_transparency.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::AccessibilityScreenReader => {
-            let b = value
-                .as_bool()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for screen reader".to_string()))?;
-            payload
-                .system
-                .accessibility
-                .screen_reader
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let b =
+                value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for screen reader".to_string()))?;
+            payload.system.accessibility.screen_reader.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::AccessibilityTextSize => {
-            let f = value
-                .as_f64()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected float for text size".to_string()))?;
-            payload
-                .system
-                .accessibility
-                .text_size
-                .set(f as f32)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let f = value.as_f64().ok_or_else(|| DenialReason::InvalidValue("Expected float for text size".to_string()))?;
+            payload.system.accessibility.text_size.set(f as f32).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::StorageEmptyTrashAuto => {
-            let b = value
-                .as_bool()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for empty trash".to_string()))?;
-            payload
-                .system
-                .storage
-                .empty_trash_auto
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let b =
+                value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for empty trash".to_string()))?;
+            payload.system.storage.empty_trash_auto.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::KeyboardLayout => {
             let s = value
                 .as_str()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected string for keyboard layout".to_string()))?;
-            payload
-                .system
-                .language
-                .keyboard_layout
-                .set(s.to_string())
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.system.language.keyboard_layout.set(s.to_string()).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::DoNotDisturb => {
-            let s = value
-                .as_str()
-                .ok_or_else(|| DenialReason::InvalidValue("Expected string for focus mode".to_string()))?;
-            payload
-                .personalization
-                .focus
-                .mode
-                .set(s.to_string())
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            let s =
+                value.as_str().ok_or_else(|| DenialReason::InvalidValue("Expected string for focus mode".to_string()))?;
+            payload.personalization.focus.mode.set(s.to_string()).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::NotificationBanners => {
             let b = value
                 .as_bool()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected bool for notification banners".to_string()))?;
-            payload
-                .personalization
-                .notifications
-                .enabled
-                .set(b)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            payload.personalization.notifications.enabled.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
         SettingKey::NotificationSounds => {
@@ -752,11 +484,7 @@ pub fn set_setting_value(
 }
 
 /// Routes setting changes to the operating system using `HyprlandBackend` and system tools.
-pub fn apply_setting(
-    backend: &HyprlandBackend,
-    payload: &SettingsPayload,
-    key: &SettingKey,
-) -> Result<(), String> {
+pub fn apply_setting(backend: &HyprlandBackend, payload: &SettingsPayload, key: &SettingKey) -> Result<(), String> {
     match key {
         SettingKey::WifiEnabled => {
             let enabled = *payload.connectivity.wifi.enabled;
@@ -783,9 +511,8 @@ pub fn apply_setting(
         }
         SettingKey::WindowGapsIn => {
             let gaps = *payload.personalization.appearance.gaps_in;
-            let status = std::process::Command::new("hyprctl")
-                .args(["keyword", "general:gaps_in", &gaps.to_string()])
-                .status();
+            let status =
+                std::process::Command::new("hyprctl").args(["keyword", "general:gaps_in", &gaps.to_string()]).status();
             match status {
                 Ok(s) if s.success() => Ok(()),
                 Ok(s) => Err(format!("hyprctl failed with exit code {:?}", s.code())),
@@ -794,9 +521,8 @@ pub fn apply_setting(
         }
         SettingKey::WindowGapsOut => {
             let gaps = *payload.personalization.appearance.gaps_out;
-            let status = std::process::Command::new("hyprctl")
-                .args(["keyword", "general:gaps_out", &gaps.to_string()])
-                .status();
+            let status =
+                std::process::Command::new("hyprctl").args(["keyword", "general:gaps_out", &gaps.to_string()]).status();
             match status {
                 Ok(s) if s.success() => Ok(()),
                 Ok(s) => Err(format!("hyprctl failed with exit code {:?}", s.code())),
@@ -805,9 +531,8 @@ pub fn apply_setting(
         }
         SettingKey::WindowBorderSize => {
             let border = *payload.personalization.appearance.border_size;
-            let status = std::process::Command::new("hyprctl")
-                .args(["keyword", "general:border_size", &border.to_string()])
-                .status();
+            let status =
+                std::process::Command::new("hyprctl").args(["keyword", "general:border_size", &border.to_string()]).status();
             match status {
                 Ok(s) if s.success() => Ok(()),
                 Ok(s) => Err(format!("hyprctl failed with exit code {:?}", s.code())),
@@ -816,9 +541,8 @@ pub fn apply_setting(
         }
         SettingKey::NtpEnabled => {
             let ntp = *payload.system.date_time.ntp_sync;
-            let status = std::process::Command::new("timedatectl")
-                .args(["set-ntp", if ntp { "true" } else { "false" }])
-                .status();
+            let status =
+                std::process::Command::new("timedatectl").args(["set-ntp", if ntp { "true" } else { "false" }]).status();
             match status {
                 Ok(s) if s.success() => Ok(()),
                 Ok(s) => Err(format!("timedatectl failed with exit code {:?}", s.code())),
@@ -827,9 +551,7 @@ pub fn apply_setting(
         }
         SettingKey::Timezone => {
             let tz = &payload.system.date_time.timezone;
-            let status = std::process::Command::new("timedatectl")
-                .args(["set-timezone", tz])
-                .status();
+            let status = std::process::Command::new("timedatectl").args(["set-timezone", tz]).status();
             match status {
                 Ok(s) if s.success() => Ok(()),
                 Ok(s) => Err(format!("timedatectl failed with exit code {:?}", s.code())),
@@ -838,9 +560,7 @@ pub fn apply_setting(
         }
         SettingKey::KeyboardLayout => {
             let layout = &payload.system.language.keyboard_layout;
-            let status = std::process::Command::new("hyprctl")
-                .args(["keyword", "input:kb_layout", layout])
-                .status();
+            let status = std::process::Command::new("hyprctl").args(["keyword", "input:kb_layout", layout]).status();
             match status {
                 Ok(s) if s.success() => Ok(()),
                 Ok(s) => Err(format!("hyprctl failed with exit code {:?}", s.code())),
@@ -864,45 +584,20 @@ pub fn apply_all_settings(backend: &HyprlandBackend, payload: &SettingsPayload) 
         backend.toggle_mute();
     }
     let _ = std::process::Command::new("hyprctl")
-        .args([
-            "keyword",
-            "general:gaps_in",
-            &payload.personalization.appearance.gaps_in.to_string(),
-        ])
+        .args(["keyword", "general:gaps_in", &payload.personalization.appearance.gaps_in.to_string()])
         .output();
     let _ = std::process::Command::new("hyprctl")
-        .args([
-            "keyword",
-            "general:gaps_out",
-            &payload.personalization.appearance.gaps_out.to_string(),
-        ])
+        .args(["keyword", "general:gaps_out", &payload.personalization.appearance.gaps_out.to_string()])
         .output();
     let _ = std::process::Command::new("hyprctl")
-        .args([
-            "keyword",
-            "general:border_size",
-            &payload.personalization.appearance.border_size.to_string(),
-        ])
+        .args(["keyword", "general:border_size", &payload.personalization.appearance.border_size.to_string()])
         .output();
     let _ = std::process::Command::new("timedatectl")
-        .args([
-            "set-ntp",
-            if *payload.system.date_time.ntp_sync {
-                "true"
-            } else {
-                "false"
-            },
-        ])
+        .args(["set-ntp", if *payload.system.date_time.ntp_sync { "true" } else { "false" }])
         .output();
-    let _ = std::process::Command::new("timedatectl")
-        .args(["set-timezone", &payload.system.date_time.timezone])
-        .output();
+    let _ = std::process::Command::new("timedatectl").args(["set-timezone", &payload.system.date_time.timezone]).output();
     let _ = std::process::Command::new("hyprctl")
-        .args([
-            "keyword",
-            "input:kb_layout",
-            &payload.system.language.keyboard_layout,
-        ])
+        .args(["keyword", "input:kb_layout", &payload.system.language.keyboard_layout])
         .output();
 }
 
@@ -946,11 +641,7 @@ impl DaemonState {
 }
 
 /// Processes an incoming `SettingsRequest` and replies via `sender`.
-pub fn handle_request(
-    state: &Arc<Mutex<DaemonState>>,
-    req: SettingsRequest,
-    sender: Sender<SettingsResponse>,
-) {
+pub fn handle_request(state: &Arc<Mutex<DaemonState>>, req: SettingsRequest, sender: Sender<SettingsResponse>) {
     match req {
         SettingsRequest::Ping => {
             let _ = sender.send(SettingsResponse::Pong);
@@ -987,10 +678,7 @@ pub fn handle_request(
                 if category.map_or(true, |c| key.category() == c) {
                     let lock_state = get_lock_state(&state.payload, key);
                     if lock_state.is_locked() {
-                        let _ = sender.send(SettingsResponse::LockState {
-                            key: key.clone(),
-                            lock_state,
-                        });
+                        let _ = sender.send(SettingsResponse::LockState { key: key.clone(), lock_state });
                     }
                 }
             }
@@ -999,35 +687,22 @@ pub fn handle_request(
             let mut state = state.lock().unwrap();
             if is_nix_locked(&state.payload, &key) {
                 let lock_state = get_lock_state(&state.payload, &key);
-                let _ = sender.send(SettingsResponse::Rejected {
-                    key,
-                    reason: DenialReason::Locked(lock_state),
-                });
+                let _ = sender.send(SettingsResponse::Rejected { key, reason: DenialReason::Locked(lock_state) });
                 return;
             }
             if is_locked(&state.payload, &key) {
                 let lock_state = get_lock_state(&state.payload, &key);
-                let _ = sender.send(SettingsResponse::Rejected {
-                    key,
-                    reason: DenialReason::Locked(lock_state),
-                });
+                let _ = sender.send(SettingsResponse::Rejected { key, reason: DenialReason::Locked(lock_state) });
                 return;
             }
 
             match set_setting_value(&mut state.payload, &key, &value) {
                 Ok(()) => {
                     if let Err(e) = config::save_settings(&state.payload) {
-                        let _ = sender.send(SettingsResponse::Error(format!(
-                            "Failed to save settings: {}",
-                            e
-                        )));
+                        let _ = sender.send(SettingsResponse::Error(format!("Failed to save settings: {}", e)));
                         return;
                     }
-                    state.broadcast_event(SettingsEvent::Changed {
-                        key,
-                        value,
-                        source,
-                    });
+                    state.broadcast_event(SettingsEvent::Changed { key, value, source });
                     let _ = sender.send(SettingsResponse::Ok);
                 }
                 Err(denial) => {
@@ -1040,10 +715,8 @@ pub fn handle_request(
             for (key, _) in &settings {
                 if is_nix_locked(&state.payload, key) || is_locked(&state.payload, key) {
                     let lock_state = get_lock_state(&state.payload, key);
-                    let _ = sender.send(SettingsResponse::Rejected {
-                        key: key.clone(),
-                        reason: DenialReason::Locked(lock_state),
-                    });
+                    let _ = sender
+                        .send(SettingsResponse::Rejected { key: key.clone(), reason: DenialReason::Locked(lock_state) });
                     return;
                 }
             }
@@ -1060,19 +733,12 @@ pub fn handle_request(
             }
 
             if let Err(e) = config::save_settings(&state.payload) {
-                let _ = sender.send(SettingsResponse::Error(format!(
-                    "Failed to save settings: {}",
-                    e
-                )));
+                let _ = sender.send(SettingsResponse::Error(format!("Failed to save settings: {}", e)));
                 return;
             }
 
             for (key, value) in changed {
-                state.broadcast_event(SettingsEvent::Changed {
-                    key,
-                    value,
-                    source: source.clone(),
-                });
+                state.broadcast_event(SettingsEvent::Changed { key, value, source: source.clone() });
             }
             let _ = sender.send(SettingsResponse::Ok);
         }
@@ -1083,10 +749,7 @@ pub fn handle_request(
                     let _ = sender.send(SettingsResponse::Ok);
                 }
                 Err(err) => {
-                    let _ = sender.send(SettingsResponse::Rejected {
-                        key,
-                        reason: DenialReason::ApplyFailed(err),
-                    });
+                    let _ = sender.send(SettingsResponse::Rejected { key, reason: DenialReason::ApplyFailed(err) });
                 }
             }
         }
@@ -1099,42 +762,27 @@ pub fn handle_request(
             let mut state = state.lock().unwrap();
             if is_nix_locked(&state.payload, &key) {
                 let lock_state = get_lock_state(&state.payload, &key);
-                let _ = sender.send(SettingsResponse::Rejected {
-                    key,
-                    reason: DenialReason::Locked(lock_state),
-                });
+                let _ = sender.send(SettingsResponse::Rejected { key, reason: DenialReason::Locked(lock_state) });
                 return;
             }
             if is_locked(&state.payload, &key) {
                 let lock_state = get_lock_state(&state.payload, &key);
-                let _ = sender.send(SettingsResponse::Rejected {
-                    key,
-                    reason: DenialReason::Locked(lock_state),
-                });
+                let _ = sender.send(SettingsResponse::Rejected { key, reason: DenialReason::Locked(lock_state) });
                 return;
             }
 
             match set_setting_value(&mut state.payload, &key, &value) {
                 Ok(()) => {
                     if let Err(e) = config::save_settings(&state.payload) {
-                        let _ = sender.send(SettingsResponse::Error(format!(
-                            "Failed to save settings: {}",
-                            e
-                        )));
+                        let _ = sender.send(SettingsResponse::Error(format!("Failed to save settings: {}", e)));
                         return;
                     }
                     if let Err(err) = apply_setting(&state.backend, &state.payload, &key) {
-                        let _ = sender.send(SettingsResponse::Rejected {
-                            key: key.clone(),
-                            reason: DenialReason::ApplyFailed(err),
-                        });
+                        let _ = sender
+                            .send(SettingsResponse::Rejected { key: key.clone(), reason: DenialReason::ApplyFailed(err) });
                         return;
                     }
-                    state.broadcast_event(SettingsEvent::Changed {
-                        key,
-                        value,
-                        source,
-                    });
+                    state.broadcast_event(SettingsEvent::Changed { key, value, source });
                     let _ = sender.send(SettingsResponse::Ok);
                 }
                 Err(denial) => {
@@ -1147,10 +795,8 @@ pub fn handle_request(
             for (key, _) in &settings {
                 if is_nix_locked(&state.payload, key) || is_locked(&state.payload, key) {
                     let lock_state = get_lock_state(&state.payload, key);
-                    let _ = sender.send(SettingsResponse::Rejected {
-                        key: key.clone(),
-                        reason: DenialReason::Locked(lock_state),
-                    });
+                    let _ = sender
+                        .send(SettingsResponse::Rejected { key: key.clone(), reason: DenialReason::Locked(lock_state) });
                     return;
                 }
             }
@@ -1160,10 +806,7 @@ pub fn handle_request(
                 match set_setting_value(&mut state.payload, &key, &value) {
                     Ok(()) => {
                         if let Err(err) = apply_setting(&state.backend, &state.payload, &key) {
-                            let _ = sender.send(SettingsResponse::Rejected {
-                                key,
-                                reason: DenialReason::ApplyFailed(err),
-                            });
+                            let _ = sender.send(SettingsResponse::Rejected { key, reason: DenialReason::ApplyFailed(err) });
                             return;
                         }
                         changed.push((key, value));
@@ -1176,19 +819,12 @@ pub fn handle_request(
             }
 
             if let Err(e) = config::save_settings(&state.payload) {
-                let _ = sender.send(SettingsResponse::Error(format!(
-                    "Failed to save settings: {}",
-                    e
-                )));
+                let _ = sender.send(SettingsResponse::Error(format!("Failed to save settings: {}", e)));
                 return;
             }
 
             for (key, value) in changed {
-                state.broadcast_event(SettingsEvent::Changed {
-                    key,
-                    value,
-                    source: source.clone(),
-                });
+                state.broadcast_event(SettingsEvent::Changed { key, value, source: source.clone() });
             }
             let _ = sender.send(SettingsResponse::Ok);
         }
@@ -1196,10 +832,7 @@ pub fn handle_request(
             let mut state = state.lock().unwrap();
             if is_nix_locked(&state.payload, &key) || is_locked(&state.payload, &key) {
                 let lock_state = get_lock_state(&state.payload, &key);
-                let _ = sender.send(SettingsResponse::Rejected {
-                    key,
-                    reason: DenialReason::Locked(lock_state),
-                });
+                let _ = sender.send(SettingsResponse::Rejected { key, reason: DenialReason::Locked(lock_state) });
                 return;
             }
             let default_payload = config::SettingsPayload::default();
@@ -1221,9 +854,7 @@ pub fn handle_request(
             let default_payload = config::SettingsPayload::default();
             for key in ALL_SETTING_KEYS {
                 if category.map_or(true, |c| key.category() == c) && !is_locked(&state.payload, key) {
-                    if let Some(default_entry) =
-                        get_setting_entry(&default_payload, &state.backend, key)
-                    {
+                    if let Some(default_entry) = get_setting_entry(&default_payload, &state.backend, key) {
                         let _ = set_setting_value(&mut state.payload, key, &default_entry.value);
                     }
                 }
@@ -1245,10 +876,7 @@ pub fn handle_request(
                     let _ = sender.send(SettingsResponse::Ok);
                 }
                 Err(e) => {
-                    let _ = sender.send(SettingsResponse::Error(format!(
-                        "Failed to reload settings: {}",
-                        e
-                    )));
+                    let _ = sender.send(SettingsResponse::Error(format!("Failed to reload settings: {}", e)));
                 }
             }
         }
@@ -1260,19 +888,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting Finick Settings Daemon...");
 
     let payload = config::load_settings().unwrap_or_else(|e| {
-        eprintln!(
-            "Warning: Failed to load existing settings ({}). Initializing defaults.",
-            e
-        );
+        eprintln!("Warning: Failed to load existing settings ({}). Initializing defaults.", e);
         config::SettingsPayload::default()
     });
 
     let backend = HyprlandBackend;
-    let state = Arc::new(Mutex::new(DaemonState {
-        payload,
-        backend,
-        subscribers: Vec::new(),
-    }));
+    let state = Arc::new(Mutex::new(DaemonState { payload, backend, subscribers: Vec::new() }));
 
     // Mock tracking loop for active window and screen time
     tokio::spawn(async {
@@ -1291,12 +912,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Binding Settings IPC server on socket '{}'...", socket_name);
 
     tokio::task::spawn_blocking(move || {
-        start_server(
-            socket_name,
-            move |req: SettingsRequest, sender: Sender<SettingsResponse>| {
-                handle_request(&state_clone, req, sender);
-            },
-        )
+        start_server(socket_name, move |req: SettingsRequest, sender: Sender<SettingsResponse>| {
+            handle_request(&state_clone, req, sender);
+        })
     })
     .await??;
 
@@ -1305,9 +923,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use ipsea::settings::{get_all_settings, get_setting, set_setting};
-    use std::thread;
+    use {
+        super::*,
+        ipsea::settings::{get_all_settings, get_setting, set_setting},
+        std::thread,
+    };
 
     #[test]
     fn test_nix_policy_checks() {
@@ -1321,10 +941,7 @@ mod tests {
         let lock_state = get_lock_state(&payload, &SettingKey::WifiEnabled);
         assert!(lock_state.is_locked());
         assert!(lock_state.is_nix_locked());
-        assert_eq!(
-            lock_state.reason(),
-            Some("Managed declaratively by NixOS")
-        );
+        assert_eq!(lock_state.reason(), Some("Managed declaratively by NixOS"));
     }
 
     #[test]
@@ -1332,30 +949,16 @@ mod tests {
         let mut payload = SettingsPayload::new();
 
         // Theme mode mutation
-        assert!(set_setting_value(
-            &mut payload,
-            &SettingKey::ThemeMode,
-            &SettingValue::String("dark".to_string())
-        )
-        .is_ok());
+        assert!(set_setting_value(&mut payload, &SettingKey::ThemeMode, &SettingValue::String("dark".to_string())).is_ok());
         assert_eq!(*payload.personalization.appearance.mode, config::ThemeMode::Dark);
 
         // Volume mutation with clamping
-        assert!(set_setting_value(
-            &mut payload,
-            &SettingKey::AudioVolume,
-            &SettingValue::Int(85)
-        )
-        .is_ok());
+        assert!(set_setting_value(&mut payload, &SettingKey::AudioVolume, &SettingValue::Int(85)).is_ok());
         assert_eq!(*payload.personalization.sound.volume, 85);
 
         // Invalid theme value
-        assert!(set_setting_value(
-            &mut payload,
-            &SettingKey::ThemeMode,
-            &SettingValue::String("neon-green".to_string())
-        )
-        .is_err());
+        assert!(set_setting_value(&mut payload, &SettingKey::ThemeMode, &SettingValue::String("neon-green".to_string()))
+            .is_err());
     }
 
     #[test]
@@ -1365,57 +968,43 @@ mod tests {
         payload.lock_nix("connectivity.wifi.enabled", "Locked by NixOS flake");
 
         let backend = HyprlandBackend;
-        let state = Arc::new(Mutex::new(DaemonState {
-            payload,
-            backend,
-            subscribers: Vec::new(),
-        }));
+        let state = Arc::new(Mutex::new(DaemonState { payload, backend, subscribers: Vec::new() }));
 
         let state_clone = Arc::clone(&state);
         let socket_clone = socket.clone();
         thread::spawn(move || {
-            let _ = start_server(
-                socket_clone,
-                move |req: SettingsRequest, sender: Sender<SettingsResponse>| {
-                    handle_request(&state_clone, req, sender);
-                },
-            );
+            let _ = start_server(socket_clone, move |req: SettingsRequest, sender: Sender<SettingsResponse>| {
+                handle_request(&state_clone, req, sender);
+            });
         });
 
         // Allow server to bind
         thread::sleep(Duration::from_millis(150));
 
         // Test Get
-        let theme_entry = get_setting(&socket, SettingKey::ThemeMode)
-            .expect("IPC get_setting failed")
-            .expect("ThemeMode entry not found");
+        let theme_entry =
+            get_setting(&socket, SettingKey::ThemeMode).expect("IPC get_setting failed").expect("ThemeMode entry not found");
         assert_eq!(theme_entry.key, SettingKey::ThemeMode);
 
         // Test Nix policy rejection on locked setting
-        let set_res = set_setting(&socket, SettingKey::WifiEnabled, false)
-            .expect("IPC set_setting failed");
+        let set_res = set_setting(&socket, SettingKey::WifiEnabled, false).expect("IPC set_setting failed");
         assert!(set_res.is_err());
         let denial = set_res.unwrap_err();
         assert!(denial.is_locked());
         assert!(denial.lock_state().unwrap().is_nix_locked());
 
         // Test successful Set on unlocked setting
-        let ok_res = set_setting(&socket, SettingKey::ThemeMode, "light")
-            .expect("IPC set_setting failed");
+        let ok_res = set_setting(&socket, SettingKey::ThemeMode, "light").expect("IPC set_setting failed");
         assert!(ok_res.is_ok());
 
         // Verify mutated value persisted in memory
-        let updated_theme = get_setting(&socket, SettingKey::ThemeMode)
-            .expect("IPC get_setting failed")
-            .expect("ThemeMode entry not found");
+        let updated_theme =
+            get_setting(&socket, SettingKey::ThemeMode).expect("IPC get_setting failed").expect("ThemeMode entry not found");
         assert_eq!(updated_theme.value.as_str(), Some("light"));
 
         // Test GetAll
         let all = get_all_settings(&socket).expect("IPC get_all_settings failed");
         assert!(!all.is_empty());
-        assert!(all
-            .iter()
-            .any(|e| e.key == SettingKey::WifiEnabled && e.is_nix_locked()));
+        assert!(all.iter().any(|e| e.key == SettingKey::WifiEnabled && e.is_nix_locked()));
     }
 }
-

@@ -4,10 +4,6 @@ pub use log;
 
 pub mod settings;
 pub use settings::*;
-
-#[doc(hidden)]
-pub use crate as ipsea;
-
 #[cfg(not(feature = "bincode"))]
 use {
     log::{error, info, trace},
@@ -21,6 +17,9 @@ use {
         sync::mpsc::{self, Sender},
     },
 };
+
+#[doc(hidden)]
+pub use crate as ipsea;
 
 const MAX_FRAME_SIZE: usize = 8 * 1024 * 1024;
 

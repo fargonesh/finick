@@ -207,6 +207,7 @@ fn app() -> impl IntoElement {
     // Centralized SettingsStore initialized and connected to daemon via IPC
     let store = use_init_settings_store();
 
+    // Local UI peripheral state
     let kb_connected = use_state(|| true);
     let hp_connected = use_state(|| false);
     let tp_connected = use_state(|| true);
@@ -292,11 +293,10 @@ fn app() -> impl IntoElement {
                             search_a11y_id.request_unfocus();
                         }
                     }
-                    Key::Character(s) if s == " " && !is_search_focused
-                        && count > 0 => {
-                            let idx = (*focused_nav_idx.read()).min(count - 1);
-                            current_route.set(routes[idx].route);
-                        }
+                    Key::Character(s) if s == " " && !is_search_focused && count > 0 => {
+                        let idx = (*focused_nav_idx.read()).min(count - 1);
+                        current_route.set(routes[idx].route);
+                    }
                     _ => {}
                 }
             }
@@ -428,55 +428,24 @@ fn app() -> impl IntoElement {
                                     store,
                                     wired_info.read().clone(),
                                     about_info.read().clone(),
+                                    displays.read().clone(),
                                 )
                                 .into_element(),
-                                Route::Appearance => appearance_detail_page(
-                                    theme_state,
-                                    store,
-                                )
-                                .into_element(),
-                                Route::Wifi => {
-                                    wifi_detail_page(store)
-                                        .into_element()
+                                Route::Appearance => appearance_detail_page(theme_state, store).into_element(),
+                                Route::Wifi => wifi_detail_page(store).into_element(),
+                                Route::Bluetooth => {
+                                    bluetooth_detail_page(store, kb_connected, hp_connected, tp_connected).into_element()
                                 }
-                                Route::Bluetooth => bluetooth_detail_page(
-                                    store,
-                                    kb_connected,
-                                    hp_connected,
-                                    tp_connected,
-                                )
-                                .into_element(),
-                                Route::Display => display_detail_page(
-                                    store,
-                                )
-                                .into_element(),
-                                Route::Sound => {
-                                    sound_detail_page(store)
-                                        .into_element()
+                                Route::Display => display_detail_page(store, displays).into_element(),
+                                Route::Sound => sound_detail_page(store).into_element(),
+                                Route::Focus => {
+                                    focus_detail_page(store, work_sched, sleep_sched, share_devices).into_element()
                                 }
-                                Route::Focus => focus_detail_page(
-                                    store,
-                                    work_sched,
-                                    sleep_sched,
-                                    share_devices,
-                                )
-                                .into_element(),
-                                Route::Notifications => notifications_detail_page(
-                                    store,
-                                )
-                                .into_element(),
+                                Route::Notifications => notifications_detail_page(store).into_element(),
                                 Route::General => general_detail_page(store).into_element(),
-                                Route::Storage => {
-                                    storage_detail_page(store).into_element()
-                                }
-                                Route::Battery => {
-                                    battery_detail_page(store)
-                                        .into_element()
-                                }
-                                Route::Accessibility => accessibility_detail_page(
-                                    store,
-                                )
-                                .into_element(),
+                                Route::Storage => storage_detail_page(store).into_element(),
+                                Route::Battery => battery_detail_page(store).into_element(),
+                                Route::Accessibility => accessibility_detail_page(store).into_element(),
                                 Route::About => about_detail_page().into_element(),
                                 Route::DateTime => pages::DateTime.into_element(),
                                 Route::Privacy => pages::Privacy.into_element(),

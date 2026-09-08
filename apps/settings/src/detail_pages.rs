@@ -420,283 +420,304 @@ pub fn bluetooth_detail_page(
         )
 }
 
-/// Display detail page matching ui_demo.html
-pub fn display_detail_page(store: SettingsStore) -> impl IntoElement {
-    let br_lock = store.lock_label(&SettingKey::DisplayBrightness);
-    let is_br_locked = br_lock.is_some();
-    let auto_br_lock = store.lock_label(&SettingKey::DisplayAutoBrightness);
-    let is_auto_br_locked = auto_br_lock.is_some();
-    let res_lock = store.lock_label(&SettingKey::DisplayResolution);
-    let is_res_locked = res_lock.is_some();
-    let ns_lock = store.lock_label(&SettingKey::DisplayNightShift);
-    let is_ns_locked = ns_lock.is_some();
-    let ct_lock = store.lock_label(&SettingKey::DisplayColorTemp);
-    let is_ct_locked = ct_lock.is_some();
-    // Arrangement state — top-level hooks for stable order
-    let mut displays: State<Option<Vec<DisplayInfo>>> = use_state(|| None);
-    let mut loaded = use_state(|| false);
-    let mut order_status: State<Option<Result<(), String>>> = use_state(|| None);
-    if !*loaded.read() {
-        loaded.set(true);
-        let mut ds = displays;
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        std::thread::spawn(move || {
-            let d = system::HyprlandBackend.get_displays();
-            let _ = tx.send(d);
-        });
-        freya::prelude::spawn(async move {
-            if let Some(d) = rx.recv().await {
-                ds.set(Some(d));
-            }
-        });
-    }
-    let t = use_app_theme();
-    let is_arrangement_locked = is_res_locked;
+#[derive(PartialEq)]
+pub struct DisplayDetailPage {
+    pub store: SettingsStore,
+    pub displays: State<Vec<DisplayInfo>>,
+}
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(DISPLAY, "Display", "Brightness, resolution and colour"))
-        .child(
+impl Component for DisplayDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let displays = self.displays;
+        let br_lock = store.lock_label(&SettingKey::DisplayBrightness);
+        let is_br_locked = br_lock.is_some();
+        let auto_br_lock = store.lock_label(&SettingKey::DisplayAutoBrightness);
+        let is_auto_br_locked = auto_br_lock.is_some();
+        let res_lock = store.lock_label(&SettingKey::DisplayResolution);
+        let is_res_locked = res_lock.is_some();
+        let ns_lock = store.lock_label(&SettingKey::DisplayNightShift);
+        let is_ns_locked = ns_lock.is_some();
+        let ct_lock = store.lock_label(&SettingKey::DisplayColorTemp);
+        let is_ct_locked = ct_lock.is_some();
+        let order_status: State<Option<Result<(), String>>> = use_state(|| None);
+        let t = use_app_theme();
+        let is_arrangement_locked = is_res_locked;
+
+        let displays_len = displays.read().len();
+        let status_chip_text: Option<Element> = match &*order_status.read() {
+            Some(Ok(())) => Some(status_chip("Order saved", false, None).into_element()),
+            Some(Err(e)) => {
+                let msg = if e.len() > 48 { format!("{}…", &e[..48]) } else { e.clone() };
+                Some(status_chip(format!("Error: {msg}"), true, None).into_element())
+            }
+            None => None,
+        };
+        let refresh_btn = {
+            let mut ds = displays;
+            let mut status = order_status;
             rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                // Wide: Brightness
-                .child(
-                    tile()
-                        .child(tile_head(
-                            None,
-                            "Brightness",
-                            br_lock.as_ref().map(|l| lock_badge(l)),
-                        ))
+                .cursor(CursorIcon::Pointer)
+                .padding((4., 8.))
+                .corner_radius(6.)
+                .background(t.panel_raised)
+                .border(Border::new().width(1.).fill(t.border))
+                .on_press(move |_| {
+                    status.set(None);
+                    freya::prelude::spawn(async move {
+                        let d = tokio::task::spawn_blocking(move || {
+                            system::HyprlandBackend.get_displays()
+                        })
+                        .await
+                        .unwrap_or_default();
+                        ds.set(d);
+                    });
+                })
+                .child(label().font_size(11.).color(t.text_dim).text("Detect Displays"))
+        };
+        let header_right: Option<Element> = {
+            let lock = res_lock.clone().map(|l| lock_badge(l).into_element());
+            let mut right_row = rect()
+                .horizontal()
+                .cross_align(Alignment::Center)
+                .spacing(8.)
+                .child(refresh_btn);
+            if let Some(l) = lock {
+                right_row = right_row.child(l);
+            }
+            if let Some(s) = status_chip_text {
+                right_row = right_row.child(s);
+            }
+            Some(right_row.into_element())
+        };
+
+        let arrangement_tile = tile()
+            .child(tile_head(None, "Arrangement", header_right))
+            .child(tile_sub("Rearrange displays by moving them left or right to match their physical arrangement."))
+            .child({
+                if displays_len == 0 {
+                    rect()
+                        .width(Size::fill())
+                        .center()
+                        .padding((18., 12.))
                         .child(
                             rect()
-                                .opacity(if is_br_locked { 0.45 } else { 1.0 })
-                                .child({
+                                .vertical()
+                                .cross_align(Alignment::Center)
+                                .spacing(6.)
+                                .child(icon(DISPLAY, 20., t.text_dim))
+                                .child(label().font_size(12.).color(t.text_dim).text("No displays detected")),
+                        )
+                        .into_element()
+                } else {
+                    let items: Vec<DisplayMockItem> = displays
+                        .read()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, d)| DisplayMockItem {
+                            name: if d.resolution.is_empty() {
+                                d.name.clone()
+                            } else {
+                                format!("{} ({})", d.name, d.resolution)
+                            },
+                            height_px: 60. - (i as f32 * 6.).min(20.),
+                        })
+                        .collect();
+                    let on_swap = {
+                        let mut displays_state = displays;
+                        let mut status_state = order_status;
+                        let locked = is_arrangement_locked;
+                        EventHandler::new(move |(from, to): (usize, usize)| {
+                            if locked {
+                                return;
+                            }
+                            let len = displays_state.read().len();
+                            if from >= len || to >= len {
+                                return;
+                            }
+                            let mut new_order = displays_state.read().clone();
+                            new_order.swap(from, to);
+                            let prev = displays_state.read().clone();
+                            displays_state.set(new_order.clone());
+                            status_state.set(None);
+                            let names: Vec<String> = new_order.iter().map(|d| d.name.clone()).collect();
+                            freya::prelude::spawn(async move {
+                                let res = tokio::task::spawn_blocking(move || {
+                                    system::HyprlandBackend.set_display_order(&names)
+                                })
+                                .await;
+                                match res {
+                                    Ok(Ok(())) => status_state.set(Some(Ok(()))),
+                                    Ok(Err(e)) => {
+                                        displays_state.set(prev);
+                                        status_state.set(Some(Err(e)));
+                                    }
+                                    Err(e) => {
+                                        displays_state.set(prev);
+                                        status_state.set(Some(Err(format!("join error: {e}"))));
+                                    }
+                                }
+                            });
+                        })
+                    };
+                    rect()
+                        .width(Size::fill())
+                        .margin((10., 0., 0., 0.))
+                        .opacity(if is_arrangement_locked { 0.45 } else { 1.0 })
+                        .child(displays_mock_reorderable(items, on_swap))
+                        .into_element()
+                }
+            });
+
+        rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(DISPLAY, "Display", "Arrangement, brightness, resolution and colour"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    // Wide: Arrangement — interactive reorderable (top priority)
+                    .child(arrangement_tile)
+                    // Wide: Brightness
+                    .child(
+                        tile()
+                            .child(tile_head(
+                                None,
+                                "Brightness",
+                                br_lock.as_ref().map(|l| lock_badge(l)),
+                            ))
+                            .child(
+                                rect()
+                                    .opacity(if is_br_locked { 0.45 } else { 1.0 })
+                                    .child({
+                                        let store = store;
+                                        slider_row(Some(SUN), *store.brightness.read(), move |v| {
+                                            if !is_br_locked {
+                                                store.set(SettingKey::DisplayBrightness, v);
+                                            }
+                                        })
+                                    }),
+                            )
+                            .child(setting_row_locked(
+                                "Auto-brightness",
+                                None::<String>,
+                                false,
+                                auto_br_lock,
+                                {
                                     let store = store;
-                                    slider_row(Some(SUN), *store.brightness.read(), move |v| {
-                                        if !is_br_locked {
-                                            store.set(SettingKey::DisplayBrightness, v);
+                                    pill_switch(*store.auto_brightness.read(), move |v| {
+                                        if !is_auto_br_locked {
+                                            store.set(SettingKey::DisplayAutoBrightness, v);
                                         }
                                     })
-                                }),
-                        )
-                        .child(setting_row_locked(
-                            "Auto-brightness",
-                            None::<String>,
-                            false,
-                            auto_br_lock,
-                            {
-                                let store = store;
-                                pill_switch(*store.auto_brightness.read(), move |v| {
-                                    if !is_auto_br_locked {
-                                        store.set(SettingKey::DisplayAutoBrightness, v);
-                                    }
-                                })
-                            },
-                        ))
-                        .child(setting_row("True Tone", None::<String>, true, {
-                            let mut tt = store.true_tone;
-                            pill_switch(*store.true_tone.read(), move |v| tt.set(v))
-                        })),
-                )
-                // 2-Column: Resolution & Night Shift
-                .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(
-                                        None,
-                                        "Resolution",
-                                        res_lock.as_ref().map(|l| lock_badge(l)),
-                                    ))
-                                    .child(
-                                        rect()
-                                            .opacity(if is_res_locked { 0.45 } else { 1.0 })
-                                            .child({
-                                                let store = store;
-                                                resolution_picker(*store.res_choice.read(), move |c| {
-                                                    if !is_res_locked {
-                                                        let choice_str = match c {
-                                                            ResolutionChoice::MoreSpace => "MoreSpace",
-                                                            ResolutionChoice::LargerText => "LargerText",
-                                                            ResolutionChoice::Default => "Default",
-                                                        };
-                                                        store.set(SettingKey::DisplayResolution, choice_str);
-                                                    }
-                                                })
-                                            }),
-                                    ),
-                            ),
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(
-                                        None,
-                                        "Night Shift",
-                                        Some(
+                                },
+                            ))
+                            .child(setting_row("True Tone", None::<String>, true, {
+                                let mut tt = store.true_tone;
+                                pill_switch(*store.true_tone.read(), move |v| tt.set(v))
+                            })),
+                    )
+                    // 2-Column: Resolution & Night Shift
+                    .child(
+                        grid2([
+                            rect()
+                                .width(Size::flex(1.))
+                                .child(
+                                    tile()
+                                        .child(tile_head(
+                                            None,
+                                            "Resolution",
+                                            res_lock.as_ref().map(|l| lock_badge(l)),
+                                        ))
+                                        .child(
                                             rect()
+                                                .opacity(if is_res_locked { 0.45 } else { 1.0 })
+                                                .child({
+                                                    let store = store;
+                                                    resolution_picker(*store.res_choice.read(), move |c| {
+                                                        if !is_res_locked {
+                                                            let choice_str = match c {
+                                                                ResolutionChoice::MoreSpace => "MoreSpace",
+                                                                ResolutionChoice::LargerText => "LargerText",
+                                                                ResolutionChoice::Default => "Default",
+                                                            };
+                                                            store.set(SettingKey::DisplayResolution, choice_str);
+                                                        }
+                                                    })
+                                                }),
+                                        ),
+                                ),
+                            rect()
+                                .width(Size::flex(1.))
+                                .child(
+                                    tile()
+                                        .child(tile_head(
+                                            None,
+                                            "Night Shift",
+                                            Some(
+                                                rect()
+                                                    .horizontal()
+                                                    .cross_align(Alignment::Center)
+                                                    .spacing(8.)
+                                                    .maybe_child(ns_lock.as_ref().map(|l| lock_badge(l)))
+                                                    .child(
+                                                        rect()
+                                                            .opacity(if is_ns_locked { 0.45 } else { 1.0 })
+                                                            .child({
+                                                                let store = store;
+                                                                pill_switch(*store.night_shift.read(), move |v| {
+                                                                    if !is_ns_locked {
+                                                                        store.set(SettingKey::DisplayNightShift, v);
+                                                                    }
+                                                                })
+                                                            }),
+                                                    ),
+                                            ),
+                                        ))
+                                        .child({
+                                            let mut nm = store.night_shift_mode;
+                                            segmented_control(
+                                                vec![("Off", 0), ("Sunset to sunrise", 1), ("Custom", 2)],
+                                                *store.night_shift_mode.read(),
+                                                move |idx| nm.set(idx),
+                                            )
+                                        })
+                                        .child(
+                                            rect()
+                                                .margin((14., 0., 0., 0.))
                                                 .horizontal()
                                                 .cross_align(Alignment::Center)
                                                 .spacing(8.)
-                                                .maybe_child(ns_lock.as_ref().map(|l| lock_badge(l)))
-                                                .child(
-                                                    rect()
-                                                        .opacity(if is_ns_locked { 0.45 } else { 1.0 })
-                                                        .child({
-                                                            let store = store;
-                                                            pill_switch(*store.night_shift.read(), move |v| {
-                                                                if !is_ns_locked {
-                                                                    store.set(SettingKey::DisplayNightShift, v);
-                                                                }
-                                                            })
-                                                        }),
-                                                ),
-                                        ),
-                                    ))
-                                    .child({
-                                        let mut nm = store.night_shift_mode;
-                                        segmented_control(
-                                            vec![("Off", 0), ("Sunset to sunrise", 1), ("Custom", 2)],
-                                            *store.night_shift_mode.read(),
-                                            move |idx| nm.set(idx),
+                                                .child(field_label("Colour temperature"))
+                                                .maybe_child(ct_lock.as_ref().map(|l| lock_badge(l))),
                                         )
-                                    })
-                                    .child(
-                                        rect()
-                                            .margin((14., 0., 0., 0.))
-                                            .horizontal()
-                                            .cross_align(Alignment::Center)
-                                            .spacing(8.)
-                                            .child(field_label("Colour temperature"))
-                                            .maybe_child(ct_lock.as_ref().map(|l| lock_badge(l))),
-                                    )
-                                    .child(
-                                        rect()
-                                            .opacity(if is_ct_locked { 0.45 } else { 1.0 })
-                                            .child({
-                                                let store = store;
-                                                slider_row(None, *store.color_temp.read(), move |v| {
-                                                    if !is_ct_locked {
-                                                        store.set(SettingKey::DisplayColorTemp, v);
-                                                    }
-                                                })
-                                            }),
-                                    ),
-                            ),
-                    ]),
-                )
-                // Wide: Arrangement — interactive reorderable
-                .child({
-                    let displays_len = displays.read().as_ref().map(|v| v.len()).unwrap_or(0);
-                    let status_chip_text: Option<Element> = match &*order_status.read() {
-                        Some(Ok(())) => Some(status_chip("Order saved", false, None).into_element()),
-                        Some(Err(e)) => {
-                            let msg = if e.len() > 48 { format!("{}…", &e[..48]) } else { e.clone() };
-                            Some(status_chip(format!("Error: {msg}"), true, None).into_element())
-                        }
-                        None => None,
-                    };
-                    let header_right: Option<Element> = {
-                        let lock = res_lock.clone().map(|l| lock_badge(l).into_element());
-                        match (lock, status_chip_text) {
-                            (Some(l), Some(s)) => Some(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .spacing(8.)
-                                    .child(l)
-                                    .child(s)
-                                    .into_element(),
-                            ),
-                            (Some(l), None) => Some(l),
-                            (None, Some(s)) => Some(s),
-                            (None, None) => None,
-                        }
-                    };
-                    let arrangement_tile = tile().child(tile_head(None, "Arrangement", header_right))
-                        .child({
-                            if displays.read().is_none() {
-                                tile_sub("Scanning displays…").into_element()
-                            } else if displays_len == 0 {
-                                rect()
-                                    .width(Size::fill())
-                                    .center()
-                                    .padding((18., 12.))
-                                    .child(
-                                        rect()
-                                            .vertical()
-                                            .cross_align(Alignment::Center)
-                                            .spacing(6.)
-                                            .child(icon(DISPLAY, 20., t.text_dim))
-                                            .child(label().font_size(12.).color(t.text_dim).text("No displays detected")),
-                                    )
-                                    .into_element()
-                            } else {
-                                let items: Vec<DisplayMockItem> = displays
-                                    .read()
-                                    .as_ref()
-                                    .map(|v| {
-                                        v.iter()
-                                            .enumerate()
-                                            .map(|(i, d)| DisplayMockItem {
-                                                name: d.name.clone(),
-                                                height_px: 60. - (i as f32 * 8.).min(28.),
-                                            })
-                                            .collect::<Vec<_>>()
-                                    })
-                                    .unwrap_or_default();
-                                let on_swap = {
-                                    let mut displays_state = displays;
-                                    let mut status_state = order_status;
-                                    let locked = is_arrangement_locked;
-                                    EventHandler::new(move |(from, to): (usize, usize)| {
-                                        if locked {
-                                            return;
-                                        }
-                                        let len = displays_state.read().as_ref().map(|v| v.len()).unwrap_or(0);
-                                        if from >= len || to >= len {
-                                            return;
-                                        }
-                                        let mut new_order = displays_state.read().as_ref().unwrap().clone();
-                                        new_order.swap(from, to);
-                                        let prev = displays_state.read().as_ref().unwrap().clone();
-                                        displays_state.set(Some(new_order.clone()));
-                                        status_state.set(None);
-                                        let names: Vec<String> = new_order.iter().map(|d| d.name.clone()).collect();
-                                        freya::prelude::spawn(async move {
-                                            let res = tokio::task::spawn_blocking(move || {
-                                                system::HyprlandBackend.set_display_order(&names)
-                                            })
-                                            .await;
-                                            match res {
-                                                Ok(Ok(())) => status_state.set(Some(Ok(()))),
-                                                Ok(Err(e)) => {
-                                                    displays_state.set(Some(prev));
-                                                    status_state.set(Some(Err(e)));
-                                                }
-                                                Err(e) => {
-                                                    displays_state.set(Some(prev));
-                                                    status_state.set(Some(Err(format!("join error: {e}"))));
-                                                }
-                                            }
-                                        });
-                                    })
-                                };
-                                rect()
-                                    .width(Size::fill())
-                                    .opacity(if is_arrangement_locked { 0.45 } else { 1.0 })
-                                    .child(displays_mock_reorderable(items, on_swap))
-                                    .into_element()
-                            }
-                        });
-                    arrangement_tile.into_element()
-                }),
-        )
+                                        .child(
+                                            rect()
+                                                .opacity(if is_ct_locked { 0.45 } else { 1.0 })
+                                                .child({
+                                                    let store = store;
+                                                    slider_row(None, *store.color_temp.read(), move |v| {
+                                                        if !is_ct_locked {
+                                                            store.set(SettingKey::DisplayColorTemp, v);
+                                                        }
+                                                    })
+                                                }),
+                                        ),
+                                ),
+                        ]),
+                    ),
+            )
+    }
+}
+
+/// Display detail page helper returning DisplayDetailPage component
+pub fn display_detail_page(
+    store: SettingsStore,
+    displays: State<Vec<DisplayInfo>>,
+) -> DisplayDetailPage {
+    DisplayDetailPage { store, displays }
 }
 
 /// Sound detail page matching ui_demo.html

@@ -7,7 +7,7 @@ use ipsea::settings::{
 use system::{HyprlandBackend, SystemBackend};
 use ui::ResolutionChoice;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct SettingsStore {
     // Connectivity
     pub wifi_power: State<bool>,

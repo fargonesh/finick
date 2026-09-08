@@ -15,11 +15,7 @@ pub fn parse_display_width(resolution: &str) -> u32 {
     if trimmed.is_empty() {
         return 1920;
     }
-    let w_str = trimmed
-        .split(|c| c == 'x' || c == 'X')
-        .next()
-        .unwrap_or("")
-        .trim();
+    let w_str = trimmed.split(|c| c == 'x' || c == 'X').next().unwrap_or("").trim();
     w_str.parse::<u32>().ok().filter(|&v| v > 0).unwrap_or(1920)
 }
 
@@ -37,15 +33,65 @@ pub fn build_monitor_position_args(ordered: &[(String, String)]) -> Vec<(String,
     build_display_positions(ordered)
 }
 
-pub fn build_positions_from_names(
-    ordered_names: &[String],
-    lookup: &HashMap<String, String>,
-) -> Vec<(String, String)> {
-    let ordered: Vec<(String, String)> = ordered_names
-        .iter()
-        .map(|n| (n.clone(), lookup.get(n).cloned().unwrap_or_default()))
-        .collect();
+pub fn build_positions_from_names(ordered_names: &[String], lookup: &HashMap<String, String>) -> Vec<(String, String)> {
+    let ordered: Vec<(String, String)> =
+        ordered_names.iter().map(|n| (n.clone(), lookup.get(n).cloned().unwrap_or_default())).collect();
     build_display_positions(&ordered)
+}
+
+pub fn parse_hyprctl_monitors(out: &str) -> Vec<DisplayInfo> {
+    let mut res = Vec::new();
+    let mut current_name = String::new();
+    let mut current_w = String::new();
+    let mut current_h = String::new();
+    let mut current_hz = String::new();
+    let mut current_scale = String::new();
+    let mut depth: i32 = 0;
+
+    for line in out.lines() {
+        let l = line.trim();
+        for ch in l.chars() {
+            if ch == '{' {
+                depth += 1;
+            } else if ch == '}' {
+                depth -= 1;
+                if depth <= 0 && !current_name.is_empty() {
+                    let resolution = if !current_w.is_empty() && !current_h.is_empty() {
+                        format!("{}x{}", current_w, current_h)
+                    } else {
+                        String::new()
+                    };
+                    res.push(DisplayInfo {
+                        name: current_name.clone(),
+                        resolution,
+                        refresh_rate: current_hz.clone(),
+                        scale: current_scale.clone(),
+                    });
+                    current_name.clear();
+                    current_w.clear();
+                    current_h.clear();
+                    current_hz.clear();
+                    current_scale.clear();
+                }
+            }
+        }
+
+        if depth == 1 {
+            if l.starts_with("\"name\":") {
+                current_name =
+                    l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == '\"' || c == ',' || c == ' ').to_string();
+            } else if l.starts_with("\"width\":") {
+                current_w = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
+            } else if l.starts_with("\"height\":") {
+                current_h = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
+            } else if l.starts_with("\"refreshRate\":") {
+                current_hz = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
+            } else if l.starts_with("\"scale\":") {
+                current_scale = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
+            }
+        }
+    }
+    res
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,7 +123,8 @@ pub fn parse_wpctl_devices(output: &str) -> (Vec<AudioDevice>, Vec<AudioDevice>)
     let mut sources = Vec::new();
     let mut section = "";
     for line in output.lines() {
-        let trimmed = line.trim_start_matches(|c: char| c.is_whitespace() || c == '│' || c == '├' || c == '└' || c == '─').trim_end();
+        let trimmed =
+            line.trim_start_matches(|c: char| c.is_whitespace() || c == '│' || c == '├' || c == '└' || c == '─').trim_end();
         if trimmed.ends_with("Sinks:") {
             section = "sinks";
             continue;
@@ -131,11 +178,7 @@ pub fn compute_battery_health(full: u64, design: u64) -> Option<u8> {
 }
 
 fn read_sysfs_u64(dir: &std::path::Path, names: &[&str]) -> Option<u64> {
-    names.iter().find_map(|n| {
-        std::fs::read_to_string(dir.join(n))
-            .ok()
-            .and_then(|s| s.trim().parse::<u64>().ok())
-    })
+    names.iter().find_map(|n| std::fs::read_to_string(dir.join(n)).ok().and_then(|s| s.trim().parse::<u64>().ok()))
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct GeneralInfo {
@@ -336,46 +379,12 @@ impl SystemBackend for HyprlandBackend {
     }
 
     fn get_displays(&self) -> Vec<DisplayInfo> {
-        let mut res = Vec::new();
         if let Ok(output) = Command::new("hyprctl").args(["monitors", "-j"]).output() {
             let out = String::from_utf8_lossy(&output.stdout);
-
-            let mut current_name = String::new();
-            let mut current_w = String::new();
-            let mut current_h = String::new();
-            let mut current_hz = String::new();
-            let mut current_scale = String::new();
-            for line in out.lines() {
-                let l = line.trim();
-                if l.starts_with("\"name\":") {
-                    current_name = l
-                        .split(':')
-                        .nth(1)
-                        .unwrap_or_default()
-                        .trim_matches(|c| c == '\"' || c == ',' || c == ' ')
-                        .to_string();
-                } else if l.starts_with("\"width\":") {
-                    current_w = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
-                } else if l.starts_with("\"height\":") {
-                    current_h = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
-                } else if l.starts_with("\"refreshRate\":") {
-                    current_hz = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
-                } else if l.starts_with("\"scale\":") {
-                    current_scale =
-                        l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
-                }
-                if (l == "}," || l == "}") && !current_name.is_empty() {
-                    res.push(DisplayInfo {
-                        name: current_name.clone(),
-                        resolution: format!("{}x{}", current_w, current_h),
-                        refresh_rate: current_hz.clone(),
-                        scale: current_scale.clone(),
-                    });
-                    current_name.clear();
-                }
-            }
+            parse_hyprctl_monitors(&out)
+        } else {
+            Vec::new()
         }
-        res
     }
 
     fn set_display_order(&self, ordered_names: &[String]) -> Result<(), String> {
@@ -384,12 +393,17 @@ impl SystemBackend for HyprlandBackend {
         }
         let displays = self.get_displays();
         let mut lookup: HashMap<String, String> = HashMap::new();
+        let mut scale_lookup: HashMap<String, String> = HashMap::new();
         for d in displays {
-            lookup.insert(d.name, d.resolution);
+            lookup.insert(d.name.clone(), d.resolution);
+            if !d.scale.trim().is_empty() {
+                scale_lookup.insert(d.name, d.scale);
+            }
         }
         let positions = build_positions_from_names(ordered_names, &lookup);
         for (name, pos) in positions {
-            let arg = format!("{name},preferred,{pos},1");
+            let scale = scale_lookup.get(&name).map(|s| s.as_str()).unwrap_or("1");
+            let arg = format!("{name},preferred,{pos},{scale}");
             let output = Command::new("hyprctl")
                 .args(["keyword", "monitor", &arg])
                 .output()
@@ -508,7 +522,12 @@ impl SystemBackend for HyprlandBackend {
                 source_name = first.name.clone();
             }
         }
-        AudioInfo { volume: current_vol, is_muted: current_mute, default_sink_name: sink_name, default_source_name: source_name }
+        AudioInfo {
+            volume: current_vol,
+            is_muted: current_mute,
+            default_sink_name: sink_name,
+            default_source_name: source_name,
+        }
     }
 
     fn get_audio_sinks(&self) -> Vec<AudioDevice> {
@@ -531,11 +550,7 @@ impl SystemBackend for HyprlandBackend {
         if sink_id.trim().is_empty() {
             return false;
         }
-        Command::new("wpctl")
-            .args(["set-default", sink_id])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        Command::new("wpctl").args(["set-default", sink_id]).output().map(|o| o.status.success()).unwrap_or(false)
     }
 
     fn set_volume(&self, percent: i32) {
@@ -764,7 +779,8 @@ impl SystemBackend for HyprlandBackend {
 
         let mut networks: Vec<WifiNetworkDetail> = networks_map.into_values().collect();
         networks.sort_by(|a, b| {
-            b.is_connected.cmp(&a.is_connected)
+            b.is_connected
+                .cmp(&a.is_connected)
                 .then_with(|| b.is_saved.cmp(&a.is_saved))
                 .then_with(|| b.signal.cmp(&a.signal))
         });
@@ -808,9 +824,7 @@ impl SystemBackend for HyprlandBackend {
         Some(WiredInfo { connected: true, interface: iface, ip_address: ip, profile })
     }
 
-    fn connect_wifi(&self, ssid: &str) {
-        let _ = Command::new("nmcli").args(["dev", "wifi", "connect", ssid]).output();
-    }
+    fn connect_wifi(&self, ssid: &str) { let _ = Command::new("nmcli").args(["dev", "wifi", "connect", ssid]).output(); }
 
     fn disconnect_wifi(&self) {
         if let Ok(output) = Command::new("nmcli").args(["-t", "-f", "DEVICE,TYPE", "dev"]).output() {
@@ -825,9 +839,7 @@ impl SystemBackend for HyprlandBackend {
         }
     }
 
-    fn forget_wifi(&self, ssid: &str) {
-        let _ = Command::new("nmcli").args(["connection", "delete", "id", ssid]).output();
-    }
+    fn forget_wifi(&self, ssid: &str) { let _ = Command::new("nmcli").args(["connection", "delete", "id", ssid]).output(); }
 
     fn get_wifi_status(&self) -> bool {
         Command::new("nmcli")
@@ -964,19 +976,11 @@ impl SystemBackend for HyprlandBackend {
     }
 
     fn reboot(&self) -> bool {
-        Command::new("systemctl")
-            .arg("reboot")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        Command::new("systemctl").arg("reboot").output().map(|o| o.status.success()).unwrap_or(false)
     }
 
     fn power_off(&self) -> bool {
-        Command::new("systemctl")
-            .arg("poweroff")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        Command::new("systemctl").arg("poweroff").output().map(|o| o.status.success()).unwrap_or(false)
     }
 }
 
@@ -1015,10 +1019,7 @@ mod tests {
     #[test]
     fn test_parse_ip_route_get() {
         let out = "1.1.1.1 via 192.168.1.1 dev wlp166s0 src 192.168.1.105 uid 1000\n";
-        assert_eq!(
-            parse_ip_route_get(out),
-            Some(("wlp166s0".to_string(), "192.168.1.105".to_string()))
-        );
+        assert_eq!(parse_ip_route_get(out), Some(("wlp166s0".to_string(), "192.168.1.105".to_string())));
         assert_eq!(parse_ip_route_get("unreachable\n"), None);
     }
 
@@ -1061,10 +1062,7 @@ mod tests {
 
     #[test]
     fn test_build_display_positions_two() {
-        let ordered = vec![
-            ("DP-1".to_string(), "1920x1080".to_string()),
-            ("HDMI-1".to_string(), "2560x1440".to_string()),
-        ];
+        let ordered = vec![("DP-1".to_string(), "1920x1080".to_string()), ("HDMI-1".to_string(), "2560x1440".to_string())];
         let pos = build_display_positions(&ordered);
         assert_eq!(pos.len(), 2);
         assert_eq!(pos[0], ("DP-1".to_string(), "0x0".to_string()));
@@ -1134,43 +1132,146 @@ mod tests {
             fn get_displays(&self) -> Vec<DisplayInfo> {
                 panic!("get_displays should not be called for empty order");
             }
+
             fn get_input_devices(&self) -> InputDevices { InputDevices { mice: vec![], keyboards: vec![] } }
-            fn get_audio_info(&self) -> AudioInfo { AudioInfo { volume: 0.0, is_muted: false, default_sink_name: String::new(), default_source_name: String::new() } }
+
+            fn get_audio_info(&self) -> AudioInfo {
+                AudioInfo {
+                    volume: 0.0,
+                    is_muted: false,
+                    default_sink_name: String::new(),
+                    default_source_name: String::new(),
+                }
+            }
+
             fn get_audio_sinks(&self) -> Vec<AudioDevice> { vec![] }
+
             fn get_audio_sources(&self) -> Vec<AudioDevice> { vec![] }
+
             fn set_default_audio_sink(&self, _sink_id: &str) -> bool { false }
+
             fn set_volume(&self, _percent: i32) {}
+
             fn supports_brightness(&self) -> bool { false }
+
             fn set_brightness(&self, _percent: u32) {}
+
             fn toggle_mute(&self) {}
-            fn get_power_info(&self) -> PowerInfo { PowerInfo { capacity: String::new(), status: String::new(), health_percent: None, cycle_count: None } }
+
+            fn get_power_info(&self) -> PowerInfo {
+                PowerInfo { capacity: String::new(), status: String::new(), health_percent: None, cycle_count: None }
+            }
+
             fn get_general_info(&self) -> GeneralInfo { GeneralInfo { locale: String::new(), timezone: String::new() } }
-            fn get_host_info(&self) -> HostInfo { HostInfo { hostname: String::new(), os_name: String::new(), kernel: String::new(), uptime: String::new(), memory: String::new() } }
+
+            fn get_host_info(&self) -> HostInfo {
+                HostInfo {
+                    hostname: String::new(),
+                    os_name: String::new(),
+                    kernel: String::new(),
+                    uptime: String::new(),
+                    memory: String::new(),
+                }
+            }
+
             fn get_current_user(&self) -> UserInfo { UserInfo { username: String::new(), uid: String::new() } }
+
             fn get_wifi_status(&self) -> bool { false }
+
             fn get_wifi_networks(&self) -> Vec<String> { vec![] }
+
             fn get_wifi_details(&self) -> (CurrentWifiInfo, Vec<WifiNetworkDetail>) { (CurrentWifiInfo::default(), vec![]) }
+
             fn get_wired_info(&self) -> Option<WiredInfo> { None }
+
             fn connect_wifi(&self, _ssid: &str) {}
+
             fn disconnect_wifi(&self) {}
+
             fn forget_wifi(&self, _ssid: &str) {}
+
             fn set_wifi_status(&self, _enabled: bool) {}
+
             fn get_bluetooth_status(&self) -> bool { false }
+
             fn set_bluetooth_status(&self, _enabled: bool) {}
-            fn get_storage_info(&self) -> StorageInfo { StorageInfo { total: String::new(), used: String::new(), available: String::new(), use_percent: 0.0, disks: vec![] } }
+
+            fn get_storage_info(&self) -> StorageInfo {
+                StorageInfo {
+                    total: String::new(),
+                    used: String::new(),
+                    available: String::new(),
+                    use_percent: 0.0,
+                    disks: vec![],
+                }
+            }
+
             fn get_paired_bluetooth_devices(&self) -> Vec<BluetoothDevice> { vec![] }
+
             fn connect_bluetooth_device(&self, _mac: &str) {}
+
             fn disconnect_bluetooth_device(&self, _mac: &str) {}
+
             fn remove_bluetooth_device(&self, _mac: &str) {}
+
             fn set_display_order(&self, ordered_names: &[String]) -> Result<(), String> {
-                if ordered_names.is_empty() { return Ok(()); }
+                if ordered_names.is_empty() {
+                    return Ok(());
+                }
                 Err("stub".to_string())
             }
+
             fn log_out(&self) -> bool { false }
+
             fn reboot(&self) -> bool { false }
+
             fn power_off(&self) -> bool { false }
         }
         let backend = StubBackend;
         assert!(backend.set_display_order(&[]).is_ok());
+    }
+
+    #[test]
+    fn test_parse_hyprctl_monitors() {
+        let json = r#"[{
+    "id": 0,
+    "name": "DP-2",
+    "description": "Dell Inc. DELL P2422HE",
+    "width": 1920,
+    "height": 1080,
+    "refreshRate": 60.00000,
+    "x": 0,
+    "y": 0,
+    "activeWorkspace": {
+        "id": 1,
+        "name": "1"
+    },
+    "scale": 1.00
+},{
+    "id": 1,
+    "name": "DP-4",
+    "description": "Dell Inc. DELL P2422HE",
+    "width": 2560,
+    "height": 1440,
+    "refreshRate": 144.00000,
+    "x": 1920,
+    "y": 0,
+    "activeWorkspace": {
+        "id": 2,
+        "name": "2"
+    },
+    "scale": 1.25
+}]"#;
+        let displays = parse_hyprctl_monitors(json);
+        assert_eq!(displays.len(), 2);
+        assert_eq!(displays[0].name, "DP-2");
+        assert_eq!(displays[0].resolution, "1920x1080");
+        assert_eq!(displays[0].refresh_rate, "60.00000");
+        assert_eq!(displays[0].scale, "1.00");
+
+        assert_eq!(displays[1].name, "DP-4");
+        assert_eq!(displays[1].resolution, "2560x1440");
+        assert_eq!(displays[1].refresh_rate, "144.00000");
+        assert_eq!(displays[1].scale, "1.25");
     }
 }

@@ -1,27 +1,37 @@
 use freya::prelude::*;
 use ipsea::settings::SettingKey;
-use system::WiredInfo;
+use system::{DisplayInfo, WiredInfo};
 use ui::*;
 use crate::pages::about::AboutInfo;
 use crate::state::SettingsStore;
 
-/// Responsive overview page for the settings app.
-pub fn overview_page(
-    current_route: State<crate::Route>,
-    theme_state: State<AppTheme>,
-    store: SettingsStore,
-    wired: Option<WiredInfo>,
-    about: AboutInfo,
-) -> impl IntoElement {
-    let t = use_app_theme();
+#[derive(PartialEq)]
+pub struct OverviewPage {
+    pub current_route: State<crate::Route>,
+    pub theme_state: State<AppTheme>,
+    pub store: SettingsStore,
+    pub wired: Option<WiredInfo>,
+    pub about: AboutInfo,
+    pub displays: Vec<DisplayInfo>,
+}
 
-    responsive_view(1000.0, move |compact| {
-        let focus_desc = match *store.focus_mode.read() {
-            "work" => "Notifications are silenced except from your team.",
-            "personal" => "Only calls and messages from favourites come through.",
-            "sleep" => "Everything is silenced until morning.",
-            _ => "Notifications are delivered as usual.",
-        };
+impl Component for OverviewPage {
+    fn render(&self) -> impl IntoElement {
+        let current_route = self.current_route;
+        let theme_state = self.theme_state;
+        let store = self.store;
+        let wired = self.wired.clone();
+        let about = self.about.clone();
+        let displays = self.displays.clone();
+        let t = use_app_theme();
+
+        responsive_view(1000.0, move |compact| {
+            let focus_desc = match *store.focus_mode.read() {
+                "work" => "Notifications are silenced except from your team.",
+                "personal" => "Only calls and messages from favourites come through.",
+                "sleep" => "Everything is silenced until morning.",
+                _ => "Notifications are delivered as usual.",
+            };
 
         let appearance_card = {
             let mut route = current_route;
@@ -185,14 +195,16 @@ pub fn overview_page(
                             Some(detail),
                             false,
                             label().font_size(12.).color(t.accent).text("Connected"),
-                        ).into_element()
+                        )
+                        .into_element()
                     }
                     None => setting_row(
                         "No wired connection".to_string(),
                         None::<String>,
                         false,
                         label().font_size(12.).color(t.text_dim).text(""),
-                    ).into_element(),
+                    )
+                    .into_element(),
                 })
         };
 
@@ -298,6 +310,7 @@ pub fn overview_page(
             let mut route = current_route;
             let br_lock = store.lock_label(&SettingKey::DisplayBrightness);
             let is_br_locked = br_lock.is_some();
+            let displays_len = displays.len();
 
             tile()
                 .child(tile_head(
@@ -330,6 +343,23 @@ pub fn overview_page(
                             })
                         }),
                 )
+                .child(setting_row(
+                    "Arrangement",
+                    Some(match displays_len {
+                        0 => "No displays detected".to_string(),
+                        1 => format!("1 display ({})", displays[0].name),
+                        n => format!("{n} displays connected"),
+                    }),
+                    false,
+                    rect()
+                        .cursor(CursorIcon::Pointer)
+                        .padding((4., 8.))
+                        .corner_radius(6.)
+                        .background(t.panel_raised)
+                        .border(Border::new().width(1.).fill(t.border))
+                        .on_press(move |_| route.set(crate::Route::Display))
+                        .child(label().font_size(11.).color(t.accent).text("Rearrange →")),
+                ))
         };
 
         let sound_card = {
@@ -562,4 +592,24 @@ pub fn overview_page(
                 )
         }
     })
+    }
+}
+
+/// Helper function returning OverviewPage Component
+pub fn overview_page(
+    current_route: State<crate::Route>,
+    theme_state: State<AppTheme>,
+    store: SettingsStore,
+    wired: Option<WiredInfo>,
+    about: AboutInfo,
+    displays: Vec<DisplayInfo>,
+) -> OverviewPage {
+    OverviewPage {
+        current_route,
+        theme_state,
+        store,
+        wired,
+        about,
+        displays,
+    }
 }

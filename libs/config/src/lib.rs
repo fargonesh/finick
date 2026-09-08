@@ -84,8 +84,7 @@ pub fn config_path_for(app: &App) -> PathBuf {
 /// Writes JSON data atomically to the specified path via a temporary file and rename.
 fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create parent directory {:?}", parent))?;
+        fs::create_dir_all(parent).with_context(|| format!("Failed to create parent directory {:?}", parent))?;
     }
 
     let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
@@ -130,8 +129,7 @@ pub fn get_config<T: DeserializeOwned + Serialize + Default>(app: App) -> Result
         atomic_write_json(&path, &default_val)?;
         Ok(default_val)
     } else {
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read config file {:?}", path))?;
+        let content = fs::read_to_string(&path).with_context(|| format!("Failed to read config file {:?}", path))?;
         serde_json::from_str(&content).map_err(|e| anyhow!(e))
     }
 }
@@ -153,8 +151,7 @@ pub fn load_settings() -> Result<SettingsPayload> {
         save_settings(&default_settings)?;
         Ok(default_settings)
     } else {
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read settings from {:?}", path))?;
+        let content = fs::read_to_string(&path).with_context(|| format!("Failed to read settings from {:?}", path))?;
         let settings = serde_json::from_str::<SettingsPayload>(&content)
             .with_context(|| format!("Failed to parse settings JSON from {:?}", path))?;
         Ok(settings)
@@ -187,8 +184,7 @@ pub fn is_setting_locked(key_path: &str) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::sync::Mutex;
+    use {super::*, std::sync::Mutex};
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
