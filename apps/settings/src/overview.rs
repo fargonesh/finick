@@ -185,14 +185,14 @@ pub fn overview_page(
                             Some(detail),
                             false,
                             label().font_size(12.).color(t.accent).text("Connected"),
-                        )
+                        ).into_element()
                     }
                     None => setting_row(
-                        "No wired connection",
+                        "No wired connection".to_string(),
                         None::<String>,
                         false,
                         label().font_size(12.).color(t.text_dim).text(""),
-                    ),
+                    ).into_element(),
                 })
         };
 

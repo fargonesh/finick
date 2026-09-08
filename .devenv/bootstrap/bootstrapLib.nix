@@ -54,6 +54,23 @@ rec {
       targetSystem = system;
 
       overlays = lib.flatten (lib.mapAttrsToList getOverlays devenv_inputs);
+      unfreePackageError = pkg:
+        let
+          name = lib.getName pkg;
+        in
+        throw ''
+          devenv: package '${name}' has an unfree license.
+
+          To allow all unfree packages, add this to devenv.yaml:
+
+            allow_unfree: true
+
+          To allow only this package, add this to devenv.yaml:
+
+            nixpkgs:
+              permitted_unfree_packages:
+                - ${name}
+        '';
 
       # Helper to create pkgs for a given system with nixpkgs_config
       mkPkgsForSystem =
@@ -73,9 +90,9 @@ rec {
               if nixpkgs_config.allowUnfree or false then
                 (_: true)
               else if (nixpkgs_config.permittedUnfreePackages or [ ]) != [ ] then
-                (pkg: builtins.elem (lib.getName pkg) (nixpkgs_config.permittedUnfreePackages or [ ]))
+                (pkg: builtins.elem (lib.getName pkg) (nixpkgs_config.permittedUnfreePackages or [ ]) || unfreePackageError pkg)
               else
-                (_: false);
+                unfreePackageError;
           } // lib.optionalAttrs ((nixpkgs_config.allowlistedLicenses or [ ]) != [ ]) {
             allowlistedLicenses = map (name: lib.licenses.${name}) (nixpkgs_config.allowlistedLicenses or [ ]);
           } // lib.optionalAttrs ((nixpkgs_config.blocklistedLicenses or [ ]) != [ ]) {
@@ -214,6 +231,7 @@ rec {
 
       # Phase 1: Base evaluation to extract profile definitions
       baseProject = lib.evalModules {
+        class = "devenv";
         specialArgs = inputs // {
           inherit inputs secretspec primops;
         };
@@ -375,10 +393,10 @@ rec {
                     config: optionPath:
                     if lib.isAttrs config && config ? _type then
                       config
-                    else if lib.isAttrs config then
-                      lib.mapAttrs (name: value: applyOverrideRecursive value (optionPath ++ [ name ])) config
                     else if pathNeedsOverride optionPath then
                       lib.mkOverride profilePriority config
+                    else if lib.isAttrs config then
+                      lib.mapAttrs (name: value: applyOverrideRecursive value (optionPath ++ [ name ])) config
                     else
                       config;
 
@@ -493,6 +511,7 @@ rec {
         let
           evalPkgs = mkPkgsForSystem evalSystem;
           evalProject = lib.evalModules {
+            class = "devenv";
             specialArgs = inputs // {
               inherit inputs secretspec primops;
             };
@@ -527,6 +546,7 @@ rec {
         config
         options
         project
+        inputs
         ;
       bash = pkgs.bash;
       shell = config.shell;
@@ -565,7 +585,7 @@ rec {
     if !hasDevenv then
       throw ''
         Input does not have a devenv.nix file.
-        Expected file at: ${devenvPath}
+        Expected file at: ${toString devenvPath}
 
         To use this input's devenv configuration, the input must provide a devenv.nix file.
       ''
@@ -578,6 +598,7 @@ rec {
         lib = pkgs.lib;
 
         project = lib.evalModules {
+          class = "devenv";
           specialArgs = allInputs // {
             inputs = allInputs;
             secretspec = null;

@@ -1,8 +1,8 @@
-/home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick/.devenv/bootstrap/bootstrapLib.nix
-/home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick/.devenv/bootstrap/default.nix
-/home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick/.devenv/bootstrap/resolve-lock.nix
-/home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick/devenv.local.nix
-/home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick/devenv.lock
-/home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick/devenv.nix
-/home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick/devenv.yaml
-/home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick/.env
+/home/flora/Projects/finick/.devenv/bootstrap/bootstrapLib.nix
+/home/flora/Projects/finick/.devenv/bootstrap/default.nix
+/home/flora/Projects/finick/.devenv/bootstrap/resolve-lock.nix
+/home/flora/Projects/finick/devenv.local.nix
+/home/flora/Projects/finick/devenv.lock
+/home/flora/Projects/finick/devenv.nix
+/home/flora/Projects/finick/devenv.yaml
+/home/flora/Projects/finick/.env

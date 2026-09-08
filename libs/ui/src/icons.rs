@@ -32,6 +32,8 @@ pub const APPEARANCE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="2
 
 pub const WIFI: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5a15.6 15.6 0 0 1 20 0"/><path d="M5.6 12.3a10.6 10.6 0 0 1 12.8 0"/><path d="M9 16.1a5.5 5.5 0 0 1 6 0"/><circle cx="12" cy="19.3" r="1" fill="currentColor" stroke="none"/></svg>"#;
 
+pub const WIRED: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect width="6" height="6" x="16" y="16" rx="1"/><rect width="6" height="6" x="2" y="16" rx="1"/><rect width="6" height="6" x="9" y="2" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>"#;
+
 pub const BLUETOOTH: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 8.7 17.3 16 12 20V4l5.3 4-10.8 7.3"/></svg>"#;
 
 pub const FOCUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z"/></svg>"#;

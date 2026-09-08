@@ -1,10 +1,20 @@
-2026-09-04T08:46:51.317269Z DEBUG prek: 0.3.11
-2026-09-04T08:46:51.317341Z DEBUG Args: ["/nix/store/py2m9vglskggcyyarm0nha16siw346af-prek-0.3.11/bin/prek", "install", "-c", ".pre-commit-config.yaml", "-t", "pre-commit"]
-2026-09-04T08:46:51.317445Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/bin/git config --includes --null --get core.hooksPath`
-2026-09-04T08:46:51.318635Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/bin/git config --get core.sharedRepository`
-2026-09-04T08:46:51.320523Z TRACE get_root: close time.busy=891µs time.idle=2.09µs
-2026-09-04T08:46:51.320541Z DEBUG Git root: /home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick
-2026-09-04T08:46:51.320545Z DEBUG Loading project configuration path=.pre-commit-config.yaml
-2026-09-04T08:46:51.321682Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/bin/git rev-parse --git-path hooks`
-2026-09-04T08:46:51.322753Z TRACE Include selectors: ``
-2026-09-04T08:46:51.322761Z TRACE Skip selectors: ``
+2026-09-08T01:37:20.743370Z DEBUG prek: 0.3.11
+2026-09-08T01:37:20.743438Z DEBUG Args: ["/nix/store/py2m9vglskggcyyarm0nha16siw346af-prek-0.3.11/bin/prek", "hook-impl", "--hook-dir", "/home/flora/Projects/finick/.git/hooks", "--script-version", "4", "--hook-type=pre-commit", "--config=.pre-commit-config.yaml", "--"]
+2026-09-08T01:37:20.749407Z TRACE get_root: close time.busy=5.34ms time.idle=8.91µs
+2026-09-08T01:37:20.749504Z DEBUG Git root: /home/flora/Projects/finick
+2026-09-08T01:37:20.749545Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/libexec/git-core/git ls-files --unmerged`
+2026-09-08T01:37:20.756172Z TRACE Include selectors: ``
+2026-09-08T01:37:20.756236Z TRACE Skip selectors: ``
+2026-09-08T01:37:20.756290Z DEBUG discover{root="/home/flora/Projects/finick" config=Some(".pre-commit-config.yaml") refresh=false}: Loading project configuration path=.pre-commit-config.yaml
+2026-09-08T01:37:20.757839Z TRACE discover{root="/home/flora/Projects/finick" config=Some(".pre-commit-config.yaml") refresh=false}: close time.busy=1.55ms time.idle=6.82µs
+2026-09-08T01:37:20.757894Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/libexec/git-core/git diff --exit-code --name-only -z .pre-commit-config.yaml`
+2026-09-08T01:37:20.762536Z TRACE Checking lock resource="store" path=/home/flora/Projects/finick/.devenv/state/prek/.lock
+2026-09-08T01:37:20.762609Z DEBUG Acquired lock resource="store"
+2026-09-08T01:37:20.766715Z DEBUG Hooks going to run: ["cargo-check", "clippy", "rustfmt"]
+2026-09-08T01:37:20.767059Z DEBUG Hook `cargo-check` does not need installation
+2026-09-08T01:37:20.767072Z DEBUG Hook `clippy` does not need installation
+2026-09-08T01:37:20.767078Z DEBUG Hook `rustfmt` does not need installation
+2026-09-08T01:37:20.767437Z TRACE Released lock path=/home/flora/Projects/finick/.devenv/state/prek/.lock
+2026-09-08T01:37:20.767471Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/libexec/git-core/git diff --diff-filter=A --name-only -z -- /home/flora/Projects/finick`
+2026-09-08T01:37:20.773341Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/libexec/git-core/git write-tree`
+2026-09-08T01:37:20.778628Z TRACE Executing `/nix/store/bcnisk3ydfgv26v2gw3zlky24g00yww2-git-2.54.0/libexec/git-core/git diff-index --binary --exit-code 3da72618495c043dc54615d7626533fff6c9033b -- /home/flora/Projects/finick`

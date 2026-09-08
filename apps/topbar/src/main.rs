@@ -350,7 +350,7 @@ fn app() -> Element {
     let wifi_on = *wifi.read();
     let bt_on = *bt.read();
     let is_muted = *muted.read();
-    let is_connected = *connected.read();
+    let _is_connected = *connected.read();
     let wired_info = wired.read().clone();
     let wired_on = wired_info.as_ref().map(|w| w.connected).unwrap_or(false);
     let show_panel = *panel_open.read();
@@ -366,78 +366,52 @@ fn app() -> Element {
         .horizontal()
         .cross_align(Alignment::Center)
         .main_align(Alignment::SpaceBetween)
-        .padding((4., 12.))
+        .padding((4., 16.))
         .background(t.panel)
         .border(Border::new().width(1.).fill(t.border))
         .content(Content::Flex)
-        .child(label().font_size(13.).color(t.text).text(clock_str))
+        .child(rect().width(Size::flex(1.))) // Left spacer
         .child(
             rect()
                 .horizontal()
                 .cross_align(Alignment::Center)
-                .spacing(10.)
+                .spacing(12.)
                 .content(Content::Flex)
                 .child(
+                    // Interactive sparse icons group
                     rect()
                         .horizontal()
                         .cross_align(Alignment::Center)
-                        .spacing(4.)
+                        .spacing(8.)
+                        .cursor(CursorIcon::Pointer)
                         .content(Content::Flex)
-                        .child(icon(WIFI, 14., if wifi_on { t.text } else { t.text_dim }))
+                        .on_press({
+                            let mut p = panel_open;
+                            move |_| {
+                                let next = !*p.read();
+                                p.set(next);
+                            }
+                        })
+                        .child(icon(
+                            if wired_on { WIRED } else { WIFI },
+                            14.,
+                            if wifi_on || wired_on { t.text } else { t.text_dim },
+                        ))
                         .child(icon(BLUETOOTH, 14., if bt_on { t.text } else { t.text_dim }))
                         .child(icon(SOUND, 14., if is_muted { t.text_dim } else { t.text }))
                         .child(
-                            label()
-                                .font_size(11.)
-                                .color(if wired_on { t.text } else { t.text_dim })
-                                .text("ETH"),
-                        )
-                        .child(
                             rect()
                                 .horizontal()
                                 .cross_align(Alignment::Center)
-                                .spacing(2.)
-                                .child(icon(
-                                    BATTERY,
-                                    12.,
-                                    if bat_pct > 20 { t.text } else { t.accent_red },
-                                ))
-                                .child(
-                                    label()
-                                        .font_size(10.)
-                                        .color(t.text_dim)
-                                        .text(format!("{bat_pct}%")),
-                                ),
-                        )
-                        .maybe_child((notif_count > 0).then(|| {
-                            rect()
-                                .horizontal()
-                                .cross_align(Alignment::Center)
-                                .spacing(2.)
-                                .child(icon(NOTIFICATIONS, 12., t.text))
-                                .child(
-                                    label()
-                                        .font_size(10.)
-                                        .color(t.accent)
-                                        .text(format!("{notif_count}")),
-                                )
-                        })),
+                                .spacing(4.)
+                                .child(icon(BATTERY, 12., if bat_pct > 20 { t.text } else { t.accent_red }))
+                                .child(label().font_size(12.).color(t.text).text(format!("{bat_pct}%"))),
+                        ),
                 )
                 .child(
-                    label()
-                        .font_size(12.)
-                        .color(if is_connected { t.text_dim } else { t.text })
-                        .text(if is_connected {
-                            "".to_string()
-                        } else {
-                            "offline".to_string()
-                        }),
-                )
-                .child(
+                    // Control center toggle icon
                     rect()
-                        .padding((4., 10.))
-                        .corner_radius(8.)
-                        .background(t.panel_raised)
+                        .padding((4., 6.))
                         .cursor(CursorIcon::Pointer)
                         .on_press({
                             let mut p = panel_open;
@@ -446,95 +420,106 @@ fn app() -> Element {
                                 p.set(next);
                             }
                         })
-                        .child(icon(MENU, 14., t.text)),
+                        .child(icon(OVERVIEW, 14., t.text)),
+                )
+                .child(
+                    // Clock
+                    label()
+                        .font_size(13.)
+                        .font_weight(FontWeight::SEMI_BOLD)
+                        .color(t.text)
+                        .text(clock_str),
                 ),
         );
 
-    let connectivity_tile = tile()
-        .child(tile_head(Some(WIFI), "Connectivity", None::<Element>))
-        .child(setting_row("Wi-Fi", None::<String>, false, {
+    let wifi_card = tile().child(tile_head(
+        Some(WIFI),
+        "Wi-Fi",
+        Some({
             let mut w = wifi;
             pill_switch(*w.read(), move |v| {
                 w.set_if_modified(v);
                 apply(SettingKey::WifiEnabled, v.into());
             })
-        }))
-        .child(setting_row("Bluetooth", None::<String>, false, {
+        }),
+    ));
+
+    let bt_card = tile().child(tile_head(
+        Some(BLUETOOTH),
+        "Bluetooth",
+        Some({
             let mut b = bt;
             pill_switch(*b.read(), move |v| {
                 b.set_if_modified(v);
                 apply(SettingKey::BluetoothEnabled, v.into());
             })
-        }))
-        .child(setting_row(
-            "Wired",
-            Some(if let Some(ref info) = wired_info {
+        }),
+    ));
+
+    let wired_card = tile()
+        .child(tile_head(Some(WIRED), "Wired", None::<Element>))
+        .child(
+            if let Some(ref info) = wired_info {
                 if info.ip_address.is_empty() {
-                    format!("{} · connected", info.interface)
+                    setting_row(info.interface.clone(), None::<String>, false, label().font_size(12.).color(t.accent).text("●")).into_element()
                 } else {
-                    format!("{} · {}", info.interface, info.ip_address)
+                    setting_row(info.interface.clone(), Some(info.ip_address.clone()), false, label().font_size(12.).color(t.accent).text("●")).into_element()
                 }
             } else {
-                "No wired connection".to_string()
-            }),
-            true,
-            label()
-                .font_size(12.)
-                .color(if wired_on { t.accent } else { t.text_dim })
-                .text(if wired_on { "●" } else { "○" }),
-        ));
-
-    // Sound / Brightness — responsive bento: side-by-side via grid2 when wide, vertical when compact
-    let sound_brightness_group = {
-        let vol = volume;
-        let mut_state = muted;
-        let br = brightness;
-        responsive_view(400.0, move |compact| {
-            let sound_tile = tile()
-                .child(tile_head(Some(SOUND), "Sound", None::<Element>))
-                .child(setting_row("Mute", None::<String>, false, {
-                    let mut m = mut_state;
-                    pill_switch(*m.read(), move |v| {
-                        m.set_if_modified(v);
-                        apply(SettingKey::AudioMuted, v.into());
-                    })
-                }))
-                .child({
-                    let mut v = vol;
-                    slider_row(Some(SOUND), *v.read(), move |nv| {
-                        v.set_if_modified(nv);
-                        apply(SettingKey::AudioVolume, nv.into());
-                    })
-                });
-            let brightness_tile = tile()
-                .child(tile_head(Some(DISPLAY), "Brightness", None::<Element>))
-                .child({
-                    let mut b = br;
-                    slider_row(Some(SUN), *b.read(), move |nv| {
-                        b.set_if_modified(nv);
-                        apply(SettingKey::DisplayBrightness, nv.into());
-                    })
-                });
-            if compact {
-                rect()
-                    .width(Size::fill())
-                    .vertical()
-                    .spacing(GAP)
-                    .content(Content::Flex)
-                    .child(sound_tile)
-                    .child(brightness_tile)
-                    .into_element()
-            } else {
-                grid2([
-                    rect().width(Size::flex(1.)).child(sound_tile),
-                    rect().width(Size::flex(1.)).child(brightness_tile),
-                ])
-                .into_element()
+                setting_row("No connection".to_string(), None::<String>, false, label().font_size(12.).color(t.text_dim).text("○")).into_element()
             }
-        })
-    };
+        );
 
-    let power_tile = tile()
+    let focus_card = tile().child(tile_head(
+        Some(FOCUS),
+        "Focus",
+        Some({
+            let mut f = dnd;
+            pill_switch(*f.read(), move |v| {
+                f.set_if_modified(v);
+                apply(
+                    SettingKey::DoNotDisturb,
+                    if v {
+                        "on".to_string().into()
+                    } else {
+                        "off".to_string().into()
+                    },
+                );
+            })
+        }),
+    ));
+
+    let sound_card = tile()
+        .child(tile_head(
+            Some(SOUND),
+            "Sound",
+            Some({
+                let mut m = muted;
+                pill_switch(*m.read(), move |v| {
+                    m.set_if_modified(v);
+                    apply(SettingKey::AudioMuted, v.into());
+                })
+            }),
+        ))
+        .child({
+            let mut v = volume;
+            slider_row(Some(SOUND), *v.read(), move |nv| {
+                v.set_if_modified(nv);
+                apply(SettingKey::AudioVolume, nv.into());
+            })
+        });
+
+    let brightness_card = tile()
+        .child(tile_head(Some(DISPLAY), "Brightness", None::<Element>))
+        .child({
+            let mut b = brightness;
+            slider_row(Some(SUN), *b.read(), move |nv| {
+                b.set_if_modified(nv);
+                apply(SettingKey::DisplayBrightness, nv.into());
+            })
+        });
+
+    let battery_card = tile()
         .child(tile_head(Some(BATTERY), "Power", None::<Element>))
         .child(
             rect()
@@ -566,31 +551,10 @@ fn app() -> Element {
                                 .cycle_count
                                 .map(|c| label().font_size(11.).color(t.text_dim).text(format!("{c} cycles"))),
                         ),
-                )
-                .child(
-                    rect()
-                        .width(Size::flex(1.))
-                        .horizontal()
-                        .main_align(Alignment::End)
-                        .content(Content::Flex)
-                        .child(setting_row("DND", None::<String>, false, {
-                            let mut f = dnd;
-                            pill_switch(*f.read(), move |v| {
-                                f.set_if_modified(v);
-                                apply(
-                                    SettingKey::DoNotDisturb,
-                                    if v {
-                                        "on".to_string().into()
-                                    } else {
-                                        "off".to_string().into()
-                                    },
-                                );
-                            })
-                        })),
                 ),
         );
 
-    let notifications_tile = tile()
+    let notifications_card = tile()
         .child(tile_head(
             Some(NOTIFICATIONS),
             format!(
@@ -644,10 +608,40 @@ fn app() -> Element {
             .padding(12.)
             .background(t.bg)
             .content(Content::Flex)
-            .child(connectivity_tile)
-            .child(sound_brightness_group)
-            .child(power_tile)
-            .child(notifications_tile)
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .horizontal()
+                    .spacing(GAP)
+                    .content(Content::Flex)
+                    .child(
+                        rect()
+                            .width(Size::flex(1.))
+                            .vertical()
+                            .spacing(GAP)
+                            .child(wifi_card)
+                            .child(wired_card)
+                    )
+                    .child(
+                        rect()
+                            .width(Size::flex(1.))
+                            .vertical()
+                            .spacing(GAP)
+                            .child(bt_card)
+                            .child(focus_card)
+                    )
+            )
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .horizontal()
+                    .spacing(GAP)
+                    .content(Content::Flex)
+                    .child(rect().width(Size::flex(1.)).child(sound_card))
+                    .child(rect().width(Size::flex(1.)).child(brightness_card))
+            )
+            .child(battery_card)
+            .child(notifications_card)
             .child(actions_row)
     } else {
         rect().width(Size::fill()).height(Size::px(0.))
@@ -670,9 +664,27 @@ fn app() -> Element {
 }
 
 fn main() {
+    // Run hyprctl to set up window rules dynamically for the topbar
+    std::process::Command::new("hyprctl").args(["keyword", "windowrulev2", "float, class:^(topbar)$"]).output().ok();
+    std::process::Command::new("hyprctl").args(["keyword", "windowrulev2", "pin, class:^(topbar)$"]).output().ok();
+    std::process::Command::new("hyprctl").args(["keyword", "windowrulev2", "move 0 0, class:^(topbar)$"]).output().ok();
+    std::process::Command::new("hyprctl").args(["keyword", "windowrulev2", "noanim, class:^(topbar)$"]).output().ok();
+    std::process::Command::new("hyprctl").args(["keyword", "windowrulev2", "noblur, class:^(topbar)$"]).output().ok();
+    std::process::Command::new("hyprctl").args(["keyword", "monitor", ",addreserved,36,0,0,0"]).output().ok();
+
     let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
     let _guard = _rt.as_ref().map(|rt| rt.enter());
-    launch(LaunchConfig::new().with_window(WindowConfig::new(app).with_title("Top Bar").with_size(480., 600.)))
+    launch(
+        LaunchConfig::new()
+            .with_window(
+                WindowConfig::new(app)
+                    .with_title("topbar")
+                    .with_app_id("topbar")
+                    .with_size(1920., 600.)
+                    .with_decorations(false)
+                    .with_transparency(true)
+            )
+    )
 }
 
 #[cfg(test)]
