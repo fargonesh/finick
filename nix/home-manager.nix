@@ -48,6 +48,14 @@ in
   config = lib.mkIf cfg.enable {
     home.packages = lib.optionals (cfg.settings.enable || cfg.files.enable || cfg.topbar.enable) [ cfg.package ];
 
+    xdg.enable = true;
+    xdg.mimeApps.enable = lib.mkDefault true;
+    xdg.mimeApps.defaultApplications = lib.mkMerge [
+      (lib.mkIf cfg.files.enable {
+        "inode/directory" = "finick-files.desktop";
+      })
+    ];
+
     systemd.user.services.finick-topbar = lib.mkIf cfg.topbar.enable {
       Unit = {
         Description = "Finick Top Bar";

@@ -49,9 +49,45 @@
           ];
         };
 
+        desktopEntries = pkgs.stdenv.mkDerivation {
+          pname = "finick-desktop-entries";
+          version = "0.1.0";
+          src = ./.;
+          nativeBuildInputs = with pkgs; [ desktop-file-utils ];
+          installPhase = ''
+            mkdir -p $out/share/applications
+            cat > $out/share/applications/finick-settings.desktop <<'EOF'
+            [Desktop Entry]
+            Name=Finick Settings
+            Comment=System settings for Finick desktop
+            Exec=settings
+            Icon=preferences-system
+            Terminal=false
+            Type=Application
+            Categories=Settings;System;X-GNOME-Settings-Panel;
+            Keywords=Settings;Preferences;System;
+            StartupWMClass=settings
+            EOF
+            cat > $out/share/applications/finick-files.desktop <<'EOF'
+            [Desktop Entry]
+            Name=Finick Files
+            Comment=File manager for Finick
+            Exec=files
+            Icon=system-file-manager
+            Terminal=false
+            Type=Application
+            Categories=System;FileManager;FileManager;
+            Keywords=Files;File Manager;Browser;
+            StartupWMClass=files
+            MimeType=inode/directory;application/x-gnome-saved-search;
+            EOF
+            desktop-file-validate $out/share/applications/*.desktop
+          '';
+        };
+
         finick = pkgs.symlinkJoin {
           name = "finick";
-          paths = map (bin:
+          paths = (map (bin:
             pkgs.writeShellScriptBin bin ''
               set -e
               REPO="$HOME/Documents/Projects/finick"
@@ -62,7 +98,7 @@
               export CARGO_HOME="''${CARGO_HOME:-$HOME/.cargo}"
               exec ${pkgs.cargo}/bin/cargo run -p ${bin} --manifest-path "$REPO/Cargo.toml" -- "$@"
             '')
-            [ "topbar" "settings" "files" "settings-daemon" "index" "finickctl" ];
+            [ "topbar" "settings" "files" "settings-daemon" "index" "finickctl" ]) ++ [ desktopEntries ];
           meta.mainProgram = "settings";
         };
       in
