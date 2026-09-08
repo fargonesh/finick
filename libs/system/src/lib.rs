@@ -384,6 +384,8 @@ pub trait SystemBackend {
     fn log_out(&self) -> bool;
     fn reboot(&self) -> bool;
     fn power_off(&self) -> bool;
+    fn set_wallpaper(&self, target: &str) -> Result<(), String>;
+    fn get_current_wallpaper(&self) -> Option<String>;
 }
 
 pub struct HyprlandBackend;
@@ -1062,6 +1064,135 @@ impl SystemBackend for HyprlandBackend {
     fn power_off(&self) -> bool {
         Command::new("systemctl").arg("poweroff").output().map(|o| o.status.success()).unwrap_or(false)
     }
+
+    fn set_wallpaper(&self, target: &str) -> Result<(), String> {
+        let trimmed = target.trim();
+        let normalized = if trimmed.starts_with("preset:") {
+            let idx_str = trimmed.trim_start_matches("preset:");
+            let idx: usize = idx_str.parse().unwrap_or(0);
+            WALLPAPER_COLOR_PRESETS.get(idx).map(|(_, c)| *c).unwrap_or("#1e1e2e").to_string()
+        } else if let Ok(idx) = trimmed.parse::<usize>() {
+            WALLPAPER_COLOR_PRESETS.get(idx).map(|(_, c)| *c).unwrap_or("#1e1e2e").to_string()
+        } else if trimmed.is_empty() {
+            "#1e1e2e".to_string()
+        } else {
+            trimmed.to_string()
+        };
+
+        let clean_path = normalized.strip_prefix("file://").unwrap_or(&normalized);
+        let path = std::path::Path::new(clean_path);
+        let is_image = path.is_file();
+
+        let swaybg_bin = resolve_swaybg();
+
+        if is_image {
+            if let Some(bin) = swaybg_bin {
+                let mut cmd = Command::new(bin);
+                cmd.args(["-i", clean_path, "-m", "fill"]);
+                if let Ok(child) = cmd.spawn() {
+                    let new_pid = child.id();
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                    if let Ok(mut lock) = ACTIVE_WALLPAPER_PID.lock() {
+                        if let Some(old_pid) = *lock {
+                            let _ = Command::new("kill").arg(old_pid.to_string()).output();
+                        }
+                        *lock = Some(new_pid);
+                    }
+                } else {
+                    return Err(format!("Failed to spawn swaybg for image {clean_path}"));
+                }
+            } else {
+                let _ = Command::new("hyprctl").args(["hyprpaper", "preload", clean_path]).output();
+                let _ = Command::new("hyprctl").args(["hyprpaper", "wallpaper", &format!(",{clean_path}")]).output();
+            }
+        } else {
+            let hex = normalized.trim_start_matches('#');
+            if let Some(bin) = swaybg_bin {
+                let mut cmd = Command::new(bin);
+                cmd.args(["-c", hex]);
+                if let Ok(child) = cmd.spawn() {
+                    let new_pid = child.id();
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                    if let Ok(mut lock) = ACTIVE_WALLPAPER_PID.lock() {
+                        if let Some(old_pid) = *lock {
+                            let _ = Command::new("kill").arg(old_pid.to_string()).output();
+                        }
+                        *lock = Some(new_pid);
+                    }
+                } else {
+                    return Err(format!("Failed to spawn swaybg for color {hex}"));
+                }
+            }
+            let _ = Command::new("hyprctl").args(["keyword", "misc:background_color", &format!("0xff{hex}")]).output();
+        }
+
+        if let Some(finick_dir) = get_finick_config_dir() {
+            let _ = std::fs::create_dir_all(&finick_dir);
+            let _ = std::fs::write(finick_dir.join("current_wallpaper"), &normalized);
+        }
+
+        Ok(())
+    }
+
+    fn get_current_wallpaper(&self) -> Option<String> {
+        if let Some(finick_dir) = get_finick_config_dir() {
+            let file = finick_dir.join("current_wallpaper");
+            if let Ok(content) = std::fs::read_to_string(file) {
+                let s = content.trim().to_string();
+                if !s.is_empty() {
+                    return Some(s);
+                }
+            }
+        }
+        None
+    }
+}
+
+static ACTIVE_WALLPAPER_PID: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+
+pub const WALLPAPER_COLOR_PRESETS: &[(&str, &str)] = &[
+    ("Deep Slate", "#1e1e2e"),
+    ("Midnight Navy", "#1f2a44"),
+    ("Twilight Plum", "#3a2e47"),
+    ("Forest Spruce", "#263836"),
+    ("Warm Burgundy", "#402e2e"),
+    ("Earth Umber", "#3d382c"),
+    ("Steel Blue", "#282b35"),
+    ("Carbon Black", "#11111b"),
+];
+
+fn resolve_swaybg() -> Option<std::path::PathBuf> {
+    if let Ok(output) = Command::new("which").arg("swaybg").output() {
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                let p = std::path::PathBuf::from(path_str);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    // Fallback: check /nix/store for swaybg
+    if let Ok(entries) = std::fs::read_dir("/nix/store") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.contains("-swaybg-") {
+                let bin = entry.path().join("bin/swaybg");
+                if bin.exists() {
+                    return Some(bin);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn get_finick_config_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+        .map(|c| c.join("finick"))
 }
 
 #[cfg(test)]
@@ -1310,6 +1441,10 @@ mod tests {
             fn reboot(&self) -> bool { false }
 
             fn power_off(&self) -> bool { false }
+
+            fn set_wallpaper(&self, _target: &str) -> Result<(), String> { Ok(()) }
+
+            fn get_current_wallpaper(&self) -> Option<String> { None }
         }
         let backend = StubBackend;
         assert!(backend.set_display_order(&[]).is_ok());
@@ -1363,5 +1498,12 @@ mod tests {
         assert_eq!(displays[1].refresh_rate, "144.00000");
         assert_eq!(displays[1].scale, "1.25");
         assert_eq!(displays[1].transform, 0);
+    }
+
+    #[test]
+    fn test_wallpaper_presets() {
+        assert_eq!(WALLPAPER_COLOR_PRESETS.len(), 8);
+        assert_eq!(WALLPAPER_COLOR_PRESETS[0].1, "#1e1e2e");
+        assert_eq!(WALLPAPER_COLOR_PRESETS[1].1, "#1f2a44");
     }
 }

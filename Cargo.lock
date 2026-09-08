@@ -6395,6 +6395,7 @@ dependencies = [
  "freya-devtools",
  "freya-performance-plugin",
  "ipc",
+ "rfd",
  "serde",
  "serde_json",
  "system",
@@ -7269,6 +7270,7 @@ dependencies = [
  "system",
  "tokio",
  "ui",
+ "winit",
 ]
 
 [[package]]

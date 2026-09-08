@@ -31,10 +31,20 @@ pub struct SettingsStore {
     pub color_temp: State<f64>,
 
     // Appearance & Personalization
+    pub wallpaper: State<String>,
     pub wallpaper_idx: State<usize>,
+    pub wallpaper_folder: State<String>,
+    pub wallpaper_interval: State<usize>,
     pub scrollbar_pref: State<usize>,
     pub icon_size_pref: State<usize>,
     pub focus_mode: State<&'static str>,
+
+    // Desktop & Dock
+    pub dock_position: State<usize>,
+    pub dock_size: State<f64>,
+    pub dock_autohide: State<bool>,
+    pub window_layout: State<usize>,
+    pub workspace_gap: State<f64>,
 
     // System & General
     pub time_24h: State<bool>,
@@ -55,6 +65,13 @@ pub struct SettingsStore {
     pub allow_notif: State<bool>,
     pub notif_style: State<usize>,
     pub silence_sleep: State<bool>,
+
+    // Screen Time
+    pub screen_time_enabled: State<bool>,
+    pub downtime_enabled: State<bool>,
+    pub app_limits_enabled: State<bool>,
+    pub downtime_from: State<String>,
+    pub downtime_to: State<String>,
 
     // Accessibility
     pub text_size: State<f64>,
@@ -223,6 +240,15 @@ impl SettingsStore {
                 if let Some(i) = val.as_i64() {
                     let mut s = self.wallpaper_idx;
                     s.set(i as usize);
+                    let mut wp = self.wallpaper;
+                    wp.set(format!("preset:{i}"));
+                } else if let Some(str_val) = val.as_str() {
+                    let mut wp = self.wallpaper;
+                    wp.set(str_val.to_string());
+                    if let Some(idx) = str_val.strip_prefix("preset:").and_then(|p| p.parse::<usize>().ok()) {
+                        let mut s = self.wallpaper_idx;
+                        s.set(idx);
+                    }
                 }
             }
             SettingKey::Scrollbars => {
@@ -274,6 +300,14 @@ impl SettingsStore {
                 if let Some(b) = val.as_bool() {
                     let mut s = self.silence_sleep;
                     s.set(b);
+                }
+            }
+            SettingKey::ScreenTimeEnabled => {
+                if let Some(b) = val.as_bool() {
+                    let mut s = self.screen_time_enabled;
+                    s.set(b);
+                    let mut s2 = self.downtime_enabled;
+                    s2.set(b);
                 }
             }
             SettingKey::AccessibilityReduceMotion => {
@@ -356,10 +390,10 @@ pub fn use_init_settings_store() -> SettingsStore {
         .parse::<u8>()
         .unwrap_or(78);
 
-    let wifi_power = use_state(|| true);
+    let wifi_power = use_state(|| HyprlandBackend.get_wifi_status());
     let ask_to_join = use_state(|| true);
     let limit_tracking = use_state(|| true);
-    let bt_power = use_state(|| true);
+    let bt_power = use_state(|| HyprlandBackend.get_bluetooth_status());
     let bt_discoverable = use_state(|| true);
 
     let volume = use_state(move || audio_info.volume);
@@ -374,10 +408,19 @@ pub fn use_init_settings_store() -> SettingsStore {
     let night_shift_mode = use_state(|| 0usize);
     let color_temp = use_state(|| 30.0);
 
+    let wallpaper = use_state(|| "#1e1e2e".to_string());
     let wallpaper_idx = use_state(|| 0usize);
+    let wallpaper_folder = use_state(|| String::new());
+    let wallpaper_interval = use_state(|| 0usize);
     let scrollbar_pref = use_state(|| 0usize);
     let icon_size_pref = use_state(|| 1usize);
     let focus_mode = use_state(|| "off");
+
+    let dock_position = use_state(|| 0usize);
+    let dock_size = use_state(|| 52.0);
+    let dock_autohide = use_state(|| true);
+    let window_layout = use_state(|| 0usize);
+    let workspace_gap = use_state(|| 12.0);
 
     let time_24h = use_state(|| true);
     let auto_updates = use_state(|| true);
@@ -396,6 +439,12 @@ pub fn use_init_settings_store() -> SettingsStore {
     let allow_notif = use_state(|| true);
     let notif_style = use_state(|| 0usize);
     let silence_sleep = use_state(|| true);
+
+    let screen_time_enabled = use_state(|| true);
+    let downtime_enabled = use_state(|| false);
+    let app_limits_enabled = use_state(|| true);
+    let downtime_from = use_state(|| "22:00".to_string());
+    let downtime_to = use_state(|| "07:00".to_string());
 
     let text_size = use_state(|| 40.0);
     let reduce_motion = use_state(|| false);
@@ -426,10 +475,18 @@ pub fn use_init_settings_store() -> SettingsStore {
         night_shift,
         night_shift_mode,
         color_temp,
+        wallpaper,
         wallpaper_idx,
+        wallpaper_folder,
+        wallpaper_interval,
         scrollbar_pref,
         icon_size_pref,
         focus_mode,
+        dock_position,
+        dock_size,
+        dock_autohide,
+        window_layout,
+        workspace_gap,
         time_24h,
         auto_updates,
         ntp_sync,
@@ -446,6 +503,11 @@ pub fn use_init_settings_store() -> SettingsStore {
         allow_notif,
         notif_style,
         silence_sleep,
+        screen_time_enabled,
+        downtime_enabled,
+        app_limits_enabled,
+        downtime_from,
+        downtime_to,
         text_size,
         reduce_motion,
         increase_contrast,

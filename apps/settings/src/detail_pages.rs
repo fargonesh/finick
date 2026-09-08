@@ -2,16 +2,28 @@ use freya::prelude::*;
 use ipsea::settings::SettingKey;
 use system::{DisplayInfo, SystemBackend};
 use ui::*;
+use crate::pages::network::{fetch_network_info, NetworkInfo};
 use crate::state::*;
 
-/// 2-column grid container helper matching .grid2 in ui_demo.html
 pub fn grid2(children: impl IntoIterator<Item = impl IntoElement>) -> impl IntoElement {
-    rect()
-        .width(Size::fill())
-        .horizontal()
-        .spacing(GAP)
-        .children(children)
-        .content(Content::Flex)
+    let items: Vec<Element> = children.into_iter().map(|c| c.into_element()).collect();
+    responsive_view(720.0, move |compact| {
+        if compact {
+            rect()
+                .width(Size::fill())
+                .vertical()
+                .spacing(GAP)
+                .children(items.clone())
+                .content(Content::Flex)
+        } else {
+            rect()
+                .width(Size::fill())
+                .horizontal()
+                .spacing(GAP)
+                .children(items.clone())
+                .content(Content::Flex)
+        }
+    })
 }
 
 #[derive(PartialEq)]
@@ -35,6 +47,8 @@ impl Component for AppearanceDetailPage {
         let is_scroll_locked = scroll_lock.is_some();
         let icon_lock = store.lock_label(&SettingKey::IconSize);
         let is_icon_locked = icon_lock.is_some();
+
+
 
         responsive_view(1000.0, move |compact| {
             rect()
@@ -121,34 +135,233 @@ impl Component for AppearanceDetailPage {
                         // 2-Column Row: Wallpaper & Interface
                         .child(
                             responsive_stack(compact, [
-                                // Left: Wallpaper (8 previews)
+                                // Left: Wallpaper
                                 rect()
                                     .width(Size::flex(1.))
-                                    .child(
+                                    .child({
+                                        let cur_wp = store.wallpaper.read().clone();
+                                        let is_custom_image = {
+                                            let clean = cur_wp.strip_prefix("file://").unwrap_or(&cur_wp);
+                                            !clean.is_empty() && std::path::Path::new(clean).is_file()
+                                        };
+                                        let image_label = if is_custom_image {
+                                            let clean = cur_wp.strip_prefix("file://").unwrap_or(&cur_wp);
+                                            std::path::Path::new(clean)
+                                                .file_name()
+                                                .map(|f| f.to_string_lossy().to_string())
+                                                .unwrap_or_else(|| "Custom image".to_string())
+                                        } else {
+                                            "Custom image".to_string()
+                                        };
+                                        let image_subtext = if is_custom_image {
+                                            let clean = cur_wp.strip_prefix("file://").unwrap_or(&cur_wp);
+                                            Some(clean.to_string())
+                                        } else {
+                                            Some("Select an image to display across all monitors".to_string())
+                                        };
+
                                         tile()
                                             .child(tile_head(
-                                                None,
+                                                Some(PICTURE),
                                                 "Wallpaper",
                                                 wp_lock.as_ref().map(|l| lock_badge(l)),
                                             ))
                                             .child(
                                                 rect()
                                                     .opacity(if is_wp_locked { 0.45 } else { 1.0 })
+                                                    .vertical()
+                                                    .spacing(10.)
+                                                    .child(field_label("Colour defaults"))
                                                     .child({
                                                         let store = store;
-                                                        wallpaper_picker(
-                                                            8,
-                                                            *store.wallpaper_idx.read(),
-                                                            true,
-                                                            move |idx| {
-                                                                if !is_wp_locked {
-                                                                    store.set(SettingKey::Wallpaper, idx as i64);
+                                                        wallpaper_color_picker(&cur_wp, move |hex| {
+                                                            if !is_wp_locked {
+                                                                store.set(SettingKey::Wallpaper, hex);
+                                                            }
+                                                        })
+                                                    })
+                                                    .child(
+                                                        rect().margin((8., 0., 0., 0.)).child(field_label("Custom background"))
+                                                    )
+                                                     .child(setting_row(
+                                                        image_label,
+                                                        image_subtext,
+                                                        false,
+                                                        rect()
+                                                            .horizontal()
+                                                            .spacing(8.)
+                                                            .content(Content::Flex)
+                                                            .child(secondary_button("Choose file…", move || {
+                                                                if is_wp_locked {
+                                                                    return;
                                                                 }
-                                                            },
-                                                        )
-                                                    }),
-                                            ),
-                                    ),
+                                                                let store = store;
+                                                                freya::prelude::spawn(async move {
+                                                                    if let Some(file) = rfd::AsyncFileDialog::new()
+                                                                        .add_filter(
+                                                                            "Images",
+                                                                            &["png", "jpg", "jpeg", "webp", "svg", "bmp"],
+                                                                        )
+                                                                        .pick_file()
+                                                                        .await
+                                                                    {
+                                                                        let path_str = file.path().to_string_lossy().to_string();
+                                                                        store.set(SettingKey::Wallpaper, path_str);
+                                                                    }
+                                                                });
+                                                            }))
+                                                            .maybe(is_custom_image, |el| {
+                                                                let store = store;
+                                                                el.child(secondary_button("Reset", move || {
+                                                                    if !is_wp_locked {
+                                                                        store.set(SettingKey::Wallpaper, "#1e1e2e".to_string());
+                                                                    }
+                                                                }))
+                                                            }),
+                                                    ))
+                                                    .child(
+                                                        rect()
+                                                            .margin((14., 0., 0., 0.))
+                                                            .vertical()
+                                                            .spacing(8.)
+                                                            .child(field_label("Folder slideshow"))
+                                                            .child(setting_row(
+                                                                if store.wallpaper_folder.read().is_empty() {
+                                                                    "No folder selected".to_string()
+                                                                } else {
+                                                                    store.wallpaper_folder.read().clone()
+                                                                },
+                                                                Some("Pick a folder to browse images as wallpapers".to_string()),
+                                                                false,
+                                                                rect()
+                                                                    .horizontal()
+                                                                    .spacing(8.)
+                                                                    .content(Content::Flex)
+                                                                    .child(secondary_button("Browse folder…", {
+                                                                        let store = store;
+                                                                        move || {
+                                                                            if is_wp_locked {
+                                                                                return;
+                                                                            }
+                                                                            let store = store;
+                                                                            freya::prelude::spawn(async move {
+                                                                                if let Some(folder) = rfd::AsyncFileDialog::new().pick_folder().await {
+                                                                                    let path = folder.path().to_string_lossy().to_string();
+                                                                                    let mut f = store.wallpaper_folder;
+                                                                                    f.set(path.clone());
+                                                                                    store.set(SettingKey::Custom("appearance.wallpaper_folder".to_string()), path);
+                                                                                }
+                                                                            });
+                                                                        }
+                                                                    }))
+                                                                    .maybe(!store.wallpaper_folder.read().is_empty(), |el| {
+                                                                        let store = store;
+                                                                        el.child(ghost_button("Clear", move || {
+                                                                            let mut f = store.wallpaper_folder;
+                                                                            f.set(String::new());
+                                                                            store.set(
+                                                                                SettingKey::Custom("appearance.wallpaper_folder".to_string()),
+                                                                                String::new(),
+                                                                            );
+                                                                        }))
+                                                                    }),
+                                                            ))
+                                                            .child({
+                                                                let folder = store.wallpaper_folder.read().clone();
+                                                                if folder.is_empty() {
+                                                                    rect().into_element()
+                                                                } else {
+                                                                    let images: Vec<String> = std::fs::read_dir(&folder)
+                                                                        .map(|rd| {
+                                                                            rd.filter_map(|e| e.ok())
+                                                                                .filter_map(|e| {
+                                                                                    let p = e.path();
+                                                                                    let ext = p.extension()?.to_string_lossy().to_lowercase();
+                                                                                    if ["png", "jpg", "jpeg", "webp", "bmp"].contains(&ext.as_str()) {
+                                                                                        Some(p.to_string_lossy().to_string())
+                                                                                    } else {
+                                                                                        None
+                                                                                    }
+                                                                                })
+                                                                                .take(12)
+                                                                                .collect()
+                                                                        })
+                                                                        .unwrap_or_default();
+                                                                    if images.is_empty() {
+                                                                        rect()
+                                                                            .margin((6., 0., 0., 0.))
+                                                                            .child(label().font_size(11.).color(use_app_theme().text_dim).text("No images found in folder"))
+                                                                            .into_element()
+                                                                    } else {
+                                                                        rect()
+                                                                            .width(Size::fill())
+                                                                            .vertical()
+                                                                            .spacing(8.)
+                                                                            .margin((6., 0., 0., 0.))
+                                                                            .child(
+                                                                                rect()
+                                                                                    .width(Size::fill())
+                                                                                    .horizontal()
+                                                                                    .spacing(6.)
+                                                                                    .content(Content::Flex)
+                                                                                    .children(images.iter().take(6).cloned().map({
+                                                                                        let store = store;
+                                                                                        let cur = cur_wp.clone();
+                                                                                        move |path| {
+                                                                                            let is_sel = cur == path || cur == format!("file://{path}");
+                                                                                            let p = path.clone();
+                                                                                            let store = store;
+                                                                                            rect()
+                                                                                                .width(Size::flex(1.))
+                                                                                                .height(Size::px(52.))
+                                                                                                .corner_radius(8.)
+                                                                                                .background(use_app_theme().panel_raised)
+                                                                                                .border(Border::new().width(if is_sel { 2. } else { 1. }).fill(if is_sel { use_app_theme().accent } else { use_app_theme().border }))
+                                                                                                .cursor(CursorIcon::Pointer)
+                                                                                                .center()
+                                                                                                .on_press(move |_| {
+                                                                                                    store.set(SettingKey::Wallpaper, p.clone());
+                                                                                                })
+                                                                                                .child(label().font_size(9.).color(use_app_theme().text_dim).text(
+                                                                                                    std::path::Path::new(&path)
+                                                                                                        .file_name()
+                                                                                                        .map(|n| n.to_string_lossy().chars().take(10).collect::<String>())
+                                                                                                        .unwrap_or_else(|| "img".to_string()),
+                                                                                                ))
+                                                                                        }
+                                                                                    })),
+                                                                            )
+                                                                            .into_element()
+                                                                    }
+                                                                }
+                                                            })
+                                                            .child(
+                                                                rect()
+                                                                    .margin((10., 0., 0., 0.))
+                                                                    .horizontal()
+                                                                    .cross_align(Alignment::Center)
+                                                                    .spacing(8.)
+                                                                    .child(field_label("Slideshow interval"))
+                                                                    .child({
+                                                                        let store = store;
+                                                                        segmented_control(
+                                                                            vec![("Off", 0), ("30s", 1), ("5m", 2), ("15m", 3), ("1h", 4)],
+                                                                            *store.wallpaper_interval.read(),
+                                                                            move |v| {
+                                                                                let mut s = store.wallpaper_interval;
+                                                                                s.set(v);
+                                                                                store.set(
+                                                                                    SettingKey::Custom("appearance.wallpaper_interval".to_string()),
+                                                                                    v as i64,
+                                                                                );
+                                                                            },
+                                                                        )
+                                                                    }),
+                                                            )
+                                                            .child(tile_sub("When interval is set, Finick will rotate wallpapers from the chosen folder")),
+                                                    ),
+                                            )
+                                    }),
                                 // Right: Interface
                                 rect()
                                     .width(Size::flex(1.))
@@ -220,72 +433,121 @@ pub fn appearance_detail_page(
     AppearanceDetailPage { theme_state, store }
 }
 
-/// Wi-Fi detail page matching ui_demo.html
-pub fn wifi_detail_page(store: SettingsStore) -> impl IntoElement {
-    let t = use_app_theme();
-    let is_wifi_locked = store.is_locked(&SettingKey::WifiEnabled);
-    let wifi_lock = store.lock_label(&SettingKey::WifiEnabled);
-    let wifi_on = *store.wifi_power.read();
+#[derive(PartialEq)]
+pub struct WifiDetailPage {
+    pub store: SettingsStore,
+}
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(WIFI, "Wi-Fi", "Manage saved networks and connection preferences"))
-        .child(
-            rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                // Wide: Current network
-                .child(
-                    tile()
-                        .child(tile_head(
-                            None,
-                            "Current network",
-                            Some(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .spacing(8.)
-                                    .maybe_child(wifi_lock.as_ref().map(|l| lock_badge(l)))
-                                    .child(
-                                        rect()
-                                            .opacity(if is_wifi_locked { 0.45 } else { 1.0 })
-                                            .child({
-                                                let store = store;
-                                                pill_switch(wifi_on, move |v| {
-                                                    if !is_wifi_locked {
-                                                        store.set(SettingKey::WifiEnabled, v);
-                                                    }
-                                                })
-                                            }),
-                                    ),
-                            ),
-                        ))
-                        .child(setting_row(
-                            if wifi_on { "Homebase 5G" } else { "Not connected" },
-                            Some(if wifi_on { "Auto-join enabled" } else { "Wi-Fi is off" }),
-                            false,
-                            label().font_size(12.).color(t.accent).text(if wifi_on { "Connected" } else { "" }),
-                        ))
-                        .child(setting_row("IP address", None::<String>, true, label().font_size(12.).color(t.text_dim).text("192.168.1.42")))
-                        .child(setting_row("Security", None::<String>, true, label().font_size(12.).color(t.text_dim).text("WPA3 Personal"))),
-                )
-                // 2-Column Row: Known networks & Preferences
-                .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Known networks", None::<String>))
-                                    .child(setting_row("Homebase 5G", None::<String>, false, status_chip("Connected", true, None)))
-                                    .child(setting_row("Homebase 2.4G", None::<String>, true, pill_switch(true, |_| {})))
-                                    .child(setting_row("The Coffee House", None::<String>, true, pill_switch(false, |_| {})))
-                                    .child(setting_row("Studio Guest", None::<String>, true, pill_switch(true, |_| {}))),
-                            ),
-                        rect()
-                            .width(Size::flex(1.))
+impl Component for WifiDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let t = use_app_theme();
+        let is_wifi_locked = store.is_locked(&SettingKey::WifiEnabled);
+        let wifi_lock = store.lock_label(&SettingKey::WifiEnabled);
+        let wifi_on = *store.wifi_power.read();
+
+        let net_state: State<Option<NetworkInfo>> = use_state(|| None);
+        let loading = use_state(|| true);
+        use_hook(move || {
+            let mut ns = net_state;
+            let mut ld = loading;
+            spawn(async move {
+                let info = tokio::task::spawn_blocking(fetch_network_info).await.unwrap_or_default();
+                ns.set(Some(info));
+                ld.set(false);
+            });
+        });
+
+        let net = net_state.read().clone().unwrap_or_default();
+        let active_label = if !wifi_on {
+            "Not connected".to_string()
+        } else if let Some(ssid) = &net.active_ssid {
+            ssid.clone()
+        } else {
+            "Not connected".to_string()
+        };
+        let active_sub = if !wifi_on {
+            Some("Wi-Fi is off".to_string())
+        } else if net.active_ssid.is_some() {
+            Some(format!("{} · {}", net.primary_interface, net.primary_ip))
+        } else {
+            Some("Not associated".to_string())
+        };
+        let sec_label = net
+            .available_networks
+            .iter()
+            .find(|n| Some(&n.ssid) == net.active_ssid.as_ref())
+            .map(|n| n.security.clone())
+            .unwrap_or_else(|| if wifi_on { "—".to_string() } else { "—".to_string() });
+
+        rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(WIFI, "Wi-Fi", "Manage saved networks and connection preferences"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    .child(
+                        tile()
+                            .child(tile_head(
+                                None,
+                                "Current network",
+                                Some(
+                                    rect()
+                                        .horizontal()
+                                        .cross_align(Alignment::Center)
+                                        .spacing(8.)
+                                        .maybe_child(wifi_lock.as_ref().map(|l| lock_badge(l)))
+                                        .child(
+                                            rect()
+                                                .opacity(if is_wifi_locked { 0.45 } else { 1.0 })
+                                                .child({
+                                                    let store = store;
+                                                    pill_switch(wifi_on, move |v| {
+                                                        if !is_wifi_locked {
+                                                            store.set(SettingKey::WifiEnabled, v);
+                                                        }
+                                                    })
+                                                }),
+                                        ),
+                                ),
+                            ))
+                            .child(setting_row(
+                                active_label,
+                                active_sub,
+                                false,
+                                label().font_size(12.).color(t.accent).text(if wifi_on && net.active_ssid.is_some() { "Connected" } else { "" }),
+                            ))
+                            .child(setting_row("IP address", None::<String>, true, label().font_size(12.).color(t.text_dim).text(net.primary_ip.clone())))
+                            .child(setting_row("Security", None::<String>, true, label().font_size(12.).color(t.text_dim).text(sec_label))),
+                    )
+                    .child(
+                        grid2([
+                            rect()
+                                .width(Size::flex(1.))
+                                .child({
+                                    let mut known = tile().child(tile_head(None, "Known networks", None::<String>));
+                                    if *loading.read() {
+                                        known = known.child(tile_sub("Scanning…"));
+                                    } else if net.known_networks.is_empty() {
+                                        known = known.child(tile_sub("No saved networks"));
+                                    } else {
+                                        for kn in net.known_networks.iter().take(5) {
+                                            let is_conn = Some(&kn.ssid) == net.active_ssid.as_ref();
+                                            known = known.child(setting_row(
+                                                kn.ssid.clone(),
+                                                Some(kn.security.clone()),
+                                                false,
+                                                if is_conn { status_chip("Connected", true, None).into_element() } else { status_chip("Saved", false, None).into_element() },
+                                            ));
+                                        }
+                                    }
+                                    known
+                                }),
+                            rect()
+                                .width(Size::flex(1.))
                             .child(
                                 tile()
                                     .child(tile_head(None, "Preferences", None::<String>))
@@ -318,119 +580,195 @@ pub fn wifi_detail_page(store: SettingsStore) -> impl IntoElement {
                     ]),
                 ),
         )
+    }
 }
 
-/// Bluetooth detail page matching ui_demo.html
-pub fn bluetooth_detail_page(
-    store: SettingsStore,
-    kb_connected: State<bool>,
-    hp_connected: State<bool>,
-    tp_connected: State<bool>,
-) -> impl IntoElement {
-    let bt_lock = store.lock_label(&SettingKey::BluetoothEnabled);
-    let is_bt_locked = bt_lock.is_some();
-    let bt_on = *store.bt_power.read();
-    let disc_on = *store.bt_discoverable.read();
+pub fn wifi_detail_page(store: SettingsStore) -> WifiDetailPage {
+    WifiDetailPage { store }
+}
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(BLUETOOTH, "Bluetooth", "Connect and manage nearby devices"))
-        .child(
-            rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                // Wide: Bluetooth & Discoverable
-                .child(
-                    tile()
-                        .child(tile_head(
-                            None,
-                            "Bluetooth",
-                            Some(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .spacing(8.)
-                                    .maybe_child(bt_lock.as_ref().map(|l| lock_badge(l)))
-                                    .child(
+#[derive(PartialEq)]
+pub struct BluetoothDetailPage {
+    pub store: SettingsStore,
+}
+
+impl Component for BluetoothDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let t = use_app_theme();
+        let bt_lock = store.lock_label(&SettingKey::BluetoothEnabled);
+        let is_bt_locked = bt_lock.is_some();
+        let bt_on = *store.bt_power.read();
+        let disc_on = *store.bt_discoverable.read();
+
+        let devices: State<Vec<system::BluetoothDevice>> = use_state(Vec::new);
+        let loading: State<bool> = use_state(|| true);
+        let scan_nearby: State<Vec<system::BluetoothDevice>> = use_state(Vec::new);
+
+        use_hook(move || {
+            let mut dev = devices;
+            let mut ld = loading;
+            let mut nearby = scan_nearby;
+            spawn(async move {
+                let paired = tokio::task::spawn_blocking(|| system::HyprlandBackend.get_paired_bluetooth_devices())
+                    .await
+                    .unwrap_or_default();
+                let all_nearby = paired.iter().filter(|d| !d.connected).cloned().collect::<Vec<_>>();
+                dev.set(paired);
+                nearby.set(all_nearby);
+                ld.set(false);
+            });
+        });
+
+        let paired = devices.read().clone();
+        let nearby_devices = scan_nearby.read().clone();
+        let is_loading = *loading.read();
+
+        rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(BLUETOOTH, "Bluetooth", "Connect and manage nearby devices"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    .child(
+                        tile()
+                            .child(tile_head(
+                                None,
+                                "Bluetooth",
+                                Some(
+                                    rect()
+                                        .horizontal()
+                                        .cross_align(Alignment::Center)
+                                        .spacing(8.)
+                                        .maybe_child(bt_lock.as_ref().map(|l| lock_badge(l)))
+                                        .child(
+                                            rect()
+                                                .opacity(if is_bt_locked { 0.45 } else { 1.0 })
+                                                .child({
+                                                    let store = store;
+                                                    pill_switch(bt_on, move |v| {
+                                                        if !is_bt_locked {
+                                                            store.set(SettingKey::BluetoothEnabled, v);
+                                                            std::thread::spawn(move || {
+                                                                system::HyprlandBackend.set_bluetooth_status(v);
+                                                            });
+                                                        }
+                                                    })
+                                                }),
+                                        ),
+                                ),
+                            ))
+                            .child(setting_row("Discoverable", None::<String>, false, {
+                                let mut d = store.bt_discoverable;
+                                pill_switch(disc_on, move |v| d.set(v))
+                            }))
+                            .child(tile_sub(if bt_on {
+                                "Bluetooth is on — scanning for devices"
+                            } else {
+                                "Turn on Bluetooth to connect to devices"
+                            })),
+                    )
+                    .child(
+                        grid2([
+                            rect().width(Size::flex(1.)).child({
+                                let mut base = tile().child(tile_head(None, "My devices", None::<String>));
+                                if is_loading {
+                                    base = base.child(tile_sub("Loading paired devices…"));
+                                } else if paired.is_empty() {
+                                    base = base.child(tile_sub("No paired devices")).child(
+                                        rect().margin((8., 0., 0., 0.)).child(ghost_button("Scan for devices", {
+                                            let mut ld = loading;
+                                            move || ld.set(true)
+                                        })),
+                                    );
+                                } else {
+                                    for dev in paired.iter().take(6) {
+                                        let mac = dev.mac.clone();
+                                        let name = dev.name.clone();
+                                        let is_conn = dev.connected;
+                                        let status = if is_conn { "Connected" } else { "Paired" };
+                                        let mac2 = mac.clone();
+                                        let mac3 = mac.clone();
+                                        base = base.child(setting_row(
+                                            name,
+                                            Some(mac.clone()),
+                                            false,
+                                            rect()
+                                                .horizontal()
+                                                .spacing(8.)
+                                                .content(Content::Flex)
+                                                .child(status_chip(status, is_conn, None))
+                                                .child(secondary_button(if is_conn { "Disconnect" } else { "Connect" }, move || {
+                                                    let m = mac.clone();
+                                                    let c = is_conn;
+                                                    std::thread::spawn(move || {
+                                                        if c {
+                                                            system::HyprlandBackend.disconnect_bluetooth_device(&m);
+                                                        } else {
+                                                            system::HyprlandBackend.connect_bluetooth_device(&m);
+                                                        }
+                                                    });
+                                                }))
+                                                .child(ghost_button("Forget", move || {
+                                                    let m = mac2.clone();
+                                                    std::thread::spawn(move || {
+                                                        system::HyprlandBackend.remove_bluetooth_device(&m);
+                                                    });
+                                                })),
+                                        ));
+                                        let _ = mac3;
+                                    }
+                                }
+                                base
+                            }),
+                            rect().width(Size::flex(1.)).child({
+                                let mut base = tile().child(tile_head(None, "Nearby", None::<String>));
+                                if is_loading {
+                                    base = base.child(tile_sub("Scanning…"));
+                                } else if nearby_devices.is_empty() {
+                                    base = base.child(tile_sub("No nearby devices found")).child(
                                         rect()
-                                            .opacity(if is_bt_locked { 0.45 } else { 1.0 })
-                                            .child({
-                                                let store = store;
-                                                pill_switch(bt_on, move |v| {
-                                                    if !is_bt_locked {
-                                                        store.set(SettingKey::BluetoothEnabled, v);
-                                                    }
-                                                })
+                                            .margin((8., 0., 0., 0.))
+                                            .horizontal()
+                                            .spacing(8.)
+                                            .child(ghost_button("Start scan", || {
+                                                std::thread::spawn(|| {
+                                                    let _ = std::process::Command::new("bluetoothctl").args(["scan", "on"]).output();
+                                                });
+                                            }))
+                                            .child(label().font_size(11.).color(t.text_dim).text("bluetoothctl scan")),
+                                    );
+                                } else {
+                                    for dev in nearby_devices.iter().take(5) {
+                                        let mac = dev.mac.clone();
+                                        let name = dev.name.clone();
+                                        base = base.child(setting_row(
+                                            name,
+                                            Some(mac.clone()),
+                                            false,
+                                            secondary_button("Pair", move || {
+                                                let m = mac.clone();
+                                                std::thread::spawn(move || {
+                                                    let _ = std::process::Command::new("bluetoothctl").args(["pair", &m]).output();
+                                                    let _ = std::process::Command::new("bluetoothctl").args(["connect", &m]).output();
+                                                });
                                             }),
-                                    ),
-                            ),
-                        ))
-                        .child(setting_row("Discoverable", None::<String>, false, {
-                            let mut d = store.bt_discoverable;
-                            pill_switch(disc_on, move |v| d.set(v))
-                        })),
-                )
-                // 2-Column Row: My devices & Nearby
-                .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "My devices", None::<String>))
-                                    .child(setting_row(
-                                        "Wireless Keyboard",
-                                        Some("Battery 64%"),
-                                        false,
-                                        {
-                                            let mut kb = kb_connected;
-                                            status_chip(
-                                                if *kb_connected.read() { "Connected" } else { "Connect" },
-                                                *kb_connected.read(),
-                                                Some((move |_| kb.set(!*kb.read())).into()),
-                                            )
-                                        },
-                                    ))
-                                    .child(setting_row(
-                                        "Headphones",
-                                        Some(if *hp_connected.read() { "Connected" } else { "Not connected" }),
-                                        true,
-                                        {
-                                            let mut hp = hp_connected;
-                                            status_chip(
-                                                if *hp_connected.read() { "Connected" } else { "Connect" },
-                                                *hp_connected.read(),
-                                                Some((move |_| hp.set(!*hp.read())).into()),
-                                            )
-                                        },
-                                    ))
-                                    .child(setting_row(
-                                        "Trackpad",
-                                        Some("Battery 81%"),
-                                        true,
-                                        {
-                                            let mut tp = tp_connected;
-                                            status_chip(
-                                                if *tp_connected.read() { "Connected" } else { "Connect" },
-                                                *tp_connected.read(),
-                                                Some((move |_| tp.set(!*tp.read())).into()),
-                                            )
-                                        },
-                                    )),
-                            ),
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Nearby", None::<String>))
-                                    .child(setting_row("Unknown Speaker", None::<String>, false, ghost_button("Connect", || {})))
-                                    .child(setting_row("Flora's Watch", None::<String>, true, ghost_button("Connect", || {}))),
-                            ),
-                    ]),
-                ),
-        )
+                                        ));
+                                    }
+                                }
+                                base
+                            }),
+                        ]),
+                    ),
+            )
+    }
+}
+
+pub fn bluetooth_detail_page(store: SettingsStore) -> BluetoothDetailPage {
+    BluetoothDetailPage { store }
 }
 
 #[derive(PartialEq)]
@@ -1642,7 +1980,294 @@ pub fn accessibility_detail_page(store: SettingsStore) -> impl IntoElement {
         )
 }
 
-/// About detail page matching ui_demo.html
+pub fn screen_time_detail_page(store: SettingsStore) -> impl IntoElement {
+    let t = use_app_theme();
+    let st_lock = store.lock_label(&SettingKey::ScreenTimeEnabled);
+    let is_st_locked = st_lock.is_some();
+    let enabled = *store.screen_time_enabled.read();
+    let downtime_on = *store.downtime_enabled.read();
+    let app_limits_on = *store.app_limits_enabled.read();
+    let from = store.downtime_from.read().clone();
+    let to = store.downtime_to.read().clone();
+
+    rect()
+        .width(Size::fill())
+        .vertical()
+        .child(page_head(GENERAL, "Screen Time", "App usage limits, downtime and communication"))
+        .child(
+            rect()
+                .width(Size::fill())
+                .vertical()
+                .spacing(GAP)
+                .child(
+                    tile()
+                        .child(tile_head(
+                            None,
+                            "Screen Time",
+                            Some(
+                                rect()
+                                    .horizontal()
+                                    .cross_align(Alignment::Center)
+                                    .spacing(8.)
+                                    .maybe_child(st_lock.as_ref().map(|l| lock_badge(l)))
+                                    .child(
+                                        rect()
+                                            .opacity(if is_st_locked { 0.45 } else { 1.0 })
+                                            .child({
+                                                let store = store;
+                                                pill_switch(enabled, move |v| {
+                                                    if !is_st_locked {
+                                                        store.set(SettingKey::ScreenTimeEnabled, v);
+                                                    }
+                                                })
+                                            }),
+                                    ),
+                            ),
+                        ))
+                        .child(tile_sub(if enabled {
+                            "Limits and downtime are enforced"
+                        } else {
+                            "Screen Time is off"
+                        }))
+                        .child(
+                            rect()
+                                .width(Size::fill())
+                                .margin((12., 0., 0., 0.))
+                                .opacity(if !enabled { 0.45 } else { 1.0 })
+                                .child(mini_bar_chart([62., 48., 71., 55., 80., 44., 67.], ["M", "T", "W", "T", "F", "S", "S"])),
+                        )
+                        .child(
+                            rect()
+                                .width(Size::fill())
+                                .horizontal()
+                                .main_align(Alignment::SpaceBetween)
+                                .margin((8., 0., 0., 0.))
+                                .child(label().font_size(11.).color(t.text_dim).text("Weekly average: 3h 42m / day"))
+                                .child(label().font_size(11.).color(t.accent).text("See All Activity →")),
+                        ),
+                )
+                .child(
+                    grid2([
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "App Limits", st_lock.as_ref().map(|l| lock_badge(l))))
+                                .child(
+                                    rect()
+                                        .opacity(if !enabled { 0.45 } else { 1.0 })
+                                        .vertical()
+                                        .child(setting_row("Limits enabled", None::<String>, false, {
+                                            let store = store;
+                                            pill_switch(app_limits_on, move |v| {
+                                                if !is_st_locked {
+                                                    let mut s = store.app_limits_enabled;
+                                                    s.set(v);
+                                                }
+                                            })
+                                        }))
+                                        .child(setting_row("Social · 1h 30m", Some("Instagram, TikTok"), false, status_chip("1h 12m left", true, None)))
+                                        .child(setting_row("Games · 1h", Some("Steam, Minecraft"), true, status_chip("42m left", true, None)))
+                                        .child(setting_row("Browser · 2h", Some("Safari, Chrome"), true, ghost_button("Add Limit", || {}))),
+                                ),
+                        ),
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Downtime", st_lock.as_ref().map(|l| lock_badge(l))))
+                                .child(
+                                    rect()
+                                        .opacity(if !enabled { 0.45 } else { 1.0 })
+                                        .vertical()
+                                        .child(setting_row("Downtime", None::<String>, false, {
+                                            let store = store;
+                                            pill_switch(downtime_on, move |v| {
+                                                if !is_st_locked {
+                                                    let mut s = store.downtime_enabled;
+                                                    s.set(v);
+                                                }
+                                            })
+                                        }))
+                                        .child(setting_row(
+                                            "Schedule",
+                                            Some(format!("{from} — {to}")),
+                                            true,
+                                            ghost_button("Edit", || {}),
+                                        ))
+                                        .child(tile_sub("Only apps you allow and phone calls will be available")),
+                                ),
+                        ),
+                    ]),
+                )
+                .child(
+                    grid2([
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Communication", None::<String>))
+                                .child(setting_row("During downtime", Some("Contacts only"), false, status_chip("Contacts", false, None)))
+                                .child(setting_row("During Screen Time", Some("Everyone"), true, ghost_button("Manage", || {}))),
+                        ),
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Content & Privacy", st_lock.as_ref().map(|l| lock_badge(l))))
+                                .child(setting_row("Content restrictions", None::<String>, false, pill_switch(false, |_| {})))
+                                .child(setting_row("App installs", None::<String>, true, pill_switch(true, |_| {}))),
+                        ),
+                    ]),
+                ),
+        )
+}
+
+pub fn desktop_detail_page(store: SettingsStore) -> impl IntoElement {
+    let layout = *store.window_layout.read();
+    let gap = *store.workspace_gap.read();
+    let dock_pos = *store.dock_position.read();
+    let dock_sz = *store.dock_size.read();
+    let dock_hide = *store.dock_autohide.read();
+
+    rect()
+        .width(Size::fill())
+        .vertical()
+        .child(page_head(LAYOUT_GRID, "Desktop & Dock", "Workspaces, window management and dock"))
+        .child(
+            rect()
+                .width(Size::fill())
+                .vertical()
+                .spacing(GAP)
+                .child(
+                    grid2([
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Window Management", None::<String>))
+                                .child(field_label("Layout"))
+                                .child({
+                                    let store = store;
+                                    segmented_control(
+                                        vec![("Master", 0), ("Dwindle", 1), ("Floating", 2)],
+                                        layout,
+                                        move |v| {
+                                            let mut s = store.window_layout;
+                                            s.set(v);
+                                            let val = match v {
+                                                0 => "master",
+                                                1 => "dwindle",
+                                                _ => "floating",
+                                            };
+                                            store.set(SettingKey::Custom("desktop.layout".to_string()), val);
+                                        },
+                                    )
+                                })
+                                .child(
+                                    rect()
+                                        .margin((14., 0., 0., 0.))
+                                        .child(field_label(format!("Workspace gap · {} px", gap as i32))),
+                                )
+                                .child({
+                                    let store = store;
+                                    slider_row(None, gap, move |v| {
+                                        let mut s = store.workspace_gap;
+                                        s.set(v);
+                                        store.set(SettingKey::Custom("desktop.workspace_gap".to_string()), v);
+                                        let _ = std::process::Command::new("hyprctl")
+                                            .args(["keyword", "general:gaps_out", &format!("{}", v as i32)])
+                                            .output();
+                                    })
+                                })
+                                .child(tile_sub("Gaps are applied live via hyprctl")),
+                        ),
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Dock", None::<String>))
+                                .child(field_label("Position"))
+                                .child({
+                                    let store = store;
+                                    segmented_control(
+                                        vec![("Bottom", 0), ("Left", 1), ("Hidden", 2)],
+                                        dock_pos,
+                                        move |v| {
+                                            let mut s = store.dock_position;
+                                            s.set(v);
+                                            store.set(SettingKey::Custom("desktop.dock_position".to_string()), v as i64);
+                                        },
+                                    )
+                                })
+                                .child(
+                                    rect()
+                                        .margin((12., 0., 0., 0.))
+                                        .child(field_label(format!("Size · {} px", dock_sz as i32))),
+                                )
+                                .child({
+                                    let store = store;
+                                    slider_row(None, dock_sz, move |v| {
+                                        let mut s = store.dock_size;
+                                        s.set(v.clamp(36., 72.));
+                                        store.set(SettingKey::Custom("desktop.dock_size".to_string()), v);
+                                    })
+                                })
+                                .child(setting_row("Autohide", None::<String>, true, {
+                                    let store = store;
+                                    pill_switch(dock_hide, move |v| {
+                                        let mut s = store.dock_autohide;
+                                        s.set(v);
+                                        store.set(SettingKey::Custom("desktop.dock_autohide".to_string()), v);
+                                    })
+                                })),
+                        ),
+                    ]),
+                )
+                .child(
+                    tile()
+                        .child(tile_head(None, "Workspaces", None::<String>))
+                        .child(tile_sub("Drag to reorder — gaps and layout update live"))
+                        .child(
+                            rect()
+                                .width(Size::fill())
+                                .height(Size::px(92.))
+                                .horizontal()
+                                .spacing(10.)
+                                .margin((10., 0., 0., 0.))
+                                .content(Content::Flex)
+                                .children((0..5).map(|i| {
+                                    let t = use_app_theme();
+                                    let is_active = i == 1;
+                                    rect()
+                                        .width(Size::flex(1.))
+                                        .height(Size::fill())
+                                        .corner_radius(10.)
+                                        .background(if is_active { t.accent } else { t.panel_raised })
+                                        .border(Border::new().width(1.).fill(if is_active { t.accent } else { t.border }))
+                                        .center()
+                                        .child(label().font_size(13.).font_weight(FontWeight::BOLD).color(if is_active { Color::WHITE } else { t.text_dim }).text(format!("{}", i + 1)))
+                                })),
+                        )
+                        .child(
+                            rect()
+                                .width(Size::fill())
+                                .horizontal()
+                                .spacing(8.)
+                                .margin((12., 0., 0., 0.))
+                                .content(Content::Flex)
+                                .child(rect().width(Size::flex(1.)).child(ghost_button("Add Desktop", || {})))
+                                .child(rect().width(Size::flex(1.)).child(secondary_button("Reset Layout", || {}))),
+                        ),
+                )
+                .child(
+                    grid2([
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Widgets", None::<String>))
+                                .child(setting_row("Show widgets", Some("Clock, weather on desktop"), false, pill_switch(true, |_| {})))
+                                .child(setting_row("Widget style", Some("Translucent"), true, status_chip("Translucent", false, None))),
+                        ),
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Mission Control", None::<String>))
+                                .child(setting_row("Hot corner", Some("Top-left · Mission Control"), false, ghost_button("Configure", || {})))
+                                .child(setting_row("Swipe gesture", Some("Three-finger up"), true, pill_switch(true, |_| {}))),
+                        ),
+                    ]),
+                ),
+        )
+}
+
+ /// About detail page matching ui_demo.html
 pub fn about_detail_page() -> impl IntoElement {
     let t = use_app_theme();
 

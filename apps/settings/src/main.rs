@@ -23,11 +23,13 @@ pub enum Route {
     Sound,
     Focus,
     Notifications,
+    ScreenTime,
     General,
     Storage,
     Battery,
     Accessibility,
     About,
+    Desktop,
     // Power-user system pages
     DateTime,
     Privacy,
@@ -103,6 +105,20 @@ pub const ALL_NAV_ROUTES: &[RouteInfo] = &[
         icon_svg: NOTIFICATIONS,
         group: Some("Personalisation"),
         keywords: "notifications alerts banners messages calendar mail apps",
+    },
+    RouteInfo {
+        route: Route::ScreenTime,
+        title: "Screen Time",
+        icon_svg: GENERAL,
+        group: Some("Personalisation"),
+        keywords: "screen time limits downtime app limits communication usage",
+    },
+    RouteInfo {
+        route: Route::Desktop,
+        title: "Desktop & Dock",
+        icon_svg: LAYOUT_GRID,
+        group: Some("Personalisation"),
+        keywords: "desktop dock workspaces window manager hyprland layout gaps",
     },
     // System
     RouteInfo {
@@ -206,11 +222,6 @@ fn app() -> impl IntoElement {
 
     // Centralized SettingsStore initialized and connected to daemon via IPC
     let store = use_init_settings_store();
-
-    // Local UI peripheral state
-    let kb_connected = use_state(|| true);
-    let hp_connected = use_state(|| false);
-    let tp_connected = use_state(|| true);
 
     // Local schedule preferences
     let work_sched = use_state(|| true);
@@ -433,15 +444,15 @@ fn app() -> impl IntoElement {
                                 .into_element(),
                                 Route::Appearance => appearance_detail_page(theme_state, store).into_element(),
                                 Route::Wifi => wifi_detail_page(store).into_element(),
-                                Route::Bluetooth => {
-                                    bluetooth_detail_page(store, kb_connected, hp_connected, tp_connected).into_element()
-                                }
+                                Route::Bluetooth => bluetooth_detail_page(store).into_element(),
                                 Route::Display => display_detail_page(store, displays).into_element(),
                                 Route::Sound => sound_detail_page(store).into_element(),
                                 Route::Focus => {
                                     focus_detail_page(store, work_sched, sleep_sched, share_devices).into_element()
                                 }
                                 Route::Notifications => notifications_detail_page(store).into_element(),
+                                Route::ScreenTime => screen_time_detail_page(store).into_element(),
+                                Route::Desktop => desktop_detail_page(store).into_element(),
                                 Route::General => general_detail_page(store).into_element(),
                                 Route::Storage => storage_detail_page(store).into_element(),
                                 Route::Battery => battery_detail_page(store).into_element(),

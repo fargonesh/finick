@@ -158,7 +158,14 @@ pub fn get_setting_entry(payload: &SettingsPayload, backend: &HyprlandBackend, k
             Some(SettingValue::String(mode_str.to_string()))
         }
         SettingKey::AccentColor => Some(SettingValue::String((*payload.personalization.appearance.accent_color).clone())),
-        SettingKey::Wallpaper => Some(SettingValue::Int(*payload.personalization.appearance.wallpaper_idx as i64)),
+        SettingKey::Wallpaper => {
+            let wp = &payload.personalization.appearance.wallpaper;
+            if !wp.is_empty() {
+                Some(SettingValue::String((**wp).clone()))
+            } else {
+                Some(SettingValue::Int(*payload.personalization.appearance.wallpaper_idx as i64))
+            }
+        }
         SettingKey::Scrollbars => Some(SettingValue::Int(*payload.personalization.appearance.scrollbar_pref as i64)),
         SettingKey::IconSize => Some(SettingValue::Int(*payload.personalization.appearance.icon_size_pref as i64)),
         SettingKey::WindowGapsIn => Some(SettingValue::Int(*payload.personalization.appearance.gaps_in as i64)),
@@ -239,14 +246,32 @@ pub fn set_setting_value(payload: &mut SettingsPayload, key: &SettingKey, value:
             Ok(())
         }
         SettingKey::Wallpaper => {
-            let i =
-                value.as_i64().ok_or_else(|| DenialReason::InvalidValue("Expected int for wallpaper index".to_string()))?;
-            payload
-                .personalization
-                .appearance
-                .wallpaper_idx
-                .set(i as usize)
-                .map_err(|e| DenialReason::Other(e.to_string()))?;
+            if let Some(s) = value.as_str() {
+                payload
+                    .personalization
+                    .appearance
+                    .wallpaper
+                    .set(s.to_string())
+                    .map_err(|e| DenialReason::Other(e.to_string()))?;
+                if let Some(idx) = s.strip_prefix("preset:").and_then(|p| p.parse::<usize>().ok()) {
+                    let _ = payload.personalization.appearance.wallpaper_idx.set(idx);
+                }
+            } else if let Some(i) = value.as_i64() {
+                payload
+                    .personalization
+                    .appearance
+                    .wallpaper_idx
+                    .set(i as usize)
+                    .map_err(|e| DenialReason::Other(e.to_string()))?;
+                payload
+                    .personalization
+                    .appearance
+                    .wallpaper
+                    .set(format!("preset:{i}"))
+                    .map_err(|e| DenialReason::Other(e.to_string()))?;
+            } else {
+                return Err(DenialReason::InvalidValue("Expected string (path or color) or int for wallpaper".to_string()));
+            }
             Ok(())
         }
         SettingKey::Scrollbars => {
@@ -567,6 +592,15 @@ pub fn apply_setting(backend: &HyprlandBackend, payload: &SettingsPayload, key: 
                 Err(e) => Err(format!("Failed to execute hyprctl: {}", e)),
             }
         }
+        SettingKey::Wallpaper => {
+            let wp = &payload.personalization.appearance.wallpaper;
+            let target = if !wp.is_empty() {
+                (**wp).clone()
+            } else {
+                format!("preset:{}", *payload.personalization.appearance.wallpaper_idx)
+            };
+            backend.set_wallpaper(&target).map_err(|e| format!("Failed to apply wallpaper: {e}"))
+        }
         _ => {
             // Unbound settings apply cleanly without hardware side effects
             Ok(())
@@ -599,6 +633,12 @@ pub fn apply_all_settings(backend: &HyprlandBackend, payload: &SettingsPayload) 
     let _ = std::process::Command::new("hyprctl")
         .args(["keyword", "input:kb_layout", &payload.system.language.keyboard_layout])
         .output();
+    let wp = if !payload.personalization.appearance.wallpaper.is_empty() {
+        payload.personalization.appearance.wallpaper.to_string()
+    } else {
+        format!("preset:{}", *payload.personalization.appearance.wallpaper_idx)
+    };
+    let _ = backend.set_wallpaper(&wp);
 }
 
 /// Internal shared state of the Finick Settings Daemon.

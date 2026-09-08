@@ -64,6 +64,8 @@
     pkgs.iptables        # iptables (firewall & privacy)
     pkgs.firewalld       # firewall-cmd (firewall & privacy)
     pkgs.tailscale       # tailscale (VPN management)
+    pkgs.swaybg          # swaybg (multi-monitor desktop wallpaper & solid color background)
+    pkgs.hyprpaper       # hyprpaper (hyprland wallpaper backend)
   ];
 
   env = {

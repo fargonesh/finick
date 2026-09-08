@@ -513,6 +513,8 @@ pub struct AppearanceSettings {
     pub mode: Setting<ThemeMode>,
     #[serde(default = "default_accent_color")]
     pub accent_color: Setting<String>,
+    #[serde(default = "default_wallpaper")]
+    pub wallpaper: Setting<String>,
     #[serde(default)]
     pub wallpaper_idx: Setting<usize>,
     #[serde(default)]
@@ -528,11 +530,16 @@ pub struct AppearanceSettings {
     pub border_size: Setting<u32>,
 }
 
+fn default_wallpaper() -> Setting<String> {
+    Setting::new("#1e1e2e".to_string())
+}
+
 impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
             mode: default_theme_mode(),
             accent_color: default_accent_color(),
+            wallpaper: default_wallpaper(),
             wallpaper_idx: Setting::new(0),
             scrollbar_pref: Setting::new(0),
             icon_size_pref: default_icon_size_pref(),
@@ -1009,6 +1016,7 @@ impl SettingsPayload {
             "connectivity.bluetooth.discoverable",
             "personalization.appearance.mode",
             "personalization.appearance.accent_color",
+            "personalization.appearance.wallpaper",
             "personalization.appearance.wallpaper_idx",
             "personalization.appearance.scrollbar_pref",
             "personalization.appearance.icon_size_pref",
@@ -1081,6 +1089,7 @@ impl SettingsPayload {
 
             "personalization.appearance.mode" => Some(&self.personalization.appearance.mode.lock),
             "personalization.appearance.accent_color" => Some(&self.personalization.appearance.accent_color.lock),
+            "personalization.appearance.wallpaper" => Some(&self.personalization.appearance.wallpaper.lock),
             "personalization.appearance.wallpaper_idx" => Some(&self.personalization.appearance.wallpaper_idx.lock),
             "personalization.appearance.scrollbar_pref" => Some(&self.personalization.appearance.scrollbar_pref.lock),
             "personalization.appearance.icon_size_pref" => Some(&self.personalization.appearance.icon_size_pref.lock),
@@ -1158,6 +1167,7 @@ impl SettingsPayload {
 
             "personalization.appearance.mode" => Some(&mut self.personalization.appearance.mode.lock),
             "personalization.appearance.accent_color" => Some(&mut self.personalization.appearance.accent_color.lock),
+            "personalization.appearance.wallpaper" => Some(&mut self.personalization.appearance.wallpaper.lock),
             "personalization.appearance.wallpaper_idx" => Some(&mut self.personalization.appearance.wallpaper_idx.lock),
             "personalization.appearance.scrollbar_pref" => Some(&mut self.personalization.appearance.scrollbar_pref.lock),
             "personalization.appearance.icon_size_pref" => Some(&mut self.personalization.appearance.icon_size_pref.lock),

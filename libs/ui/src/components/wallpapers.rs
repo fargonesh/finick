@@ -1,6 +1,50 @@
 use freya::prelude::*;
 use crate::theme::{use_app_theme, RADIUS_SM};
 
+pub const WALLPAPER_COLOR_DEFAULTS: &[(&str, &str, Color)] = &[
+    ("Deep Slate", "#1e1e2e", Color::from_rgb(0x1E, 0x1E, 0x2E)),
+    ("Midnight Navy", "#1f2a44", Color::from_rgb(0x1F, 0x2A, 0x44)),
+    ("Twilight Plum", "#3a2e47", Color::from_rgb(0x3A, 0x2E, 0x47)),
+    ("Forest Spruce", "#263836", Color::from_rgb(0x26, 0x38, 0x36)),
+    ("Warm Burgundy", "#402e2e", Color::from_rgb(0x40, 0x2E, 0x2E)),
+    ("Earth Umber", "#3d382c", Color::from_rgb(0x3D, 0x38, 0x2C)),
+    ("Steel Blue", "#282b35", Color::from_rgb(0x28, 0x2B, 0x35)),
+    ("Carbon Black", "#11111b", Color::from_rgb(0x11, 0x11, 0x1B)),
+];
+
+/// Wallpaper color swatch picker displaying curated default solid colors
+pub fn wallpaper_color_picker(
+    selected_val: &str,
+    on_select: impl Into<EventHandler<String>>,
+) -> Rect {
+    let t = use_app_theme();
+    let on_select: EventHandler<String> = on_select.into();
+
+    rect()
+        .width(Size::fill())
+        .horizontal()
+        .spacing(8.)
+        .content(Content::Flex)
+        .children(WALLPAPER_COLOR_DEFAULTS.iter().enumerate().map(move |(idx, (_name, hex, color))| {
+            let is_selected = selected_val == *hex || selected_val == format!("preset:{idx}");
+            let border_color = if is_selected { t.accent } else { t.border };
+            let border_width = if is_selected { 2. } else { 1. };
+            let hex_val = hex.to_string();
+            let on_select = on_select.clone();
+
+            rect()
+                .width(Size::flex(1.))
+                .height(Size::px(44.))
+                .corner_radius(RADIUS_SM)
+                .background(*color)
+                .border(Border::new().width(border_width).fill(border_color))
+                .cursor(CursorIcon::Pointer)
+                .a11y_role(AccessibilityRole::RadioButton)
+                .a11y_focusable(true)
+                .on_press(move |_| on_select.call(hex_val.clone()))
+        }))
+}
+
 /// Wallpaper thumbnail picker matching .wallpapers in ui_demo.html
 pub fn wallpaper_picker(
     count: usize,
@@ -28,7 +72,7 @@ pub fn wallpaper_picker(
         .width(Size::fill())
         .horizontal()
         .spacing(8.)
-            .content(Content::Flex)
+        .content(Content::Flex)
         .children((0..count).map(move |i| {
             let is_selected = i == selected_idx;
             let border_color = if is_selected { t.accent } else { t.border };

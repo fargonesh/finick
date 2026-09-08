@@ -51,67 +51,9 @@ pub struct PrintersInfo {
 impl Default for PrintersInfo {
     fn default() -> Self {
         Self {
-            printers: vec![
-                PrinterDevice {
-                    name: "HP LaserJet Pro MFP M428fdw".to_string(),
-                    system_name: "HP_LaserJet_Pro_M428fdw".to_string(),
-                    description: "Monochrome Multifunction Office Laser".to_string(),
-                    location: "Main Office • 192.168.1.120".to_string(),
-                    is_default: true,
-                    is_accepting: true,
-                    status: "Ready".to_string(),
-                    uri: "ipp://192.168.1.120/ipp/print".to_string(),
-                    driver: "HP LaserJet Series PPD (IPP Everywhere)".to_string(),
-                    jobs_count: 1,
-                },
-                PrinterDevice {
-                    name: "Brother HL-L2350DW Series".to_string(),
-                    system_name: "Brother_HL_L2350DW".to_string(),
-                    description: "Compact Wireless Duplex Laser".to_string(),
-                    location: "Studio Desk • Wi-Fi".to_string(),
-                    is_default: false,
-                    is_accepting: true,
-                    status: "Idle".to_string(),
-                    uri: "dnssd://Brother%20HL-L2350DW._ipp._tcp.local/".to_string(),
-                    driver: "Brother HL-L2350DW series CUPS".to_string(),
-                    jobs_count: 0,
-                },
-                PrinterDevice {
-                    name: "Canon PIXMA TS9120 Photo".to_string(),
-                    system_name: "Canon_PIXMA_TS9120".to_string(),
-                    description: "Color Photo All-in-One Inkjet".to_string(),
-                    location: "Design Lab • USB".to_string(),
-                    is_default: false,
-                    is_accepting: true,
-                    status: "Ready".to_string(),
-                    uri: "usb://Canon/TS9100%20series?serial=9A241C".to_string(),
-                    driver: "Canon TS9100 series Ver.5.50".to_string(),
-                    jobs_count: 0,
-                },
-            ],
-            scanners: vec![
-                ScannerDevice {
-                    name: "HP MFP M428 Scan Engine".to_string(),
-                    model: "Flatbed & 50-sheet ADF (1200 DPI)".to_string(),
-                    connection: "eSCL / AirScan Network".to_string(),
-                    status: "Ready".to_string(),
-                },
-                ScannerDevice {
-                    name: "Canon TS9100 Color Scanner".to_string(),
-                    model: "CIS Flatbed Scanner (2400 x 4800 DPI)".to_string(),
-                    connection: "Direct USB (SANE backend)".to_string(),
-                    status: "Ready".to_string(),
-                },
-            ],
-            active_jobs: vec![
-                PrintJob {
-                    id: "HP-108".to_string(),
-                    document_name: "Finick_Architecture_Design_v2.pdf".to_string(),
-                    user: "flora".to_string(),
-                    size: "6 pages (2.4 MB)".to_string(),
-                    status: "Printing (Page 2/6)".to_string(),
-                },
-            ],
+            printers: Vec::new(),
+            scanners: Vec::new(),
+            active_jobs: Vec::new(),
             cups_active: true,
             network_discovery: true,
             default_paper_size: "A4 (210 x 297 mm)".to_string(),
@@ -269,12 +211,10 @@ pub fn fetch_printers_info() -> PrintersInfo {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "active")
         .unwrap_or(true);
 
-    let default_fallback = PrintersInfo::default();
-
     PrintersInfo {
-        printers: if !found_printers.is_empty() { found_printers } else { default_fallback.printers },
-        scanners: if !found_scanners.is_empty() { found_scanners } else { default_fallback.scanners },
-        active_jobs: if !found_jobs.is_empty() { found_jobs } else { default_fallback.active_jobs },
+        printers: found_printers,
+        scanners: found_scanners,
+        active_jobs: found_jobs,
         cups_active,
         network_discovery: true,
         default_paper_size: "A4 (210 x 297 mm)".to_string(),

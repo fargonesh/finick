@@ -1,8 +1,10 @@
 use freya::prelude::*;
 use ipsea::settings::SettingKey;
-use system::{DisplayInfo, WiredInfo};
+use system::{DisplayInfo, HyprlandBackend, SystemBackend, WiredInfo};
 use ui::*;
 use crate::pages::about::AboutInfo;
+use crate::pages::network::{fetch_network_info, NetworkInfo};
+use system::BluetoothDevice;
 use crate::state::SettingsStore;
 
 #[derive(PartialEq)]
@@ -24,6 +26,27 @@ impl Component for OverviewPage {
         let about = self.about.clone();
         let displays = self.displays.clone();
         let t = use_app_theme();
+        let net_state: State<Option<NetworkInfo>> = use_state(|| None);
+        use_hook(move || {
+            let mut ns = net_state;
+            spawn(async move {
+                let info = tokio::task::spawn_blocking(fetch_network_info).await.unwrap_or_default();
+                ns.set(Some(info));
+            });
+        });
+        let net = net_state.read().clone().unwrap_or_default();
+        let storage = HyprlandBackend.get_storage_info();
+        let bt_devices_state: State<Vec<BluetoothDevice>> = use_state(Vec::new);
+        use_hook(move || {
+            let mut ds = bt_devices_state;
+            spawn(async move {
+                let devs = tokio::task::spawn_blocking(|| HyprlandBackend.get_paired_bluetooth_devices())
+                    .await
+                    .unwrap_or_default();
+                ds.set(devs);
+            });
+        });
+        let bt_devices = bt_devices_state.read().clone();
 
         responsive_view(1000.0, move |compact| {
             let focus_desc = match *store.focus_mode.read() {
@@ -164,8 +187,20 @@ impl Component for OverviewPage {
                     ),
                 ))
                 .child(setting_row(
-                    if wifi_on { "Homebase 5G" } else { "Not connected" },
-                    Some(if wifi_on { "Auto-join enabled" } else { "Wi-Fi is off" }),
+                    if !wifi_on {
+                        "Not connected".to_string()
+                    } else if let Some(ssid) = net.active_ssid.clone() {
+                        ssid
+                    } else {
+                        "Not connected".to_string()
+                    },
+                    Some(if !wifi_on {
+                        "Wi-Fi is off".to_string()
+                    } else if net.active_ssid.is_some() {
+                        format!("{} · {}", net.primary_interface, net.primary_ip)
+                    } else {
+                        "Not associated".to_string()
+                    }),
                     false,
                     rect()
                         .cursor(CursorIcon::Pointer)
@@ -213,7 +248,7 @@ impl Component for OverviewPage {
             let is_bt_locked = bt_lock.is_some();
             let bt_on = *store.bt_power.read();
 
-            tile()
+            let mut base = tile()
                 .child(tile_head(
                     Some(BLUETOOTH),
                     "Bluetooth",
@@ -231,14 +266,28 @@ impl Component for OverviewPage {
                                         pill_switch(bt_on, move |v| {
                                             if !is_bt_locked {
                                                 store.set(SettingKey::BluetoothEnabled, v);
+                                                std::thread::spawn(move || {
+                                                    HyprlandBackend.set_bluetooth_status(v);
+                                                });
                                             }
                                         })
                                     }),
                             ),
                     ),
-                ))
-                .child(setting_row("Wireless Keyboard", None::<String>, false, status_chip("Connected", true, None)))
-                .child(setting_row("Headphones", None::<String>, true, status_chip("Not connected", false, None)))
+                ));
+            if bt_devices.is_empty() {
+                base = base.child(tile_sub(if bt_on { "No paired devices" } else { "Bluetooth is off" }));
+            } else {
+                for dev in bt_devices.iter().take(3) {
+                    base = base.child(setting_row(
+                        dev.name.clone(),
+                        Some(dev.mac.clone()),
+                        false,
+                        status_chip(if dev.connected { "Connected" } else { "Paired" }, dev.connected, None),
+                    ));
+                }
+            }
+            base
         };
 
         let focus_card = {
@@ -402,6 +451,9 @@ impl Component for OverviewPage {
 
         let storage_card = {
             let mut route = current_route;
+            let used_pct = storage.use_percent as f32;
+            let free_pct = (100.0_f32 - used_pct).max(0.0_f32);
+            let storage_label = format!("{} of {} used", storage.used, storage.total);
 
             tile()
                 .child(tile_head(
@@ -412,7 +464,7 @@ impl Component for OverviewPage {
                             .horizontal()
                             .cross_align(Alignment::Center)
                             .spacing(8.)
-                            .child(tile_sub("612 GB of 1 TB used"))
+                            .child(tile_sub(storage_label))
                             .child(
                                 rect()
                                     .cursor(CursorIcon::Pointer)
@@ -422,12 +474,10 @@ impl Component for OverviewPage {
                             ),
                     ),
                 ))
-                .child(multi_segment_bar(vec![(38., t.accent), (21., t.bg_active), (14., t.text_dim), (27., t.track)], false))
+                .child(multi_segment_bar(vec![(used_pct, t.accent), (free_pct, t.track)], false))
                 .child(storage_legend(vec![
-                    StorageLegendItem { label: "Applications", value: "231 GB".into(), color: t.accent },
-                    StorageLegendItem { label: "Photos", value: "128 GB".into(), color: t.bg_active },
-                    StorageLegendItem { label: "Documents", value: "84 GB".into(), color: t.text_dim },
-                    StorageLegendItem { label: "System", value: "169 GB".into(), color: t.track },
+                    StorageLegendItem { label: "Used", value: storage.used.clone().into(), color: t.accent },
+                    StorageLegendItem { label: "Available", value: storage.available.clone().into(), color: t.track },
                 ]))
         };
 

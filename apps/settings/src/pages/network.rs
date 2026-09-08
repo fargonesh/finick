@@ -39,85 +39,12 @@ impl Default for NetworkInfo {
     fn default() -> Self {
         Self {
             wifi_enabled: true,
-            active_ssid: Some("Dark Depths".to_string()),
-            available_networks: vec![
-                WifiNetwork {
-                    ssid: "Dark Depths".to_string(),
-                    signal: 78,
-                    security: "WPA2/WPA3".to_string(),
-                    connected: true,
-                    is_known: true,
-                },
-                WifiNetwork {
-                    ssid: "OPTUS_FF7C2CL".to_string(),
-                    signal: 54,
-                    security: "WPA2".to_string(),
-                    connected: false,
-                    is_known: false,
-                },
-                WifiNetwork {
-                    ssid: "dd_iot".to_string(),
-                    signal: 90,
-                    security: "WPA2".to_string(),
-                    connected: false,
-                    is_known: true,
-                },
-                WifiNetwork {
-                    ssid: "VX420-34F8".to_string(),
-                    signal: 32,
-                    security: "WPA2".to_string(),
-                    connected: false,
-                    is_known: false,
-                },
-            ],
-            known_networks: vec![
-                WifiNetwork {
-                    ssid: "Dark Depths".to_string(),
-                    signal: 78,
-                    security: "WPA2/WPA3".to_string(),
-                    connected: true,
-                    is_known: true,
-                },
-                WifiNetwork {
-                    ssid: "Flora's iPhone".to_string(),
-                    signal: 0,
-                    security: "WPA2".to_string(),
-                    connected: false,
-                    is_known: true,
-                },
-                WifiNetwork {
-                    ssid: "eduroam".to_string(),
-                    signal: 0,
-                    security: "WPA2-Enterprise".to_string(),
-                    connected: false,
-                    is_known: true,
-                },
-                WifiNetwork {
-                    ssid: "Home_5G_Backup".to_string(),
-                    signal: 0,
-                    security: "WPA3".to_string(),
-                    connected: false,
-                    is_known: true,
-                },
-            ],
-            vpns: vec![
-                VpnConnection {
-                    name: "Tailscale Mesh".to_string(),
-                    interface: "tailscale0".to_string(),
-                    vpn_type: "Mesh VPN".to_string(),
-                    connected: true,
-                    ip_address: Some("100.64.0.5".to_string()),
-                },
-                VpnConnection {
-                    name: "Work WireGuard".to_string(),
-                    interface: "wg0".to_string(),
-                    vpn_type: "WireGuard".to_string(),
-                    connected: false,
-                    ip_address: None,
-                },
-            ],
-            primary_ip: "192.168.1.105".to_string(),
-            primary_interface: "wlp166s0".to_string(),
+            active_ssid: None,
+            available_networks: Vec::new(),
+            known_networks: Vec::new(),
+            vpns: Vec::new(),
+            primary_ip: "—".to_string(),
+            primary_interface: "—".to_string(),
         }
     }
 }

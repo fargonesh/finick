@@ -16,6 +16,7 @@ freya = { git = "https://github.com/marc2332/freya", branch = "main", features =
     "all",
 ] }
 tokio = { version = "1.43", features = ["full"] }
+winit = "0.30"
 
 [[bin]]
 name = "topbar"
