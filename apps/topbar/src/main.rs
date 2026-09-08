@@ -1,22 +1,19 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
+#[allow(unused_imports)]
+use ipsea::settings::get_setting;
 use {
     freya::prelude::*,
     ipsea::settings::{
-        SettingEntry, SettingKey, SettingValue, SettingsEvent, SubscriptionFilter,
-        SETTINGS_SOCKET_NAME, get_all_settings, set_and_apply,
+        SETTINGS_SOCKET_NAME, SettingEntry, SettingKey, SettingValue, SettingsEvent, SubscriptionFilter, get_all_settings,
+        set_and_apply,
     },
     serde::{Deserialize, Serialize},
     system::{HyprlandBackend, SystemBackend, WiredInfo},
     ui::*,
 };
 
-#[allow(unused_imports)]
-use ipsea::settings::get_setting;
-
-fn socket() -> String {
-    SETTINGS_SOCKET_NAME.to_string()
-}
+fn socket() -> String { SETTINGS_SOCKET_NAME.to_string() }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotificationLevel {
@@ -38,16 +35,9 @@ pub struct Notification {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum NotifRequest {
-    Push {
-        title: String,
-        body: String,
-        level: NotificationLevel,
-        app_name: Option<String>,
-    },
+    Push { title: String, body: String, level: NotificationLevel, app_name: Option<String> },
     List,
-    Dismiss {
-        id: String,
-    },
+    Dismiss { id: String },
     Clear,
     Subscribe,
 }
@@ -94,8 +84,7 @@ fn apply_entry(
             }
         }
         SettingKey::DoNotDisturb => {
-            let on = entry.value.as_str().map(|s| s != "off").unwrap_or(false)
-                || entry.value.as_bool().unwrap_or(false);
+            let on = entry.value.as_str().map(|s| s != "off").unwrap_or(false) || entry.value.as_bool().unwrap_or(false);
             let mut s = dnd;
             s.set_if_modified(on);
         }
@@ -104,9 +93,7 @@ fn apply_entry(
     }
 }
 
-fn parse_capacity_pct(capacity: &str) -> u8 {
-    capacity.trim().trim_end_matches('%').parse::<u8>().unwrap_or(0).min(100)
-}
+fn parse_capacity_pct(capacity: &str) -> u8 { capacity.trim().trim_end_matches('%').parse::<u8>().unwrap_or(0).min(100) }
 
 fn load_initial_batch(
     wifi: State<bool>,
@@ -118,15 +105,13 @@ fn load_initial_batch(
     connected: State<bool>,
 ) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Option<Vec<SettingEntry>>>();
-    std::thread::spawn(move || {
-        match get_all_settings(socket()) {
-            Ok(entries) => {
-                let _ = tx.send(Some(entries));
-            }
-            Err(e) => {
-                eprintln!("topbar get_all_settings offline: {e}");
-                let _ = tx.send(None);
-            }
+    std::thread::spawn(move || match get_all_settings(socket()) {
+        Ok(entries) => {
+            let _ = tx.send(Some(entries));
+        }
+        Err(e) => {
+            eprintln!("topbar get_all_settings offline: {e}");
+            let _ = tx.send(None);
         }
     });
     spawn(async move {
@@ -168,48 +153,45 @@ fn subscribe_live(
     spawn(async move {
         while let Some(evt) = rx.recv().await {
             match evt {
-                SettingsEvent::Changed { key, value, source: _ } => {
-                    match key {
-                        SettingKey::WifiEnabled => {
-                            if let Some(v) = value.as_bool() {
-                                let mut s = wifi;
-                                s.set_if_modified(v);
-                            }
+                SettingsEvent::Changed { key, value, source: _ } => match key {
+                    SettingKey::WifiEnabled => {
+                        if let Some(v) = value.as_bool() {
+                            let mut s = wifi;
+                            s.set_if_modified(v);
                         }
-                        SettingKey::BluetoothEnabled => {
-                            if let Some(v) = value.as_bool() {
-                                let mut s = bt;
-                                s.set_if_modified(v);
-                            }
-                        }
-                        SettingKey::AudioVolume => {
-                            if let Some(v) = value.as_f64() {
-                                let mut s = volume;
-                                s.set_if_modified(v);
-                            }
-                        }
-                        SettingKey::AudioMuted => {
-                            if let Some(v) = value.as_bool() {
-                                let mut s = muted;
-                                s.set_if_modified(v);
-                            }
-                        }
-                        SettingKey::DisplayBrightness => {
-                            if let Some(v) = value.as_f64() {
-                                let mut s = brightness;
-                                s.set_if_modified(v);
-                            }
-                        }
-                        SettingKey::DoNotDisturb => {
-                            let on = value.as_str().map(|s| s != "off").unwrap_or(false)
-                                || value.as_bool().unwrap_or(false);
-                            let mut s = dnd;
-                            s.set_if_modified(on);
-                        }
-                        SettingKey::PowerProfile => {}
-                        _ => {}
                     }
-                }
+                    SettingKey::BluetoothEnabled => {
+                        if let Some(v) = value.as_bool() {
+                            let mut s = bt;
+                            s.set_if_modified(v);
+                        }
+                    }
+                    SettingKey::AudioVolume => {
+                        if let Some(v) = value.as_f64() {
+                            let mut s = volume;
+                            s.set_if_modified(v);
+                        }
+                    }
+                    SettingKey::AudioMuted => {
+                        if let Some(v) = value.as_bool() {
+                            let mut s = muted;
+                            s.set_if_modified(v);
+                        }
+                    }
+                    SettingKey::DisplayBrightness => {
+                        if let Some(v) = value.as_f64() {
+                            let mut s = brightness;
+                            s.set_if_modified(v);
+                        }
+                    }
+                    SettingKey::DoNotDisturb => {
+                        let on = value.as_str().map(|s| s != "off").unwrap_or(false) || value.as_bool().unwrap_or(false);
+                        let mut s = dnd;
+                        s.set_if_modified(on);
+                    }
+                    SettingKey::PowerProfile => {}
+                    _ => {}
+                },
                 SettingsEvent::LockChanged { .. } => {}
                 SettingsEvent::Reloaded => {
                     load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected);
@@ -226,9 +208,7 @@ fn apply(key: SettingKey, val: SettingValue) {
     });
 }
 
-fn clock_now() -> String {
-    chrono::Local::now().format("%H:%M").to_string()
-}
+fn clock_now() -> String { chrono::Local::now().format("%H:%M").to_string() }
 
 fn power_action(action: &'static str) {
     std::thread::spawn(move || {
@@ -323,13 +303,10 @@ fn app() -> Element {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(20)).await;
                 clk.set_if_modified(clock_now());
-                let wired_now = tokio::task::spawn_blocking(|| HyprlandBackend.get_wired_info())
-                    .await
-                    .unwrap_or(None);
+                let wired_now = tokio::task::spawn_blocking(|| HyprlandBackend.get_wired_info()).await.unwrap_or(None);
                 wired_state.set_if_modified(wired_now);
-                let power = tokio::task::spawn_blocking(|| HyprlandBackend.get_power_info())
-                    .await
-                    .unwrap_or(system::PowerInfo {
+                let power =
+                    tokio::task::spawn_blocking(|| HyprlandBackend.get_power_info()).await.unwrap_or(system::PowerInfo {
                         capacity: "0%".to_string(),
                         status: "Unknown".to_string(),
                         health_percent: None,
@@ -338,9 +315,7 @@ fn app() -> Element {
                 let p = parse_capacity_pct(&power.capacity);
                 pct_state.set_if_modified(p);
                 status_state.set_if_modified(power.status.clone());
-                let notifs = tokio::task::spawn_blocking(fetch_notifications_blocking)
-                    .await
-                    .unwrap_or_default();
+                let notifs = tokio::task::spawn_blocking(fetch_notifications_blocking).await.unwrap_or_default();
                 notif_state.set_if_modified(notifs);
             }
         });
@@ -424,11 +399,7 @@ fn app() -> Element {
                 )
                 .child(
                     // Clock
-                    label()
-                        .font_size(13.)
-                        .font_weight(FontWeight::SEMI_BOLD)
-                        .color(t.text)
-                        .text(clock_str),
+                    label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(clock_str),
                 ),
         );
 
@@ -456,19 +427,29 @@ fn app() -> Element {
         }),
     ));
 
-    let wired_card = tile()
-        .child(tile_head(Some(WIRED), "Wired", None::<Element>))
-        .child(
-            if let Some(ref info) = wired_info {
-                if info.ip_address.is_empty() {
-                    setting_row(info.interface.clone(), None::<String>, false, label().font_size(12.).color(t.accent).text("●")).into_element()
-                } else {
-                    setting_row(info.interface.clone(), Some(info.ip_address.clone()), false, label().font_size(12.).color(t.accent).text("●")).into_element()
-                }
+    let wired_card =
+        tile().child(tile_head(Some(WIRED), "Wired", None::<Element>)).child(if let Some(ref info) = wired_info {
+            if info.ip_address.is_empty() {
+                setting_row(info.interface.clone(), None::<String>, false, label().font_size(12.).color(t.accent).text("●"))
+                    .into_element()
             } else {
-                setting_row("No connection".to_string(), None::<String>, false, label().font_size(12.).color(t.text_dim).text("○")).into_element()
+                setting_row(
+                    info.interface.clone(),
+                    Some(info.ip_address.clone()),
+                    false,
+                    label().font_size(12.).color(t.accent).text("●"),
+                )
+                .into_element()
             }
-        );
+        } else {
+            setting_row(
+                "No connection".to_string(),
+                None::<String>,
+                false,
+                label().font_size(12.).color(t.text_dim).text("○"),
+            )
+            .into_element()
+        });
 
     let focus_card = tile().child(tile_head(
         Some(FOCUS),
@@ -477,14 +458,7 @@ fn app() -> Element {
             let mut f = dnd;
             pill_switch(*f.read(), move |v| {
                 f.set_if_modified(v);
-                apply(
-                    SettingKey::DoNotDisturb,
-                    if v {
-                        "on".to_string().into()
-                    } else {
-                        "off".to_string().into()
-                    },
-                );
+                apply(SettingKey::DoNotDisturb, if v { "on".to_string().into() } else { "off".to_string().into() });
             })
         }),
     ));
@@ -509,62 +483,47 @@ fn app() -> Element {
             })
         });
 
-    let brightness_card = tile()
-        .child(tile_head(Some(DISPLAY), "Brightness", None::<Element>))
-        .child({
-            let mut b = brightness;
-            slider_row(Some(SUN), *b.read(), move |nv| {
-                b.set_if_modified(nv);
-                apply(SettingKey::DisplayBrightness, nv.into());
-            })
-        });
+    let brightness_card = tile().child(tile_head(Some(DISPLAY), "Brightness", None::<Element>)).child({
+        let mut b = brightness;
+        slider_row(Some(SUN), *b.read(), move |nv| {
+            b.set_if_modified(nv);
+            apply(SettingKey::DisplayBrightness, nv.into());
+        })
+    });
 
-    let battery_card = tile()
-        .child(tile_head(Some(BATTERY), "Power", None::<Element>))
-        .child(
-            rect()
-                .width(Size::fill())
-                .horizontal()
-                .cross_align(Alignment::Center)
-                .spacing(14.)
-                .content(Content::Flex)
-                .child(battery_ring(bat_pct, false))
-                .child(
-                    rect()
-                        .vertical()
-                        .spacing(2.)
-                        .child(
-                            label()
-                                .font_size(14.)
-                                .font_weight(FontWeight::SEMI_BOLD)
-                                .color(t.text)
-                                .text(format!("{bat_pct}%")),
-                        )
-                        .child(label().font_size(12.).color(t.text_dim).text(bat_status))
-                        .maybe_child(
-                            power_snapshot
-                                .health_percent
-                                .map(|h| label().font_size(11.).color(t.text_dim).text(format!("Health {h}%"))),
-                        )
-                        .maybe_child(
-                            power_snapshot
-                                .cycle_count
-                                .map(|c| label().font_size(11.).color(t.text_dim).text(format!("{c} cycles"))),
-                        ),
-                ),
-        );
+    let battery_card = tile().child(tile_head(Some(BATTERY), "Power", None::<Element>)).child(
+        rect()
+            .width(Size::fill())
+            .horizontal()
+            .cross_align(Alignment::Center)
+            .spacing(14.)
+            .content(Content::Flex)
+            .child(battery_ring(bat_pct, false))
+            .child(
+                rect()
+                    .vertical()
+                    .spacing(2.)
+                    .child(
+                        label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(format!("{bat_pct}%")),
+                    )
+                    .child(label().font_size(12.).color(t.text_dim).text(bat_status))
+                    .maybe_child(
+                        power_snapshot
+                            .health_percent
+                            .map(|h| label().font_size(11.).color(t.text_dim).text(format!("Health {h}%"))),
+                    )
+                    .maybe_child(
+                        power_snapshot
+                            .cycle_count
+                            .map(|c| label().font_size(11.).color(t.text_dim).text(format!("{c} cycles"))),
+                    ),
+            ),
+    );
 
     let notifications_card = tile()
         .child(tile_head(
             Some(NOTIFICATIONS),
-            format!(
-                "Notifications{}",
-                if notif_count > 0 {
-                    format!(" · {notif_count}")
-                } else {
-                    String::new()
-                }
-            ),
+            format!("Notifications{}", if notif_count > 0 { format!(" · {notif_count}") } else { String::new() }),
             Some(
                 rect()
                     .cursor(CursorIcon::Pointer)
@@ -581,12 +540,7 @@ fn app() -> Element {
                 let title = n.title.clone();
                 let body = n.body.clone();
                 let lvl = format!("{:?}", n.level);
-                e = e.child(setting_row(
-                    title,
-                    Some(body),
-                    true,
-                    label().font_size(10.).color(t.text_dim).text(lvl),
-                ));
+                e = e.child(setting_row(title, Some(body), true, label().font_size(10.).color(t.text_dim).text(lvl)));
             }
             e
         });
@@ -614,22 +568,8 @@ fn app() -> Element {
                     .horizontal()
                     .spacing(GAP)
                     .content(Content::Flex)
-                    .child(
-                        rect()
-                            .width(Size::flex(1.))
-                            .vertical()
-                            .spacing(GAP)
-                            .child(wifi_card)
-                            .child(wired_card)
-                    )
-                    .child(
-                        rect()
-                            .width(Size::flex(1.))
-                            .vertical()
-                            .spacing(GAP)
-                            .child(bt_card)
-                            .child(focus_card)
-                    )
+                    .child(rect().width(Size::flex(1.)).vertical().spacing(GAP).child(wifi_card).child(wired_card))
+                    .child(rect().width(Size::flex(1.)).vertical().spacing(GAP).child(bt_card).child(focus_card)),
             )
             .child(
                 rect()
@@ -638,7 +578,7 @@ fn app() -> Element {
                     .spacing(GAP)
                     .content(Content::Flex)
                     .child(rect().width(Size::flex(1.)).child(sound_card))
-                    .child(rect().width(Size::flex(1.)).child(brightness_card))
+                    .child(rect().width(Size::flex(1.)).child(brightness_card)),
             )
             .child(battery_card)
             .child(notifications_card)
@@ -653,13 +593,7 @@ fn app() -> Element {
         .vertical()
         .background(t.bg_base)
         .child(status)
-        .child(
-            rect()
-                .width(Size::fill())
-                .height(Size::fill())
-                .vertical()
-                .child(panel),
-        )
+        .child(rect().width(Size::fill()).height(Size::fill()).vertical().child(panel))
         .into_element()
 }
 
@@ -675,23 +609,24 @@ fn main() {
     let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
     let _guard = _rt.as_ref().map(|rt| rt.enter());
     launch(
-        LaunchConfig::new()
-            .with_window(
-                WindowConfig::new(app)
-                    .with_title("topbar")
-                    .with_app_id("topbar")
-                    .with_size(1920., 600.)
-                    .with_decorations(false)
-                    .with_transparency(true)
-            )
+        LaunchConfig::new().with_window(
+            WindowConfig::new(app)
+                .with_title("topbar")
+                .with_app_id("topbar")
+                .with_size(1920., 600.)
+                .with_decorations(false)
+                .with_transparency(true),
+        ),
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use ipsea::settings::{SettingsRequest, SettingsResponse};
-    use std::sync::{Arc, Mutex};
+    use {
+        super::*,
+        ipsea::settings::{SettingsRequest, SettingsResponse},
+        std::sync::{Arc, Mutex},
+    };
 
     fn spawn_toggle_server(socket: &str, wifi: Arc<Mutex<bool>>) {
         let socket = socket.to_string();
@@ -725,11 +660,7 @@ mod tests {
                             if let Some(on) = value.as_bool() {
                                 *wifi.lock().expect("lock") = on;
                                 let _ = sender.send(SettingsResponse::Ok);
-                                let _ = sender.send(SettingsResponse::Event(SettingsEvent::Changed {
-                                    key,
-                                    value,
-                                    source,
-                                }));
+                                let _ = sender.send(SettingsResponse::Event(SettingsEvent::Changed { key, value, source }));
                             }
                         } else {
                             let _ = sender.send(SettingsResponse::Ok);
@@ -749,18 +680,14 @@ mod tests {
         let wifi = Arc::new(Mutex::new(true));
         spawn_toggle_server(&socket, wifi.clone());
 
-        let entry = get_setting(&socket, SettingKey::WifiEnabled)
-            .expect("get failed")
-            .expect("entry missing");
+        let entry = get_setting(&socket, SettingKey::WifiEnabled).expect("get failed").expect("entry missing");
         assert_eq!(entry.value.as_bool(), Some(true));
 
         let res = set_and_apply(&socket, SettingKey::WifiEnabled, false).expect("set_and_apply failed");
         assert!(res.is_ok());
         assert!(!*wifi.lock().expect("lock"));
 
-        let entry = get_setting(&socket, SettingKey::WifiEnabled)
-            .expect("get failed")
-            .expect("entry missing");
+        let entry = get_setting(&socket, SettingKey::WifiEnabled).expect("get failed").expect("entry missing");
         assert_eq!(entry.value.as_bool(), Some(false));
     }
 

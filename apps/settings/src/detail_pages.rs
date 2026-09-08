@@ -14,196 +14,210 @@ pub fn grid2(children: impl IntoIterator<Item = impl IntoElement>) -> impl IntoE
         .content(Content::Flex)
 }
 
-/// Appearance detail page matching ui_demo.html
-pub fn appearance_detail_page(
-    theme_state: State<AppTheme>,
-    store: SettingsStore,
-) -> impl IntoElement {
-    let t = use_app_theme();
-    let theme_lock = store.lock_label(&SettingKey::ThemeMode);
-    let is_theme_locked = theme_lock.is_some();
-    let accent_lock = store.lock_label(&SettingKey::AccentColor);
-    let is_accent_locked = accent_lock.is_some();
-    let wp_lock = store.lock_label(&SettingKey::Wallpaper);
-    let is_wp_locked = wp_lock.is_some();
-    let scroll_lock = store.lock_label(&SettingKey::Scrollbars);
-    let is_scroll_locked = scroll_lock.is_some();
-    let icon_lock = store.lock_label(&SettingKey::IconSize);
-    let is_icon_locked = icon_lock.is_some();
+#[derive(PartialEq)]
+pub struct AppearanceDetailPage {
+    pub theme_state: State<AppTheme>,
+    pub store: SettingsStore,
+}
 
-    responsive_view(1000.0, move |compact| {
-        rect()
-            .width(Size::fill())
-            .vertical()
-            .child(page_head(APPEARANCE, "Appearance", "Theme, accent colour and desktop background"))
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .vertical()
-                    .spacing(GAP)
-                    // Wide Tile: Theme & Accent
-                    .child(
-                        tile()
-                            .child(tile_head(
-                                None,
-                                "Theme & accent",
-                                Some(
+impl Component for AppearanceDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let theme_state = self.theme_state;
+        let store = self.store;
+        let t = use_app_theme();
+        let theme_lock = store.lock_label(&SettingKey::ThemeMode);
+        let is_theme_locked = theme_lock.is_some();
+        let accent_lock = store.lock_label(&SettingKey::AccentColor);
+        let is_accent_locked = accent_lock.is_some();
+        let wp_lock = store.lock_label(&SettingKey::Wallpaper);
+        let is_wp_locked = wp_lock.is_some();
+        let scroll_lock = store.lock_label(&SettingKey::Scrollbars);
+        let is_scroll_locked = scroll_lock.is_some();
+        let icon_lock = store.lock_label(&SettingKey::IconSize);
+        let is_icon_locked = icon_lock.is_some();
+
+        responsive_view(1000.0, move |compact| {
+            rect()
+                .width(Size::fill())
+                .vertical()
+                .child(page_head(APPEARANCE, "Appearance", "Theme, accent colour and desktop background"))
+                .child(
+                    rect()
+                        .width(Size::fill())
+                        .vertical()
+                        .spacing(GAP)
+                        // Wide Tile: Theme & Accent
+                        .child(
+                            tile()
+                                .child(tile_head(
+                                    None,
+                                    "Theme & accent",
+                                    Some(
+                                        rect()
+                                            .horizontal()
+                                            .cross_align(Alignment::Center)
+                                            .spacing(8.)
+                                            .maybe_child(theme_lock.as_ref().map(|l| lock_badge(l)))
+                                            .child(
+                                                rect()
+                                                    .opacity(if is_theme_locked { 0.45 } else { 1.0 })
+                                                    .child({
+                                                        let mut th = theme_state;
+                                                        let store = store;
+                                                        segmented_control(
+                                                            vec![
+                                                                ("Light", ThemeMode::Light),
+                                                                ("Dark", ThemeMode::Dark),
+                                                                ("Auto", ThemeMode::Auto),
+                                                            ],
+                                                            t.mode,
+                                                            move |mode| {
+                                                                if !is_theme_locked {
+                                                                    let new_t = th.read().with_mode(mode);
+                                                                    th.set(new_t);
+                                                                    set_theme(&new_t);
+                                                                    let mode_str = match mode {
+                                                                        ThemeMode::Light => "light",
+                                                                        ThemeMode::Dark => "dark",
+                                                                        ThemeMode::Auto => "auto",
+                                                                    };
+                                                                    store.set(SettingKey::ThemeMode, mode_str);
+                                                                }
+                                                            },
+                                                        )
+                                                    }),
+                                            ),
+                                    ),
+                                ))
+                                .child(
                                     rect()
                                         .horizontal()
                                         .cross_align(Alignment::Center)
                                         .spacing(8.)
-                                        .maybe_child(theme_lock.as_ref().map(|l| lock_badge(l)))
-                                        .child(
-                                            rect()
-                                                .opacity(if is_theme_locked { 0.45 } else { 1.0 })
-                                                .child({
-                                                    let mut th = theme_state;
-                                                    let store = store;
-                                                    segmented_control(
-                                                        vec![
-                                                            ("Light", ThemeMode::Light),
-                                                            ("Dark", ThemeMode::Dark),
-                                                            ("Auto", ThemeMode::Auto),
-                                                        ],
-                                                        t.mode,
-                                                        move |mode| {
-                                                            if !is_theme_locked {
-                                                                let new_t = th.read().with_mode(mode);
-                                                                th.set(new_t);
-                                                                set_theme(&new_t);
-                                                                let mode_str = match mode {
-                                                                    ThemeMode::Light => "light",
-                                                                    ThemeMode::Dark => "dark",
-                                                                    ThemeMode::Auto => "auto",
-                                                                };
-                                                                store.set(SettingKey::ThemeMode, mode_str);
-                                                            }
-                                                        },
-                                                    )
-                                                }),
-                                        ),
-                                ),
-                            ))
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .spacing(8.)
-                                    .child(field_label("Accent colour"))
-                                    .maybe_child(accent_lock.as_ref().map(|l| lock_badge(l))),
-                            )
-                            .child(
-                                rect()
-                                    .opacity(if is_accent_locked { 0.45 } else { 1.0 })
-                                    .child({
-                                        let mut th = theme_state;
-                                        let store = store;
-                                        swatch_picker(
-                                            t.accent_name,
-                                            true,
-                                            move |acc| {
-                                                if !is_accent_locked {
-                                                    let new_t = th.read().with_accent(acc);
-                                                    th.set(new_t);
-                                                    set_theme(&new_t);
-                                                    store.set(SettingKey::AccentColor, acc.name.to_string());
-                                                }
-                                            },
-                                        )
-                                    }),
-                            ),
-                    )
-                    // 2-Column Row: Wallpaper & Interface
-                    .child(
-                        responsive_stack(compact, [
-                            // Left: Wallpaper (8 previews)
-                            rect()
-                                .width(Size::flex(1.))
+                                        .child(field_label("Accent colour"))
+                                        .maybe_child(accent_lock.as_ref().map(|l| lock_badge(l))),
+                                )
                                 .child(
-                                    tile()
-                                        .child(tile_head(
-                                            None,
-                                            "Wallpaper",
-                                            wp_lock.as_ref().map(|l| lock_badge(l)),
-                                        ))
-                                        .child(
-                                            rect()
-                                                .opacity(if is_wp_locked { 0.45 } else { 1.0 })
-                                                .child({
-                                                    let store = store;
-                                                    wallpaper_picker(
-                                                        8,
-                                                        *store.wallpaper_idx.read(),
-                                                        true,
-                                                        move |idx| {
-                                                            if !is_wp_locked {
-                                                                store.set(SettingKey::Wallpaper, idx as i64);
-                                                            }
-                                                        },
-                                                    )
-                                                }),
-                                        ),
+                                    rect()
+                                        .opacity(if is_accent_locked { 0.45 } else { 1.0 })
+                                        .child({
+                                            let mut th = theme_state;
+                                            let store = store;
+                                            swatch_picker(
+                                                t.accent_name,
+                                                true,
+                                                move |acc| {
+                                                    if !is_accent_locked {
+                                                        let new_t = th.read().with_accent(acc);
+                                                        th.set(new_t);
+                                                        set_theme(&new_t);
+                                                        store.set(SettingKey::AccentColor, acc.name.to_string());
+                                                    }
+                                                },
+                                            )
+                                        }),
                                 ),
-                            // Right: Interface
-                            rect()
-                                .width(Size::flex(1.))
-                                .child(
-                                    tile()
-                                        .child(tile_head(None, "Interface", None::<String>))
-                                        .child(
-                                            rect()
-                                                .horizontal()
-                                                .cross_align(Alignment::Center)
-                                                .spacing(8.)
-                                                .child(field_label("Show scrollbars"))
-                                                .maybe_child(scroll_lock.as_ref().map(|l| lock_badge(l))),
-                                        )
-                                        .child(
-                                            rect()
-                                                .opacity(if is_scroll_locked { 0.45 } else { 1.0 })
-                                                .child({
-                                                    let store = store;
-                                                    segmented_control(
-                                                        vec![("Automatically", 0), ("When scrolling", 1), ("Always", 2)],
-                                                        *store.scrollbar_pref.read(),
-                                                        move |idx| {
-                                                            if !is_scroll_locked {
-                                                                store.set(SettingKey::Scrollbars, idx as i64);
-                                                            }
-                                                        },
-                                                    )
-                                                }),
-                                        )
-                                        .child(
-                                            rect()
-                                                .margin((16., 0., 0., 0.))
-                                                .horizontal()
-                                                .cross_align(Alignment::Center)
-                                                .spacing(8.)
-                                                .child(field_label("Sidebar icon size"))
-                                                .maybe_child(icon_lock.as_ref().map(|l| lock_badge(l))),
-                                        )
-                                        .child(
-                                            rect()
-                                                .opacity(if is_icon_locked { 0.45 } else { 1.0 })
-                                                .child({
-                                                    let store = store;
-                                                    segmented_control(
-                                                        vec![("Small", 0), ("Medium", 1), ("Large", 2)],
-                                                        *store.icon_size_pref.read(),
-                                                        move |idx| {
-                                                            if !is_icon_locked {
-                                                                store.set(SettingKey::IconSize, idx as i64);
-                                                            }
-                                                        },
-                                                    )
-                                                }),
-                                        ),
-                                ),
-                        ]),
-                    ),
-            )
-    })
+                        )
+                        // 2-Column Row: Wallpaper & Interface
+                        .child(
+                            responsive_stack(compact, [
+                                // Left: Wallpaper (8 previews)
+                                rect()
+                                    .width(Size::flex(1.))
+                                    .child(
+                                        tile()
+                                            .child(tile_head(
+                                                None,
+                                                "Wallpaper",
+                                                wp_lock.as_ref().map(|l| lock_badge(l)),
+                                            ))
+                                            .child(
+                                                rect()
+                                                    .opacity(if is_wp_locked { 0.45 } else { 1.0 })
+                                                    .child({
+                                                        let store = store;
+                                                        wallpaper_picker(
+                                                            8,
+                                                            *store.wallpaper_idx.read(),
+                                                            true,
+                                                            move |idx| {
+                                                                if !is_wp_locked {
+                                                                    store.set(SettingKey::Wallpaper, idx as i64);
+                                                                }
+                                                            },
+                                                        )
+                                                    }),
+                                            ),
+                                    ),
+                                // Right: Interface
+                                rect()
+                                    .width(Size::flex(1.))
+                                    .child(
+                                        tile()
+                                            .child(tile_head(None, "Interface", None::<String>))
+                                            .child(
+                                                rect()
+                                                    .horizontal()
+                                                    .cross_align(Alignment::Center)
+                                                    .spacing(8.)
+                                                    .child(field_label("Show scrollbars"))
+                                                    .maybe_child(scroll_lock.as_ref().map(|l| lock_badge(l))),
+                                            )
+                                            .child(
+                                                rect()
+                                                    .opacity(if is_scroll_locked { 0.45 } else { 1.0 })
+                                                    .child({
+                                                        let store = store;
+                                                        segmented_control(
+                                                            vec![("Automatically", 0), ("When scrolling", 1), ("Always", 2)],
+                                                            *store.scrollbar_pref.read(),
+                                                            move |idx| {
+                                                                if !is_scroll_locked {
+                                                                    store.set(SettingKey::Scrollbars, idx as i64);
+                                                                }
+                                                            },
+                                                        )
+                                                    }),
+                                            )
+                                            .child(
+                                                rect()
+                                                    .margin((16., 0., 0., 0.))
+                                                    .horizontal()
+                                                    .cross_align(Alignment::Center)
+                                                    .spacing(8.)
+                                                    .child(field_label("Sidebar icon size"))
+                                                    .maybe_child(icon_lock.as_ref().map(|l| lock_badge(l))),
+                                            )
+                                            .child(
+                                                rect()
+                                                    .opacity(if is_icon_locked { 0.45 } else { 1.0 })
+                                                    .child({
+                                                        let store = store;
+                                                        segmented_control(
+                                                            vec![("Small", 0), ("Medium", 1), ("Large", 2)],
+                                                            *store.icon_size_pref.read(),
+                                                            move |idx| {
+                                                                if !is_icon_locked {
+                                                                    store.set(SettingKey::IconSize, idx as i64);
+                                                                }
+                                                            },
+                                                        )
+                                                    }),
+                                            ),
+                                    ),
+                            ]),
+                        ),
+                )
+        })
+    }
+}
+
+/// Helper function returning AppearanceDetailPage Component
+pub fn appearance_detail_page(
+    theme_state: State<AppTheme>,
+    store: SettingsStore,
+) -> AppearanceDetailPage {
+    AppearanceDetailPage { theme_state, store }
 }
 
 /// Wi-Fi detail page matching ui_demo.html
