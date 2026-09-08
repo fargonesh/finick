@@ -6,17 +6,31 @@ use std::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayInfo {
     pub name: String,
+    pub description: String,
     pub resolution: String,
     pub refresh_rate: String,
     pub scale: String,
+    pub transform: u8,
+    pub x: i32,
+    pub y: i32,
+    pub available_modes: Vec<String>,
+    pub is_focused: bool,
 }
-pub fn parse_display_width(resolution: &str) -> u32 {
+
+pub fn parse_display_dimensions(resolution: &str) -> (u32, u32) {
     let trimmed = resolution.trim();
     if trimmed.is_empty() {
-        return 1920;
+        return (1920, 1080);
     }
-    let w_str = trimmed.split(|c| c == 'x' || c == 'X').next().unwrap_or("").trim();
-    w_str.parse::<u32>().ok().filter(|&v| v > 0).unwrap_or(1920)
+    let mut parts = trimmed.split(|c| c == 'x' || c == 'X');
+    let w = parts.next().and_then(|s| s.trim().parse::<u32>().ok()).filter(|&v| v > 0).unwrap_or(1920);
+    let h = parts.next().and_then(|s| s.trim().split('@').next()?.parse::<u32>().ok()).filter(|&v| v > 0).unwrap_or(1080);
+    (w, h)
+}
+
+pub fn parse_display_width(resolution: &str) -> u32 {
+    let (w, _) = parse_display_dimensions(resolution);
+    w
 }
 
 pub fn build_display_positions(ordered: &[(String, String)]) -> Vec<(String, String)> {
@@ -39,59 +53,66 @@ pub fn build_positions_from_names(ordered_names: &[String], lookup: &HashMap<Str
     build_display_positions(&ordered)
 }
 
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct RawHyprMonitor {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub refresh_rate: Option<Box<serde_json::value::RawValue>>,
+    #[serde(default)]
+    pub scale: Option<Box<serde_json::value::RawValue>>,
+    #[serde(default)]
+    pub transform: Option<u8>,
+    #[serde(default)]
+    pub x: Option<i32>,
+    #[serde(default)]
+    pub y: Option<i32>,
+    #[serde(default)]
+    pub available_modes: Vec<String>,
+    #[serde(default)]
+    pub focused: bool,
+}
+
 pub fn parse_hyprctl_monitors(out: &str) -> Vec<DisplayInfo> {
-    let mut res = Vec::new();
-    let mut current_name = String::new();
-    let mut current_w = String::new();
-    let mut current_h = String::new();
-    let mut current_hz = String::new();
-    let mut current_scale = String::new();
-    let mut depth: i32 = 0;
-
-    for line in out.lines() {
-        let l = line.trim();
-        for ch in l.chars() {
-            if ch == '{' {
-                depth += 1;
-            } else if ch == '}' {
-                depth -= 1;
-                if depth <= 0 && !current_name.is_empty() {
-                    let resolution = if !current_w.is_empty() && !current_h.is_empty() {
-                        format!("{}x{}", current_w, current_h)
-                    } else {
-                        String::new()
-                    };
-                    res.push(DisplayInfo {
-                        name: current_name.clone(),
-                        resolution,
-                        refresh_rate: current_hz.clone(),
-                        scale: current_scale.clone(),
-                    });
-                    current_name.clear();
-                    current_w.clear();
-                    current_h.clear();
-                    current_hz.clear();
-                    current_scale.clear();
+    if let Ok(raw_list) = serde_json::from_str::<Vec<RawHyprMonitor>>(out) {
+        return raw_list
+            .into_iter()
+            .map(|raw| {
+                let resolution = match (raw.width, raw.height) {
+                    (Some(w), Some(h)) if w > 0 && h > 0 => format!("{w}x{h}"),
+                    _ => String::new(),
+                };
+                let refresh_rate = match raw.refresh_rate {
+                    Some(r) => r.get().trim_matches('"').to_string(),
+                    None => String::new(),
+                };
+                let scale = match raw.scale {
+                    Some(r) => r.get().trim_matches('"').to_string(),
+                    None => "1.00".to_string(),
+                };
+                DisplayInfo {
+                    name: raw.name,
+                    description: raw.description,
+                    resolution,
+                    refresh_rate,
+                    scale,
+                    transform: raw.transform.unwrap_or(0),
+                    x: raw.x.unwrap_or(0),
+                    y: raw.y.unwrap_or(0),
+                    available_modes: raw.available_modes,
+                    is_focused: raw.focused,
                 }
-            }
-        }
-
-        if depth == 1 {
-            if l.starts_with("\"name\":") {
-                current_name =
-                    l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == '\"' || c == ',' || c == ' ').to_string();
-            } else if l.starts_with("\"width\":") {
-                current_w = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
-            } else if l.starts_with("\"height\":") {
-                current_h = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
-            } else if l.starts_with("\"refreshRate\":") {
-                current_hz = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
-            } else if l.starts_with("\"scale\":") {
-                current_scale = l.split(':').nth(1).unwrap_or_default().trim_matches(|c| c == ',' || c == ' ').to_string();
-            }
-        }
+            })
+            .collect();
     }
-    res
+    Vec::new()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -359,12 +380,45 @@ pub trait SystemBackend {
     fn disconnect_bluetooth_device(&self, mac: &str);
     fn remove_bluetooth_device(&self, mac: &str);
     fn set_display_order(&self, ordered_names: &[String]) -> Result<(), String>;
+    fn set_display_config(&self, name: &str, mode: Option<&str>, transform: Option<u8>) -> Result<(), String>;
     fn log_out(&self) -> bool;
     fn reboot(&self) -> bool;
     fn power_off(&self) -> bool;
 }
 
 pub struct HyprlandBackend;
+
+impl HyprlandBackend {
+    pub fn apply_monitor_config(name: &str, mode: &str, position: &str, scale: &str, transform: u8) -> Result<(), String> {
+        let scale_val: f64 = scale.parse().unwrap_or(1.0);
+        let eval_lua = format!(
+            r#"hl.monitor({{ output = "{name}", mode = "{mode}", position = "{position}", scale = {scale_val}, transform = {transform} }})"#
+        );
+        if let Ok(output) = Command::new("hyprctl").args(["eval", &eval_lua]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if output.status.success()
+                && (stdout.starts_with("ok") || (!stdout.contains("error") && !stdout.contains("fail") && stderr.is_empty()))
+            {
+                return Ok(());
+            }
+        }
+
+        let arg = format!("{name},{mode},{position},{scale_val},transform,{transform}");
+        let output = Command::new("hyprctl")
+            .args(["keyword", "monitor", &arg])
+            .output()
+            .map_err(|e| format!("failed to spawn hyprctl: {e}"))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stdout.contains("can't work") || stdout.contains("error") || !output.status.success() {
+            let detail = if !stderr.is_empty() { stderr } else { stdout };
+            return Err(format!("failed to configure monitor {name}: {detail}"));
+        }
+        Ok(())
+    }
+}
 
 impl SystemBackend for HyprlandBackend {
     fn supports_brightness(&self) -> bool {
@@ -392,34 +446,60 @@ impl SystemBackend for HyprlandBackend {
             return Ok(());
         }
         let displays = self.get_displays();
-        let mut lookup: HashMap<String, String> = HashMap::new();
-        let mut scale_lookup: HashMap<String, String> = HashMap::new();
-        for d in displays {
-            lookup.insert(d.name.clone(), d.resolution);
-            if !d.scale.trim().is_empty() {
-                scale_lookup.insert(d.name, d.scale);
-            }
-        }
-        let positions = build_positions_from_names(ordered_names, &lookup);
-        for (name, pos) in positions {
-            let scale = scale_lookup.get(&name).map(|s| s.as_str()).unwrap_or("1");
-            let arg = format!("{name},preferred,{pos},{scale}");
-            let output = Command::new("hyprctl")
-                .args(["keyword", "monitor", &arg])
-                .output()
-                .map_err(|e| format!("failed to spawn hyprctl: {e}"))?;
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let detail = if !stderr.is_empty() { stderr } else { stdout };
-                let msg = if detail.is_empty() {
-                    format!("hyprctl keyword monitor {arg} failed")
+        let disp_map: HashMap<String, DisplayInfo> = displays.into_iter().map(|d| (d.name.clone(), d)).collect();
+
+        let mut x: i32 = 0;
+        for name in ordered_names {
+            if let Some(d) = disp_map.get(name) {
+                let (w, h) = parse_display_dimensions(&d.resolution);
+                let effective_w = if d.transform == 1 || d.transform == 3 { h } else { w };
+                let pos = format!("{x}x0");
+                let mode = if !d.resolution.is_empty() && !d.refresh_rate.is_empty() {
+                    if let Ok(hz) = d.refresh_rate.parse::<f64>() {
+                        format!("{}@{:.2}Hz", d.resolution, hz)
+                    } else {
+                        format!("{}@{}", d.resolution, d.refresh_rate)
+                    }
+                } else if !d.resolution.is_empty() {
+                    d.resolution.clone()
                 } else {
-                    format!("hyprctl keyword monitor {arg} failed: {detail}")
+                    "preferred".to_string()
                 };
-                return Err(msg);
+                Self::apply_monitor_config(name, &mode, &pos, &d.scale, d.transform)?;
+                x = x.saturating_add(effective_w as i32);
             }
         }
+        Ok(())
+    }
+
+    fn set_display_config(&self, name: &str, mode: Option<&str>, transform: Option<u8>) -> Result<(), String> {
+        let displays = self.get_displays();
+        let Some(target) = displays.iter().find(|d| d.name == name) else {
+            return Err(format!("monitor {name} not found"));
+        };
+        let final_mode = mode.map(|m| m.to_string()).unwrap_or_else(|| {
+            if !target.resolution.is_empty() && !target.refresh_rate.is_empty() {
+                if let Ok(hz) = target.refresh_rate.parse::<f64>() {
+                    format!("{}@{:.2}Hz", target.resolution, hz)
+                } else {
+                    format!("{}@{}", target.resolution, target.refresh_rate)
+                }
+            } else if !target.resolution.is_empty() {
+                target.resolution.clone()
+            } else {
+                "preferred".to_string()
+            }
+        });
+        let final_transform = transform.unwrap_or(target.transform);
+        let pos = format!("{}x{}", target.x, target.y);
+        Self::apply_monitor_config(name, &final_mode, &pos, &target.scale, final_transform)?;
+
+        // Re-align displays horizontally to prevent overlap
+        let mut sorted = self.get_displays();
+        sorted.sort_by_key(|d| d.x);
+        let names: Vec<String> = sorted.into_iter().map(|d| d.name).collect();
+        let _ = self.set_display_order(&names);
+
         Ok(())
     }
 
@@ -1221,6 +1301,10 @@ mod tests {
                 Err("stub".to_string())
             }
 
+            fn set_display_config(&self, _name: &str, _mode: Option<&str>, _transform: Option<u8>) -> Result<(), String> {
+                Ok(())
+            }
+
             fn log_out(&self) -> bool { false }
 
             fn reboot(&self) -> bool { false }
@@ -1246,7 +1330,9 @@ mod tests {
         "id": 1,
         "name": "1"
     },
-    "scale": 1.00
+    "scale": 1.00,
+    "transform": 1,
+    "availableModes": ["1920x1080@60.00Hz", "1600x900@60.00Hz"]
 },{
     "id": 1,
     "name": "DP-4",
@@ -1260,7 +1346,8 @@ mod tests {
         "id": 2,
         "name": "2"
     },
-    "scale": 1.25
+    "scale": 1.25,
+    "transform": 0
 }]"#;
         let displays = parse_hyprctl_monitors(json);
         assert_eq!(displays.len(), 2);
@@ -1268,10 +1355,13 @@ mod tests {
         assert_eq!(displays[0].resolution, "1920x1080");
         assert_eq!(displays[0].refresh_rate, "60.00000");
         assert_eq!(displays[0].scale, "1.00");
+        assert_eq!(displays[0].transform, 1);
+        assert_eq!(displays[0].available_modes.len(), 2);
 
         assert_eq!(displays[1].name, "DP-4");
         assert_eq!(displays[1].resolution, "2560x1440");
         assert_eq!(displays[1].refresh_rate, "144.00000");
         assert_eq!(displays[1].scale, "1.25");
+        assert_eq!(displays[1].transform, 0);
     }
 }

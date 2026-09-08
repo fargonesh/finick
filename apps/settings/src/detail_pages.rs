@@ -2,7 +2,6 @@ use freya::prelude::*;
 use ipsea::settings::SettingKey;
 use system::{DisplayInfo, SystemBackend};
 use ui::*;
-use ui::displays_mock_reorderable;
 use crate::state::*;
 
 /// 2-column grid container helper matching .grid2 in ui_demo.html
@@ -430,6 +429,11 @@ impl Component for DisplayDetailPage {
     fn render(&self) -> impl IntoElement {
         let store = self.store;
         let displays = self.displays;
+        let selected_name: State<Option<String>> = use_state(|| None);
+        let dragged_name: State<Option<String>> = use_state(|| None);
+        let order_status: State<Option<Result<String, String>>> = use_state(|| None);
+        let t = use_app_theme();
+
         let br_lock = store.lock_label(&SettingKey::DisplayBrightness);
         let is_br_locked = br_lock.is_some();
         let auto_br_lock = store.lock_label(&SettingKey::DisplayAutoBrightness);
@@ -440,13 +444,27 @@ impl Component for DisplayDetailPage {
         let is_ns_locked = ns_lock.is_some();
         let ct_lock = store.lock_label(&SettingKey::DisplayColorTemp);
         let is_ct_locked = ct_lock.is_some();
-        let order_status: State<Option<Result<(), String>>> = use_state(|| None);
-        let t = use_app_theme();
         let is_arrangement_locked = is_res_locked;
 
-        let displays_len = displays.read().len();
+        let displays_list = displays.read().clone();
+        let displays_len = displays_list.len();
+
+        let cur_selected_name: Option<String> = {
+            let s = selected_name.read().clone();
+            if s.as_ref().map_or(false, |name| displays_list.iter().any(|d| &d.name == name)) {
+                s
+            } else {
+                displays_list.first().map(|d| d.name.clone())
+            }
+        };
+
+        let selected_display: Option<DisplayInfo> = displays_list
+            .iter()
+            .find(|d| Some(&d.name) == cur_selected_name.as_ref())
+            .cloned();
+
         let status_chip_text: Option<Element> = match &*order_status.read() {
-            Some(Ok(())) => Some(status_chip("Order saved", false, None).into_element()),
+            Some(Ok(msg)) => Some(status_chip(msg.clone(), false, None).into_element()),
             Some(Err(e)) => {
                 let msg = if e.len() > 48 { format!("{}…", &e[..48]) } else { e.clone() };
                 Some(status_chip(format!("Error: {msg}"), true, None).into_element())
@@ -493,7 +511,7 @@ impl Component for DisplayDetailPage {
 
         let arrangement_tile = tile()
             .child(tile_head(None, "Arrangement", header_right))
-            .child(tile_sub("Rearrange displays by moving them left or right to match their physical arrangement."))
+            .child(tile_sub("Drag displays to match your physical arrangement. Click a display to customize its settings."))
             .child({
                 if displays_len == 0 {
                     rect()
@@ -510,64 +528,291 @@ impl Component for DisplayDetailPage {
                         )
                         .into_element()
                 } else {
-                    let items: Vec<DisplayMockItem> = displays
-                        .read()
+                    let items: Vec<DisplayMockItem> = displays_list
                         .iter()
-                        .enumerate()
-                        .map(|(i, d)| DisplayMockItem {
-                            name: if d.resolution.is_empty() {
-                                d.name.clone()
+                        .map(|d| {
+                            let is_sel = Some(&d.name) == cur_selected_name.as_ref();
+                            let res_label = if d.resolution.is_empty() {
+                                String::new()
+                            } else if let Ok(hz) = d.refresh_rate.parse::<f64>() {
+                                format!("{} ({:.0}Hz)", d.resolution, hz)
                             } else {
-                                format!("{} ({})", d.name, d.resolution)
-                            },
-                            height_px: 60. - (i as f32 * 6.).min(20.),
+                                format!("{} ({})", d.resolution, d.refresh_rate)
+                            };
+                            DisplayMockItem {
+                                name: d.name.clone(),
+                                description: d.description.clone(),
+                                resolution: res_label,
+                                height_px: 68.,
+                                transform: d.transform,
+                                is_selected: is_sel,
+                            }
                         })
                         .collect();
+
+                    let on_select = {
+                        let mut sel = selected_name;
+                        EventHandler::new(move |name: String| {
+                            sel.set(Some(name));
+                        })
+                    };
+
                     let on_swap = {
                         let mut displays_state = displays;
-                        let mut status_state = order_status;
                         let locked = is_arrangement_locked;
-                        EventHandler::new(move |(from, to): (usize, usize)| {
+                        EventHandler::new(move |(from_name, to_name): (String, String)| {
                             if locked {
                                 return;
                             }
-                            let len = displays_state.read().len();
-                            if from >= len || to >= len {
+                            let current_list = displays_state.read().clone();
+                            if let (Some(pos1), Some(pos2)) = (
+                                current_list.iter().position(|d| d.name == from_name),
+                                current_list.iter().position(|d| d.name == to_name),
+                            ) {
+                                let mut new_order = current_list;
+                                new_order.swap(pos1, pos2);
+                                displays_state.set(new_order);
+                            }
+                        })
+                    };
+
+                    let on_drag_end = {
+                        let mut displays_state = displays;
+                        let mut status_state = order_status;
+                        let locked = is_arrangement_locked;
+                        EventHandler::new(move |()| {
+                            if locked {
                                 return;
                             }
-                            let mut new_order = displays_state.read().clone();
-                            new_order.swap(from, to);
-                            let prev = displays_state.read().clone();
-                            displays_state.set(new_order.clone());
+                            let names: Vec<String> =
+                                displays_state.read().iter().map(|d| d.name.clone()).collect();
                             status_state.set(None);
-                            let names: Vec<String> = new_order.iter().map(|d| d.name.clone()).collect();
                             freya::prelude::spawn(async move {
                                 let res = tokio::task::spawn_blocking(move || {
                                     system::HyprlandBackend.set_display_order(&names)
                                 })
                                 .await;
                                 match res {
-                                    Ok(Ok(())) => status_state.set(Some(Ok(()))),
-                                    Ok(Err(e)) => {
-                                        displays_state.set(prev);
-                                        status_state.set(Some(Err(e)));
+                                    Ok(Ok(())) => {
+                                        let updated = tokio::task::spawn_blocking(move || {
+                                            system::HyprlandBackend.get_displays()
+                                        })
+                                        .await
+                                        .unwrap_or_default();
+                                        if !updated.is_empty() {
+                                            displays_state.set(updated);
+                                        }
+                                        status_state.set(Some(Ok("Arrangement saved".to_string())));
                                     }
+                                    Ok(Err(e)) => status_state.set(Some(Err(e))),
                                     Err(e) => {
-                                        displays_state.set(prev);
-                                        status_state.set(Some(Err(format!("join error: {e}"))));
+                                        status_state.set(Some(Err(format!("join error: {e}"))))
                                     }
                                 }
                             });
                         })
                     };
+
                     rect()
                         .width(Size::fill())
                         .margin((10., 0., 0., 0.))
                         .opacity(if is_arrangement_locked { 0.45 } else { 1.0 })
-                        .child(displays_mock_reorderable(items, on_swap))
+                        .child(draggable_displays_mock(
+                            items,
+                            dragged_name,
+                            on_swap,
+                            Some(on_select),
+                            Some(on_drag_end),
+                        ))
                         .into_element()
                 }
             });
+
+        let selected_tile = if let Some(selected) = selected_display {
+            let sel_name = selected.name.clone();
+            let sel_desc = if !selected.description.is_empty() {
+                format!("{} ({})", selected.description, selected.name)
+            } else {
+                selected.name.clone()
+            };
+            let sel_res = selected.resolution.clone();
+            let sel_hz = if let Ok(hz) = selected.refresh_rate.parse::<f64>() {
+                format!("{:.0} Hz", hz)
+            } else if !selected.refresh_rate.is_empty() {
+                selected.refresh_rate.clone()
+            } else {
+                "60 Hz".to_string()
+            };
+
+            let mut distinct_resolutions: Vec<String> = Vec::new();
+            for m in &selected.available_modes {
+                let res_part = m.split('@').next().unwrap_or("").trim().to_string();
+                if !res_part.is_empty() && !distinct_resolutions.contains(&res_part) {
+                    distinct_resolutions.push(res_part);
+                }
+            }
+            if distinct_resolutions.is_empty() {
+                distinct_resolutions = vec![
+                    "1920x1080".to_string(),
+                    "1600x900".to_string(),
+                    "1280x1024".to_string(),
+                    "1280x720".to_string(),
+                ];
+            }
+            let top_resolutions: Vec<String> = distinct_resolutions.into_iter().take(5).collect();
+
+            let rotation_items = vec![
+                ("Standard (0°)", 0u8),
+                ("90° Portrait", 1u8),
+                ("180° Inverted", 2u8),
+                ("270° Portrait", 3u8),
+            ];
+            let cur_transform = selected.transform;
+
+            let rotation_control = {
+                let mut ds = displays;
+                let mut status_state = order_status;
+                let mut sel = selected_name;
+                let sel_n = sel_name.clone();
+                let locked = is_res_locked;
+                segmented_control(
+                    rotation_items,
+                    cur_transform,
+                    move |new_tf: u8| {
+                        if locked {
+                            return;
+                        }
+                        status_state.set(None);
+                        let name = sel_n.clone();
+                        sel.set(Some(name.clone()));
+                        freya::prelude::spawn(async move {
+                            let res = tokio::task::spawn_blocking(move || {
+                                system::HyprlandBackend.set_display_config(&name, None, Some(new_tf))
+                            })
+                            .await;
+                            match res {
+                                Ok(Ok(())) => {
+                                    let updated = tokio::task::spawn_blocking(move || {
+                                        system::HyprlandBackend.get_displays()
+                                    })
+                                    .await
+                                    .unwrap_or_default();
+                                    if !updated.is_empty() {
+                                        ds.set(updated);
+                                    }
+                                    status_state.set(Some(Ok("Rotation applied".to_string())));
+                                }
+                                Ok(Err(e)) => status_state.set(Some(Err(e))),
+                                Err(e) => {
+                                    status_state.set(Some(Err(format!("join error: {e}"))))
+                                }
+                            }
+                        });
+                    },
+                )
+            };
+
+            let res_items: Vec<(String, String)> = top_resolutions
+                .iter()
+                .map(|r| (r.replace('x', " × "), r.clone()))
+                .collect();
+            let cur_res_choice = sel_res.clone();
+
+            let resolution_control = {
+                let mut ds = displays;
+                let mut status_state = order_status;
+                let mut sel = selected_name;
+                let sel_n = sel_name.clone();
+                let locked = is_res_locked;
+                let modes = selected.available_modes.clone();
+                segmented_control_dynamic(
+                    res_items,
+                    cur_res_choice,
+                    move |chosen_res: String| {
+                        if locked {
+                            return;
+                        }
+                        status_state.set(None);
+                        let name = sel_n.clone();
+                        sel.set(Some(name.clone()));
+                        let target_mode = modes
+                            .iter()
+                            .find(|m| m.starts_with(&chosen_res))
+                            .cloned()
+                            .unwrap_or_else(|| chosen_res.clone());
+
+                        freya::prelude::spawn(async move {
+                            let res = tokio::task::spawn_blocking(move || {
+                                system::HyprlandBackend.set_display_config(&name, Some(&target_mode), None)
+                            })
+                            .await;
+                            match res {
+                                Ok(Ok(())) => {
+                                    let updated = tokio::task::spawn_blocking(move || {
+                                        system::HyprlandBackend.get_displays()
+                                    })
+                                    .await
+                                    .unwrap_or_default();
+                                    if !updated.is_empty() {
+                                        ds.set(updated);
+                                    }
+                                    status_state.set(Some(Ok("Resolution applied".to_string())));
+                                }
+                                Ok(Err(e)) => status_state.set(Some(Err(e))),
+                                Err(e) => {
+                                    status_state.set(Some(Err(format!("join error: {e}"))))
+                                }
+                            }
+                        });
+                    },
+                )
+            };
+
+            tile()
+                .child(tile_head(
+                    None,
+                    format!("Display Settings — {sel_desc}"),
+                    res_lock.as_ref().map(|l| lock_badge(l)),
+                ))
+                .child(setting_row(
+                    "Current mode",
+                    None::<String>,
+                    false,
+                    label()
+                        .font_size(12.)
+                        .color(t.text_dim)
+                        .text(format!("{sel_res} @ {sel_hz}")),
+                ))
+                .child(
+                    rect()
+                        .margin((12., 0., 4., 0.))
+                        .horizontal()
+                        .cross_align(Alignment::Center)
+                        .spacing(8.)
+                        .child(field_label("Resolution")),
+                )
+                .child(
+                    rect()
+                        .opacity(if is_res_locked { 0.45 } else { 1.0 })
+                        .child(resolution_control),
+                )
+                .child(
+                    rect()
+                        .margin((16., 0., 4., 0.))
+                        .horizontal()
+                        .cross_align(Alignment::Center)
+                        .spacing(8.)
+                        .child(field_label("Orientation / Rotation")),
+                )
+                .child(
+                    rect()
+                        .opacity(if is_res_locked { 0.45 } else { 1.0 })
+                        .child(rotation_control),
+                )
+                .into_element()
+        } else {
+            rect().into_element()
+        };
 
         rect()
             .width(Size::fill())
@@ -578,8 +823,10 @@ impl Component for DisplayDetailPage {
                     .width(Size::fill())
                     .vertical()
                     .spacing(GAP)
-                    // Wide: Arrangement — interactive reorderable (top priority)
+                    // Wide: Arrangement — interactive draggable (top priority)
                     .child(arrangement_tile)
+                    // Wide: Per-display configuration (Resolution & Rotation)
+                    .maybe_child((displays_len > 0).then(|| selected_tile))
                     // Wide: Brightness
                     .child(
                         tile()
