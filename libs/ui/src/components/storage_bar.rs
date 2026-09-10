@@ -15,14 +15,15 @@ pub fn multi_segment_bar(
 ) -> impl IntoElement {
     let t = use_app_theme();
     let height = if is_big { 14. } else { 10. };
-    let radius = if is_big { 7. } else { 5. };
 
     rect()
         .width(Size::fill())
         .height(Size::px(height))
-        .corner_radius(radius)
+        .corner_radius(RADIUS_PILL)
         .background(t.track)
+        .overflow(Overflow::Clip)
         .horizontal()
+        .content(Content::Flex)
         .children(segments.into_iter().map(|(pct, color)| {
             rect()
                 .width(Size::percent(pct))

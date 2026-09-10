@@ -5073,6 +5073,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "overlay"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "config",
+ "freya",
+ "ipc",
+ "serde",
+ "serde_json",
+ "system",
+ "tokio",
+ "ui",
+ "winit",
+]
+
+[[package]]
 name = "owned_ttf_parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6413,6 +6429,7 @@ dependencies = [
  "serde_json",
  "system",
  "tokio",
+ "zbus",
 ]
 
 [[package]]
@@ -7258,22 +7275,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
-name = "topbar"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "config",
- "freya",
- "ipc",
- "serde",
- "serde_json",
- "system",
- "tokio",
- "ui",
- "winit",
-]
-
-[[package]]
 name = "torin"
 version = "0.5.0-rc.4"
 source = "git+https://github.com/marc2332/freya?branch=main#b647af7f4c393fcc12c44eccf7275a4c4b470348"
@@ -7469,6 +7470,7 @@ name = "ui"
 version = "0.1.0"
 dependencies = [
  "freya",
+ "freya-components",
 ]
 
 [[package]]

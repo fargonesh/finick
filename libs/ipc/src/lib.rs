@@ -137,6 +137,17 @@ where
     }
 }
 
+pub fn resolve_socket_path(socket_path: impl Into<PathBuf> + Display) -> PathBuf {
+    let s = socket_path.to_string();
+    if s.starts_with('/') {
+        PathBuf::from(s)
+    } else if s.ends_with(".sock") {
+        PathBuf::from(format!("/tmp/{}", s))
+    } else {
+        PathBuf::from(format!("/tmp/{}.sock", s))
+    }
+}
+
 /// Spawns a server that listens for requests, then
 /// spawns new (std) threads to handle them.
 pub fn start_server<Req, Res, F>(socket_path: impl Into<PathBuf> + Display, handler: F) -> std::io::Result<()>
@@ -145,11 +156,7 @@ where
     Res: Serialize + Send + 'static + std::fmt::Debug,
     F: Fn(Req, Sender<Res>) + Send + Sync + Clone + 'static,
 {
-    let socket_path = if socket_path.to_string().starts_with("/") {
-        socket_path.into()
-    } else {
-        PathBuf::from(format!("/tmp/{}.sock", socket_path))
-    };
+    let socket_path = resolve_socket_path(socket_path);
 
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
@@ -188,7 +195,7 @@ where
     Res: Serialize + Send + 'static + std::fmt::Debug,
 {
     pub async fn new(app: impl ToString) -> std::io::Result<Self> {
-        let socket_path = PathBuf::from(format!("/tmp/{}.sock", app.to_string()));
+        let socket_path = resolve_socket_path(app.to_string());
         let _ = std::fs::remove_file(&socket_path);
         let listener = tokio::net::UnixListener::bind(&socket_path)?;
         info!("Server started on {:?}", socket_path);
@@ -243,11 +250,7 @@ where
     Res: for<'de> Deserialize<'de> + std::fmt::Debug, // Debug logging
     H: Fn(Res) + Send + 'static,
 {
-    let socket_path = if socket_path.to_string().starts_with("/") {
-        socket_path.into()
-    } else {
-        PathBuf::from(format!("/tmp/{}.sock", socket_path))
-    };
+    let socket_path = resolve_socket_path(socket_path);
 
     info!("Connecting to server at {:?}", socket_path);
     let mut stream = UnixStream::connect(&socket_path)?;
@@ -308,3 +311,5 @@ where
     }
     Ok(())
 }
+pub mod notifications;
+pub use notifications::{Notification, NotificationBroadcaster, NotificationEvent, NotificationRequest};

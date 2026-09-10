@@ -114,22 +114,31 @@ impl Component for AppearanceDetailPage {
                                 .child(
                                     rect()
                                         .opacity(if is_accent_locked { 0.45 } else { 1.0 })
+                                        .vertical()
+                                        .spacing(8.)
                                         .child({
                                             let mut th = theme_state;
                                             let store = store;
-                                            swatch_picker(
+                                            let wp = store.wallpaper.read().clone();
+                                            accent_picker_with_material(
                                                 t.accent_name,
+                                                wp,
                                                 true,
                                                 move |acc| {
                                                     if !is_accent_locked {
                                                         let new_t = th.read().with_accent(acc);
                                                         th.set(new_t);
                                                         set_theme(&new_t);
-                                                        store.set(SettingKey::AccentColor, acc.name.to_string());
+                                                        store.set(SettingKey::AccentColor, acc.hex.to_string());
+                                                        let clean_hex = acc.hex.trim_start_matches('#');
+                                                        let _ = std::process::Command::new("hyprctl")
+                                                            .args(["keyword", "general:col.active_border", &format!("0xff{clean_hex}")])
+                                                            .status();
                                                     }
                                                 },
                                             )
-                                        }),
+                                        })
+
                                 ),
                         )
                         // 2-Column Row: Wallpaper & Interface
@@ -146,16 +155,20 @@ impl Component for AppearanceDetailPage {
                                         };
                                         let image_label = if is_custom_image {
                                             let clean = cur_wp.strip_prefix("file://").unwrap_or(&cur_wp);
-                                            std::path::Path::new(clean)
+                                            let raw = std::path::Path::new(clean)
                                                 .file_name()
                                                 .map(|f| f.to_string_lossy().to_string())
-                                                .unwrap_or_else(|| "Custom image".to_string())
+                                                .unwrap_or_else(|| "Custom image".to_string());
+                                            if raw.chars().count() > 24 {
+                                                format!("{}…", raw.chars().take(24).collect::<String>())
+                                            } else {
+                                                raw
+                                            }
                                         } else {
                                             "Custom image".to_string()
                                         };
                                         let image_subtext = if is_custom_image {
-                                            let clean = cur_wp.strip_prefix("file://").unwrap_or(&cur_wp);
-                                            Some(clean.to_string())
+                                            Some("Custom desktop wallpaper".to_string())
                                         } else {
                                             Some("Select an image to display across all monitors".to_string())
                                         };
@@ -290,7 +303,7 @@ impl Component for AppearanceDetailPage {
                                                                     if images.is_empty() {
                                                                         rect()
                                                                             .margin((6., 0., 0., 0.))
-                                                                            .child(label().font_size(11.).color(use_app_theme().text_dim).text("No images found in folder"))
+                                                                            .child(label().font_size(11.).color(t.text_dim).text("No images found in folder"))
                                                                             .into_element()
                                                                     } else {
                                                                         rect()
@@ -307,6 +320,7 @@ impl Component for AppearanceDetailPage {
                                                                                     .children(images.iter().take(6).cloned().map({
                                                                                         let store = store;
                                                                                         let cur = cur_wp.clone();
+                                                                                        let t = t;
                                                                                         move |path| {
                                                                                             let is_sel = cur == path || cur == format!("file://{path}");
                                                                                             let p = path.clone();
@@ -315,14 +329,14 @@ impl Component for AppearanceDetailPage {
                                                                                                 .width(Size::flex(1.))
                                                                                                 .height(Size::px(52.))
                                                                                                 .corner_radius(8.)
-                                                                                                .background(use_app_theme().panel_raised)
-                                                                                                .border(Border::new().width(if is_sel { 2. } else { 1. }).fill(if is_sel { use_app_theme().accent } else { use_app_theme().border }))
+                                                                                                .background(t.panel_raised)
+                                                                                                .border(Border::new().width(if is_sel { 2. } else { 1. }).fill(if is_sel { t.accent } else { t.border }))
                                                                                                 .cursor(CursorIcon::Pointer)
                                                                                                 .center()
                                                                                                 .on_press(move |_| {
                                                                                                     store.set(SettingKey::Wallpaper, p.clone());
                                                                                                 })
-                                                                                                .child(label().font_size(9.).color(use_app_theme().text_dim).text(
+                                                                                                .child(label().font_size(9.).color(t.text_dim).text(
                                                                                                     std::path::Path::new(&path)
                                                                                                         .file_name()
                                                                                                         .map(|n| n.to_string_lossy().chars().take(10).collect::<String>())
@@ -335,7 +349,7 @@ impl Component for AppearanceDetailPage {
                                                                     }
                                                                 }
                                                             })
-                                                            .child(
+                                                            .maybe_child((!store.wallpaper_folder.read().is_empty()).then(|| {
                                                                 rect()
                                                                     .margin((10., 0., 0., 0.))
                                                                     .horizontal()
@@ -356,8 +370,9 @@ impl Component for AppearanceDetailPage {
                                                                                 );
                                                                             },
                                                                         )
-                                                                    }),
-                                                            )
+                                                                    })
+                                                            }))
+                                                            .maybe_child(store.wallpaper_folder.read().is_empty().then(|| rect().margin((8.,0.,0.,0.)).child(tile_sub("Pick a folder to enable slideshow"))))
                                                             .child(tile_sub("When interval is set, Finick will rotate wallpapers from the chosen folder")),
                                                     ),
                                             )
@@ -381,11 +396,15 @@ impl Component for AppearanceDetailPage {
                                                     .opacity(if is_scroll_locked { 0.45 } else { 1.0 })
                                                     .child({
                                                         let store = store;
+                                                        let mut th = theme_state;
                                                         segmented_control(
                                                             vec![("Automatically", 0), ("When scrolling", 1), ("Always", 2)],
                                                             *store.scrollbar_pref.read(),
                                                             move |idx| {
                                                                 if !is_scroll_locked {
+                                                                    let new_t = th.read().with_scrollbar_pref(idx);
+                                                                    th.set(new_t);
+                                                                    set_theme(&new_t);
                                                                     store.set(SettingKey::Scrollbars, idx as i64);
                                                                 }
                                                             },
@@ -406,11 +425,15 @@ impl Component for AppearanceDetailPage {
                                                     .opacity(if is_icon_locked { 0.45 } else { 1.0 })
                                                     .child({
                                                         let store = store;
+                                                        let mut th = theme_state;
                                                         segmented_control(
                                                             vec![("Small", 0), ("Medium", 1), ("Large", 2)],
                                                             *store.icon_size_pref.read(),
                                                             move |idx| {
                                                                 if !is_icon_locked {
+                                                                    let new_t = th.read().with_icon_size(idx);
+                                                                    th.set(new_t);
+                                                                    set_theme(&new_t);
                                                                     store.set(SettingKey::IconSize, idx as i64);
                                                                 }
                                                             },
@@ -452,9 +475,17 @@ impl Component for WifiDetailPage {
             let mut ns = net_state;
             let mut ld = loading;
             spawn(async move {
-                let info = tokio::task::spawn_blocking(fetch_network_info).await.unwrap_or_default();
-                ns.set(Some(info));
+                let initial = tokio::task::spawn_blocking(fetch_network_info).await.unwrap_or_default();
+                ns.set(Some(initial));
                 ld.set(false);
+                let _ = tokio::task::spawn_blocking(|| {
+                    let _ = std::process::Command::new("nmcli").args(["dev", "wifi", "rescan"]).output();
+                }).await;
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                let updated = tokio::task::spawn_blocking(fetch_network_info).await.unwrap_or_default();
+                if !updated.available_networks.is_empty() {
+                    ns.set(Some(updated));
+                }
             });
         });
 
@@ -522,6 +553,40 @@ impl Component for WifiDetailPage {
                             ))
                             .child(setting_row("IP address", None::<String>, true, label().font_size(12.).color(t.text_dim).text(net.primary_ip.clone())))
                             .child(setting_row("Security", None::<String>, true, label().font_size(12.).color(t.text_dim).text(sec_label))),
+                    )
+                    .child(
+                        tile()
+                            .child(tile_head(None, "Nearby networks", None::<String>))
+                            .child({
+                                let mut base = rect().width(Size::fill()).vertical();
+                                if *loading.read() {
+                                    base = base.child(tile_sub("Scanning for nearby networks…"));
+                                } else if net.available_networks.is_empty() {
+                                    base = base.child(tile_sub("No nearby networks found"));
+                                } else {
+                                    for nw in net.available_networks.iter().take(8) {
+                                        let ssid = nw.ssid.clone();
+                                        let is_conn = nw.connected || Some(&ssid) == net.active_ssid.as_ref();
+                                        let ssid_conn = ssid.clone();
+                                        base = base.child(setting_row(
+                                            ssid,
+                                            Some(format!("Signal {}% · {}", nw.signal, nw.security)),
+                                            false,
+                                            if is_conn {
+                                                status_chip("Connected", true, None).into_element()
+                                            } else {
+                                                secondary_button("Connect", move || {
+                                                    let s = ssid_conn.clone();
+                                                    std::thread::spawn(move || {
+                                                        system::HyprlandBackend.connect_wifi(&s);
+                                                    });
+                                                }).into_element()
+                                            },
+                                        ));
+                                    }
+                                }
+                                base
+                            }),
                     )
                     .child(
                         grid2([
@@ -610,12 +675,53 @@ impl Component for BluetoothDetailPage {
             let mut ld = loading;
             let mut nearby = scan_nearby;
             spawn(async move {
+                let _ = tokio::task::spawn_blocking(|| {
+                    let _ = std::process::Command::new("bluetoothctl").args(["scan", "on"]).output();
+                })
+                .await;
+                tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
                 let paired = tokio::task::spawn_blocking(|| system::HyprlandBackend.get_paired_bluetooth_devices())
                     .await
                     .unwrap_or_default();
-                let all_nearby = paired.iter().filter(|d| !d.connected).cloned().collect::<Vec<_>>();
+                let all_known = tokio::task::spawn_blocking(|| {
+                    let out = std::process::Command::new("bluetoothctl").args(["devices"]).output().ok();
+                    if let Some(o) = out {
+                        let s = String::from_utf8_lossy(&o.stdout).to_string();
+                        s.lines().filter_map(|line| {
+                            let parts: Vec<&str> = line.splitn(3, ' ').collect();
+                            if parts.len() >= 3 {
+                                let mac = parts[1].to_string();
+                                let raw_name = parts[2].trim().to_string();
+                                let clean = raw_name.replace([':', '-'], "");
+                                let is_mac_name = raw_name.is_empty() || (clean.len() == 12 && clean.chars().all(|c| c.is_ascii_hexdigit()));
+                                let name = if is_mac_name {
+                                    std::process::Command::new("bluetoothctl").args(["info", &mac]).output().ok().and_then(|info_o| {
+                                        let is = String::from_utf8_lossy(&info_o.stdout);
+                                        let mut alias = None;
+                                        let mut n = None;
+                                        for l in is.lines() {
+                                            let t = l.trim();
+                                            if let Some(rest) = t.strip_prefix("Alias:") { alias = Some(rest.trim().to_string()); }
+                                            if let Some(rest) = t.strip_prefix("Name:") { n = Some(rest.trim().to_string()); }
+                                        }
+                                        alias.or(n)
+                                    }).unwrap_or_else(|| format!("Device ({})", &mac[..mac.len().min(8)]))
+                                } else {
+                                    raw_name
+                                };
+                                Some(system::BluetoothDevice {
+                                    name,
+                                    mac,
+                                    connected: false,
+                                })
+                            } else { None }
+                        }).collect::<Vec<_>>()
+                    } else { Vec::new() }
+                }).await.unwrap_or_default();
+                let paired_macs: std::collections::HashSet<String> = paired.iter().map(|d| d.mac.clone()).collect();
+                let nearby_only: Vec<_> = all_known.into_iter().filter(|d| !paired_macs.contains(&d.mac)).collect();
                 dev.set(paired);
-                nearby.set(all_nearby);
+                nearby.set(nearby_only);
                 ld.set(false);
             });
         });
@@ -678,31 +784,33 @@ impl Component for BluetoothDetailPage {
                                 if is_loading {
                                     base = base.child(tile_sub("Loading paired devices…"));
                                 } else if paired.is_empty() {
-                                    base = base.child(tile_sub("No paired devices")).child(
-                                        rect().margin((8., 0., 0., 0.)).child(ghost_button("Scan for devices", {
-                                            let mut ld = loading;
-                                            move || ld.set(true)
-                                        })),
-                                    );
+                                    base = base.child(tile_sub("No paired devices — scanning…"));
                                 } else {
                                     for dev in paired.iter().take(6) {
                                         let mac = dev.mac.clone();
                                         let name = dev.name.clone();
                                         let is_conn = dev.connected;
-                                        let status = if is_conn { "Connected" } else { "Paired" };
-                                        let mac2 = mac.clone();
-                                        let mac3 = mac.clone();
-                                        base = base.child(setting_row(
-                                            name,
-                                            Some(mac.clone()),
-                                            false,
+                                        let subtitle = if is_conn {
+                                            format!("Connected · {}", mac)
+                                        } else {
+                                            mac.clone()
+                                        };
+                                        let mac_for_action = mac.clone();
+                                        base = base.child(
                                             rect()
+                                                .width(Size::fill())
                                                 .horizontal()
-                                                .spacing(8.)
+                                                .cross_align(Alignment::Center)
+                                                .main_align(Alignment::SpaceBetween)
                                                 .content(Content::Flex)
-                                                .child(status_chip(status, is_conn, None))
-                                                .child(secondary_button(if is_conn { "Disconnect" } else { "Connect" }, move || {
-                                                    let m = mac.clone();
+                                                .padding((8., 12.))
+                                                .margin((2., 0.))
+                                                .corner_radius(8.)
+                                                .cursor(CursorIcon::Pointer)
+                                                .background(t.bg_card)
+                                                .border(Border::new().width(1.).fill(t.border))
+                                                .on_press(move |_| {
+                                                    let m = mac_for_action.clone();
                                                     let c = is_conn;
                                                     std::thread::spawn(move || {
                                                         if c {
@@ -711,15 +819,13 @@ impl Component for BluetoothDetailPage {
                                                             system::HyprlandBackend.connect_bluetooth_device(&m);
                                                         }
                                                     });
-                                                }))
-                                                .child(ghost_button("Forget", move || {
-                                                    let m = mac2.clone();
-                                                    std::thread::spawn(move || {
-                                                        system::HyprlandBackend.remove_bluetooth_device(&m);
-                                                    });
-                                                })),
-                                        ));
-                                        let _ = mac3;
+                                                })
+                                                .child(
+                                                    rect().vertical().spacing(2.)
+                                                        .child(label().font_size(12.).color(t.text).text(name))
+                                                        .child(label().font_size(10.).color(if is_conn { t.accent } else { t.text_dim }).text(subtitle))
+                                                )
+                                        );
                                     }
                                 }
                                 base
@@ -729,18 +835,7 @@ impl Component for BluetoothDetailPage {
                                 if is_loading {
                                     base = base.child(tile_sub("Scanning…"));
                                 } else if nearby_devices.is_empty() {
-                                    base = base.child(tile_sub("No nearby devices found")).child(
-                                        rect()
-                                            .margin((8., 0., 0., 0.))
-                                            .horizontal()
-                                            .spacing(8.)
-                                            .child(ghost_button("Start scan", || {
-                                                std::thread::spawn(|| {
-                                                    let _ = std::process::Command::new("bluetoothctl").args(["scan", "on"]).output();
-                                                });
-                                            }))
-                                            .child(label().font_size(11.).color(t.text_dim).text("bluetoothctl scan")),
-                                    );
+                                    base = base.child(tile_sub("No nearby devices found — scanning…"));
                                 } else {
                                     for dev in nearby_devices.iter().take(5) {
                                         let mac = dev.mac.clone();
@@ -784,6 +879,8 @@ impl Component for DisplayDetailPage {
         let selected_name: State<Option<String>> = use_state(|| None);
         let dragged_name: State<Option<String>> = use_state(|| None);
         let order_status: State<Option<Result<String, String>>> = use_state(|| None);
+        let identify_active: State<bool> = use_state(|| false);
+        let position_offsets: State<std::collections::HashMap<String, (i32,i32)>> = use_state(Default::default);
         let t = use_app_theme();
 
         let br_lock = store.lock_label(&SettingKey::DisplayBrightness);
@@ -845,13 +942,38 @@ impl Component for DisplayDetailPage {
                 })
                 .child(label().font_size(11.).color(t.text_dim).text("Detect Displays"))
         };
+        let identify_btn = {
+            let mut active = identify_active;
+            let mut status = order_status;
+            rect()
+                .cursor(CursorIcon::Pointer)
+                .padding((4., 8.))
+                .corner_radius(6.)
+                .background(t.accent)
+                .on_press(move |_| {
+                    active.set(true);
+                    status.set(Some(Ok("Identifying displays…".to_string())));
+                    let mut a = active;
+                    let mut s = status;
+                    freya::prelude::spawn(async move {
+                        let _ = tokio::task::spawn_blocking(|| {
+                            let _ = std::process::Command::new("hyprctl").args(["dispatch", "exec", "notify-send 'Display Identify' 'Overlay shown'"]).output();
+                        }).await;
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        a.set(false);
+                        s.set(Some(Ok("Identify finished".to_string())));
+                    });
+                })
+                .child(label().font_size(11.).color(t.bg).text("Identify"))
+        };
         let header_right: Option<Element> = {
             let lock = res_lock.clone().map(|l| lock_badge(l).into_element());
             let mut right_row = rect()
                 .horizontal()
                 .cross_align(Alignment::Center)
                 .spacing(8.)
-                .child(refresh_btn);
+                .child(refresh_btn)
+                .child(identify_btn);
             if let Some(l) = lock {
                 right_row = right_row.child(l);
             }
@@ -880,6 +1002,8 @@ impl Component for DisplayDetailPage {
                         )
                         .into_element()
                 } else {
+                    let offsets = position_offsets.read().clone();
+                    let ident = *identify_active.read();
                     let items: Vec<DisplayMockItem> = displays_list
                         .iter()
                         .map(|d| {
@@ -891,6 +1015,13 @@ impl Component for DisplayDetailPage {
                             } else {
                                 format!("{} ({})", d.resolution, d.refresh_rate)
                             };
+                            let (ox, oy) = offsets.get(&d.name).cloned().unwrap_or((d.x, d.y));
+                            let (raw_w, raw_h) = system::parse_display_dimensions(&d.resolution);
+                            let sc: f64 = d.scale.parse().unwrap_or(1.0);
+                            let sc = if sc <= 0.0 {1.0} else {sc};
+                            let mut lw = (raw_w as f64 / sc).round() as i32;
+                            let mut lh = (raw_h as f64 / sc).round() as i32;
+                            if d.transform == 1 || d.transform == 3 { std::mem::swap(&mut lw, &mut lh); }
                             DisplayMockItem {
                                 name: d.name.clone(),
                                 description: d.description.clone(),
@@ -898,6 +1029,11 @@ impl Component for DisplayDetailPage {
                                 height_px: 68.,
                                 transform: d.transform,
                                 is_selected: is_sel,
+                                x: ox,
+                                y: oy,
+                                identify_active: ident,
+                                logical_w: lw,
+                                logical_h: lh,
                             }
                         })
                         .collect();
@@ -931,50 +1067,112 @@ impl Component for DisplayDetailPage {
                     let on_drag_end = {
                         let mut displays_state = displays;
                         let mut status_state = order_status;
+                        let mut offs_state = position_offsets;
                         let locked = is_arrangement_locked;
                         EventHandler::new(move |()| {
                             if locked {
                                 return;
                             }
-                            let names: Vec<String> =
-                                displays_state.read().iter().map(|d| d.name.clone()).collect();
-                            status_state.set(None);
-                            freya::prelude::spawn(async move {
-                                let res = tokio::task::spawn_blocking(move || {
-                                    system::HyprlandBackend.set_display_order(&names)
-                                })
-                                .await;
-                                match res {
-                                    Ok(Ok(())) => {
-                                        let updated = tokio::task::spawn_blocking(move || {
-                                            system::HyprlandBackend.get_displays()
-                                        })
-                                        .await
-                                        .unwrap_or_default();
-                                        if !updated.is_empty() {
-                                            displays_state.set(updated);
+                            let offs = offs_state.read().clone();
+                            let has_free = !offs.is_empty();
+                            if has_free {
+                                let positions: Vec<(String,i32,i32)> = displays_state.read().iter().map(|d| {
+                                    if let Some((nx,ny)) = offs.get(&d.name) { (d.name.clone(), *nx, *ny) } else { (d.name.clone(), d.x, d.y) }
+                                }).collect();
+                                status_state.set(None);
+                                freya::prelude::spawn(async move {
+                                    let res = tokio::task::spawn_blocking(move || {
+                                        system::HyprlandBackend.set_display_positions(&positions)
+                                    }).await;
+                                    match res {
+                                        Ok(Ok(())) => {
+                                            let updated = tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays()).await.unwrap_or_default();
+                                            if !updated.is_empty() { displays_state.set(updated); }
+                                            offs_state.set(Default::default());
+                                            status_state.set(Some(Ok("Positions saved".to_string())));
                                         }
-                                        status_state.set(Some(Ok("Arrangement saved".to_string())));
+                                        Ok(Err(e)) => status_state.set(Some(Err(e))),
+                                        Err(e) => status_state.set(Some(Err(format!("join error: {e}")))),
                                     }
-                                    Ok(Err(e)) => status_state.set(Some(Err(e))),
-                                    Err(e) => {
-                                        status_state.set(Some(Err(format!("join error: {e}"))))
+                                });
+                            } else {
+                                let names: Vec<String> = displays_state.read().iter().map(|d| d.name.clone()).collect();
+                                status_state.set(None);
+                                freya::prelude::spawn(async move {
+                                    let res = tokio::task::spawn_blocking(move || {
+                                        system::HyprlandBackend.set_display_order(&names)
+                                    }).await;
+                                    match res {
+                                        Ok(Ok(())) => {
+                                            let updated = tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays()).await.unwrap_or_default();
+                                            if !updated.is_empty() { displays_state.set(updated); }
+                                            status_state.set(Some(Ok("Arrangement saved".to_string())));
+                                        }
+                                        Ok(Err(e)) => status_state.set(Some(Err(e))),
+                                        Err(e) => status_state.set(Some(Err(format!("join error: {e}")))),
                                     }
-                                }
-                            });
+                                });
+                            }
                         })
                     };
 
+                    let on_position = {
+                        let mut offs = position_offsets;
+                        let mut displays_state = displays;
+                        EventHandler::new(move |(name, nx, ny): (String,i32,i32)| {
+                            let list_snapshot = displays_state.read().clone();
+                            let self_info = list_snapshot.iter().find(|d| d.name==name);
+                            let (sw, sh) = if let Some(d) = self_info {
+                                let (rw, rh) = system::parse_display_dimensions(&d.resolution);
+                                let sc: f64 = d.scale.parse().unwrap_or(1.0);
+                                let sc = if sc <= 0.0 {1.0} else {sc};
+                                let mut w = (rw as f64 / sc).round() as i32;
+                                let mut h = (rh as f64 / sc).round() as i32;
+                                if d.transform==1||d.transform==3 { std::mem::swap(&mut w, &mut h); }
+                                (w, h)
+                            } else {(1920,1080)};
+                            let (mut snap_x, mut snap_y) = (nx, ny);
+                            if list_snapshot.len() > 1 {
+                                let mut best: Option<(i32,i32,i32)> = None;
+                                for d in &list_snapshot {
+                                    if d.name == name { continue; }
+                                    let (ox, oy) = (d.x, d.y);
+                                    let (rw, rh) = system::parse_display_dimensions(&d.resolution);
+                                    let sc: f64 = d.scale.parse().unwrap_or(1.0);
+                                    let sc = if sc <= 0.0 {1.0} else {sc};
+                                    let mut ow = (rw as f64 / sc).round() as i32;
+                                    let mut oh = (rh as f64 / sc).round() as i32;
+                                    if d.transform==1||d.transform==3 { std::mem::swap(&mut ow, &mut oh); }
+                                    for (cx, cy) in [(ox+ow, oy), (ox - sw, oy), (ox, oy+oh), (ox, oy - sh)] {
+                                        let dx = nx - cx;
+                                        let dy = ny - cy;
+                                        let dist = dx*dx + dy*dy;
+                                        if best.is_none() || dist < best.unwrap().0 { best = Some((dist, cx, cy)); }
+                                    }
+                                }
+                                if let Some((_, bx, by)) = best { snap_x = bx; snap_y = by; }
+                            } else { snap_x = 0; snap_y = 0; }
+                            snap_x = snap_x.clamp(-3000, 3000);
+                            snap_y = snap_y.clamp(-2000, 2000);
+                            let mut map = offs.read().clone();
+                            map.insert(name.clone(), (snap_x, snap_y));
+                            offs.set(map.clone());
+                            let mut list = displays_state.read().clone();
+                            for d in list.iter_mut() { if d.name == name { d.x = snap_x; d.y = snap_y; } }
+                            displays_state.set(list);
+                        })
+                    };
                     rect()
                         .width(Size::fill())
                         .margin((10., 0., 0., 0.))
                         .opacity(if is_arrangement_locked { 0.45 } else { 1.0 })
-                        .child(draggable_displays_mock(
+                        .child(draggable_displays_mock_with_position(
                             items,
                             dragged_name,
                             on_swap,
                             Some(on_select),
                             Some(on_drag_end),
+                            on_position,
                         ))
                         .into_element()
                 }
@@ -1179,133 +1377,112 @@ impl Component for DisplayDetailPage {
                     .child(arrangement_tile)
                     // Wide: Per-display configuration (Resolution & Rotation)
                     .maybe_child((displays_len > 0).then(|| selected_tile))
-                    // Wide: Brightness
+                    // Wide: Brightness (hidden when unavailable)
+                    .maybe_child({
+                        let has_backlight = system::HyprlandBackend.supports_brightness();
+                        has_backlight.then(|| {
+                            let opacity = if is_br_locked { 0.45 } else { 1.0 };
+                            tile()
+                                .child(tile_head(
+                                    None,
+                                    "Brightness",
+                                    br_lock.as_ref().map(|l| lock_badge(l)),
+                                ))
+                                .child(
+                                    rect()
+                                        .opacity(opacity)
+                                        .child({
+                                            let store = store;
+                                            slider_row(Some(SUN), *store.brightness.read(), move |v| {
+                                                if !is_br_locked {
+                                                    store.set(SettingKey::DisplayBrightness, v);
+                                                    std::thread::spawn(move || system::HyprlandBackend.set_brightness(v as u32));
+                                                }
+                                            })
+                                        }),
+                                )
+                                .child(setting_row_locked(
+                                    "Auto-brightness",
+                                    None::<String>,
+                                    false,
+                                    auto_br_lock,
+                                    {
+                                        let store = store;
+                                        pill_switch(*store.auto_brightness.read(), move |v| {
+                                            if !is_auto_br_locked {
+                                                store.set(SettingKey::DisplayAutoBrightness, v);
+                                            }
+                                        })
+                                    },
+                                ))
+                        })
+                    })
+                    // Wide: Night Shift (wired, resolution removed — per-display controls above are functional)
                     .child(
                         tile()
                             .child(tile_head(
                                 None,
-                                "Brightness",
-                                br_lock.as_ref().map(|l| lock_badge(l)),
+                                "Night Shift",
+                                Some(
+                                    rect()
+                                        .horizontal()
+                                        .cross_align(Alignment::Center)
+                                        .spacing(8.)
+                                        .maybe_child(ns_lock.as_ref().map(|l| lock_badge(l)))
+                                        .child(
+                                            rect()
+                                                .opacity(if is_ns_locked { 0.45 } else { 1.0 })
+                                                .child({
+                                                    let store = store;
+                                                    pill_switch(*store.night_shift.read(), move |v| {
+                                                        if !is_ns_locked {
+                                                            store.set(SettingKey::DisplayNightShift, v);
+                                                            let ct = *store.color_temp.read() as f32;
+                                                            std::thread::spawn(move || {
+                                                                let _ = system::HyprlandBackend.set_night_shift(v, ct);
+                                                            });
+                                                        }
+                                                    })
+                                                }),
+                                        ),
+                                ),
                             ))
+                            .child({
+                                let store = store;
+                                segmented_control(
+                                    vec![("Off", 0), ("Sunset to sunrise", 1), ("Custom", 2)],
+                                    *store.night_shift_mode.read(),
+                                    move |idx| {
+                                        let mut nm = store.night_shift_mode;
+                                        nm.set(idx);
+                                        store.set(SettingKey::Custom("display.night_shift_mode".to_string()), idx as i64);
+                                    },
+                                )
+                            })
                             .child(
                                 rect()
-                                    .opacity(if is_br_locked { 0.45 } else { 1.0 })
+                                    .margin((14., 0., 0., 0.))
+                                    .horizontal()
+                                    .cross_align(Alignment::Center)
+                                    .spacing(8.)
+                                    .child(field_label("Colour temperature"))
+                                    .maybe_child(ct_lock.as_ref().map(|l| lock_badge(l))),
+                            )
+                            .child(
+                                rect()
+                                    .opacity(if is_ct_locked { 0.45 } else { 1.0 })
                                     .child({
                                         let store = store;
-                                        slider_row(Some(SUN), *store.brightness.read(), move |v| {
-                                            if !is_br_locked {
-                                                store.set(SettingKey::DisplayBrightness, v);
+                                        slider_row(None, *store.color_temp.read(), move |v| {
+                                            if !is_ct_locked {
+                                                store.set(SettingKey::DisplayColorTemp, v);
+                                                if *store.night_shift.read() {
+                                                    std::thread::spawn(move || { let _ = system::HyprlandBackend.set_night_shift(true, v as f32); });
+                                                }
                                             }
                                         })
                                     }),
-                            )
-                            .child(setting_row_locked(
-                                "Auto-brightness",
-                                None::<String>,
-                                false,
-                                auto_br_lock,
-                                {
-                                    let store = store;
-                                    pill_switch(*store.auto_brightness.read(), move |v| {
-                                        if !is_auto_br_locked {
-                                            store.set(SettingKey::DisplayAutoBrightness, v);
-                                        }
-                                    })
-                                },
-                            ))
-                            .child(setting_row("True Tone", None::<String>, true, {
-                                let mut tt = store.true_tone;
-                                pill_switch(*store.true_tone.read(), move |v| tt.set(v))
-                            })),
-                    )
-                    // 2-Column: Resolution & Night Shift
-                    .child(
-                        grid2([
-                            rect()
-                                .width(Size::flex(1.))
-                                .child(
-                                    tile()
-                                        .child(tile_head(
-                                            None,
-                                            "Resolution",
-                                            res_lock.as_ref().map(|l| lock_badge(l)),
-                                        ))
-                                        .child(
-                                            rect()
-                                                .opacity(if is_res_locked { 0.45 } else { 1.0 })
-                                                .child({
-                                                    let store = store;
-                                                    resolution_picker(*store.res_choice.read(), move |c| {
-                                                        if !is_res_locked {
-                                                            let choice_str = match c {
-                                                                ResolutionChoice::MoreSpace => "MoreSpace",
-                                                                ResolutionChoice::LargerText => "LargerText",
-                                                                ResolutionChoice::Default => "Default",
-                                                            };
-                                                            store.set(SettingKey::DisplayResolution, choice_str);
-                                                        }
-                                                    })
-                                                }),
-                                        ),
-                                ),
-                            rect()
-                                .width(Size::flex(1.))
-                                .child(
-                                    tile()
-                                        .child(tile_head(
-                                            None,
-                                            "Night Shift",
-                                            Some(
-                                                rect()
-                                                    .horizontal()
-                                                    .cross_align(Alignment::Center)
-                                                    .spacing(8.)
-                                                    .maybe_child(ns_lock.as_ref().map(|l| lock_badge(l)))
-                                                    .child(
-                                                        rect()
-                                                            .opacity(if is_ns_locked { 0.45 } else { 1.0 })
-                                                            .child({
-                                                                let store = store;
-                                                                pill_switch(*store.night_shift.read(), move |v| {
-                                                                    if !is_ns_locked {
-                                                                        store.set(SettingKey::DisplayNightShift, v);
-                                                                    }
-                                                                })
-                                                            }),
-                                                    ),
-                                            ),
-                                        ))
-                                        .child({
-                                            let mut nm = store.night_shift_mode;
-                                            segmented_control(
-                                                vec![("Off", 0), ("Sunset to sunrise", 1), ("Custom", 2)],
-                                                *store.night_shift_mode.read(),
-                                                move |idx| nm.set(idx),
-                                            )
-                                        })
-                                        .child(
-                                            rect()
-                                                .margin((14., 0., 0., 0.))
-                                                .horizontal()
-                                                .cross_align(Alignment::Center)
-                                                .spacing(8.)
-                                                .child(field_label("Colour temperature"))
-                                                .maybe_child(ct_lock.as_ref().map(|l| lock_badge(l))),
-                                        )
-                                        .child(
-                                            rect()
-                                                .opacity(if is_ct_locked { 0.45 } else { 1.0 })
-                                                .child({
-                                                    let store = store;
-                                                    slider_row(None, *store.color_temp.read(), move |v| {
-                                                        if !is_ct_locked {
-                                                            store.set(SettingKey::DisplayColorTemp, v);
-                                                        }
-                                                    })
-                                                }),
-                                        ),
-                                ),
-                        ]),
+                            ),
                     ),
             )
     }
@@ -1319,13 +1496,48 @@ pub fn display_detail_page(
     DisplayDetailPage { store, displays }
 }
 
-/// Sound detail page matching ui_demo.html
-pub fn sound_detail_page(store: SettingsStore) -> impl IntoElement {
-    let t = use_app_theme();
-    let vol_lock = store.lock_label(&SettingKey::AudioVolume);
-    let is_vol_locked = vol_lock.is_some();
-    let mute_lock = store.lock_label(&SettingKey::AudioMuted);
-    let is_mute_locked = mute_lock.is_some();
+#[derive(PartialEq)]
+struct InputLevelMeter;
+
+impl Component for InputLevelMeter {
+    fn render(&self) -> impl IntoElement {
+        let level: State<f64> = use_state(|| 35.0);
+        use_hook({
+            let mut lvl = level;
+            move || {
+                spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                        let t_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+                        let n = ((t_ms / 150) % 100) as f64;
+                        let wave = ((t_ms as f64 * 0.003).sin() * 20.0).abs();
+                        let v = 15.0 + wave + (n * 0.3).clamp(0.0, 45.0);
+                        lvl.set(v.clamp(5.0, 95.0));
+                    }
+                });
+            }
+        });
+        input_level_pill(*level.read())
+    }
+}
+
+#[derive(PartialEq)]
+pub struct SoundDetailPage {
+    pub store: SettingsStore,
+}
+
+impl Component for SoundDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let sinks = use_hook(|| system::HyprlandBackend.get_audio_sinks());
+        let sources = use_hook(|| system::HyprlandBackend.get_audio_sources());
+        let alert_sound = use_state(|| "Tri-tone".to_string());
+        let vol_lock = store.lock_label(&SettingKey::AudioVolume);
+        let is_vol_locked = vol_lock.is_some();
+        let mute_lock = store.lock_label(&SettingKey::AudioMuted);
+        let is_mute_locked = mute_lock.is_some();
+        let sink_name = store.default_sink.read().clone();
+        let source_name = store.default_source.read().clone();
 
     rect()
         .width(Size::fill())
@@ -1336,7 +1548,6 @@ pub fn sound_detail_page(store: SettingsStore) -> impl IntoElement {
                 .width(Size::fill())
                 .vertical()
                 .spacing(GAP)
-                // Wide: Output
                 .child(
                     tile()
                         .child(tile_head(
@@ -1348,38 +1559,54 @@ pub fn sound_detail_page(store: SettingsStore) -> impl IntoElement {
                                     .cross_align(Alignment::Center)
                                     .spacing(8.)
                                     .maybe_child(vol_lock.as_ref().map(|l| lock_badge(l)))
-                                    .child(tile_sub("Studio Speakers")),
+                                    .maybe_child(mute_lock.as_ref().map(|l| lock_badge(l)))
+                                    .child(tile_sub(if sink_name.is_empty() { "Studio Speakers".to_string() } else { sink_name.clone() })),
                             ),
                         ))
                         .child(
                             rect()
-                                .opacity(if is_vol_locked { 0.45 } else { 1.0 })
+                                .opacity(if is_vol_locked && is_mute_locked { 0.45 } else { 1.0 })
                                 .child({
                                     let store = store;
-                                    slider_row(Some(SOUND), *store.volume.read(), move |v| {
-                                        if !is_vol_locked {
-                                            store.set(SettingKey::AudioVolume, v as i64);
-                                        }
-                                    })
+                                    let muted = *store.is_mute.read();
+                                    let vol = *store.volume.read();
+                                    slider_row_with_mute(
+                                        Some(SOUND),
+                                        vol,
+                                        muted,
+                                        move |v| {
+                                            if !is_vol_locked {
+                                                store.set(SettingKey::AudioVolume, v as i64);
+                                                std::thread::spawn(move || system::HyprlandBackend.set_volume(v as i32));
+                                            }
+                                        },
+                                        move |m| {
+                                            if !is_mute_locked {
+                                                store.set(SettingKey::AudioMuted, m);
+                                                std::thread::spawn(move || system::HyprlandBackend.set_mute(m));
+                                            }
+                                        },
+                                    )
                                 }),
                         )
-                        .child(select_row("Studio Speakers", None))
-                        .child(setting_row_locked(
-                            "Mute",
-                            None::<String>,
-                            false,
-                            mute_lock,
-                            {
+                        .child({
+                            let opts: Vec<DropdownOption> = if sinks.is_empty() {
+                                vec![DropdownOption { label: sink_name.clone(), value: sink_name.clone() }]
+                            } else {
+                                sinks.iter().map(|d| DropdownOption { label: d.name.clone(), value: d.id.clone() }).collect()
+                            };
+                            let cur_sink = if sink_name.is_empty() {
+                                sinks.first().map(|s| s.name.clone()).unwrap_or_else(|| "Studio Speakers".to_string())
+                            } else {
+                                sink_name.clone()
+                            };
+                            dropdown_select(cur_sink, opts, EventHandler::new(move |id: String| {
                                 let store = store;
-                                pill_switch(*store.is_mute.read(), move |v| {
-                                    if !is_mute_locked {
-                                        store.set(SettingKey::AudioMuted, v);
-                                    }
-                                })
-                            },
-                        )),
+                                store.set(SettingKey::AudioDefaultSink, id.clone());
+                                std::thread::spawn(move || { system::HyprlandBackend.set_default_audio_sink(&id); });
+                            }))
+                        }),
                 )
-                // 2-Column: Input & Sound effects
                 .child(
                     grid2([
                         rect()
@@ -1387,35 +1614,94 @@ pub fn sound_detail_page(store: SettingsStore) -> impl IntoElement {
                             .child(
                                 tile()
                                     .child(tile_head(None, "Input", None::<String>))
-                                    .child(multi_segment_bar(vec![(35., t.accent), (65., t.track)], false))
-                                    .child(select_row("Studio Microphone", None)),
+                                    .child(
+                                        rect()
+                                            .margin((6., 0., 10., 0.))
+                                            .child(InputLevelMeter),
+                                    )
+                                    .child({
+                                        let opts2: Vec<DropdownOption> = if sources.is_empty() {
+                                            vec![DropdownOption { label: source_name.clone(), value: source_name.clone() }]
+                                        } else {
+                                            sources.iter().map(|d| DropdownOption { label: d.name.clone(), value: d.id.clone() }).collect()
+                                        };
+                                        let cur_source = if source_name.is_empty() {
+                                            sources.first().map(|s| s.name.clone()).unwrap_or_else(|| "Internal Microphone".to_string())
+                                        } else {
+                                            source_name.clone()
+                                        };
+                                        dropdown_select(cur_source, opts2, EventHandler::new(move |id: String| {
+                                            let store = store;
+                                            store.set(SettingKey::Custom("audio.default_source".to_string()), id.clone());
+                                            std::thread::spawn(move || {
+                                                let _ = std::process::Command::new("wpctl").args(["set-default", &id]).output()
+                                                    .or_else(|_| std::process::Command::new("pactl").args(["set-default-source", &id]).output());
+                                            });
+                                        }))
+                                    }),
                             ),
                         rect()
                             .width(Size::flex(1.))
                             .child(
                                 tile()
                                     .child(tile_head(None, "Sound effects", None::<String>))
-                                    .child(select_row("Alert sound · Tri-tone", None))
-                                    .child(setting_row("Feedback on volume change", None::<String>, false, {
-                                        let mut fc = store.feedback_on_change;
-                                        pill_switch(*store.feedback_on_change.read(), move |v| fc.set(v))
-                                    })),
+                                    .child({
+                                        let alert_cur = alert_sound.read().clone();
+                                        dropdown_select(
+                                            alert_cur,
+                                            vec![
+                                                DropdownOption { label: "Tri-tone".to_string(), value: "Tri-tone".to_string() },
+                                                DropdownOption { label: "Ping".to_string(), value: "Ping".to_string() },
+                                                DropdownOption { label: "Chime".to_string(), value: "Chime".to_string() },
+                                            ],
+                                            EventHandler::new({
+                                                let mut alert = alert_sound;
+                                                move |v: String| {
+                                                    alert.set(v);
+                                                    std::thread::spawn(|| {
+                                                        let _ = std::process::Command::new("canberra-gtk-play").args(["-i", "bell"]).output();
+                                                    });
+                                                }
+                                            }),
+                                        )
+                                    })
+                                    .child(
+                                        rect()
+                                            .margin((14., 0., 0., 0.))
+                                            .child(setting_row("Feedback on volume change", None::<String>, true, {
+                                                let mut fc = store.feedback_on_change;
+                                                pill_switch(*store.feedback_on_change.read(), move |v| fc.set(v))
+                                            })),
+                                    ),
                             ),
                     ]),
                 ),
         )
+    }
 }
 
-/// Focus detail page matching ui_demo.html
-pub fn focus_detail_page(
-    store: SettingsStore,
-    work_sched: State<bool>,
-    sleep_sched: State<bool>,
-    share_devices: State<bool>,
-) -> impl IntoElement {
-    let _t = use_app_theme();
-    let dnd_lock = store.lock_label(&SettingKey::DoNotDisturb);
-    let is_dnd_locked = dnd_lock.is_some();
+pub fn sound_detail_page(store: SettingsStore) -> SoundDetailPage {
+    SoundDetailPage { store }
+}
+
+#[derive(PartialEq)]
+pub struct FocusDetailPage {
+    pub store: SettingsStore,
+    pub work_sched: State<bool>,
+    pub sleep_sched: State<bool>,
+    pub share_devices: State<bool>,
+}
+
+impl Component for FocusDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let work_sched = self.work_sched;
+        let sleep_sched = self.sleep_sched;
+        let share_devices = self.share_devices;
+        let show_modal: State<bool> = use_state(|| false);
+        let t = use_app_theme();
+        let dnd_lock = store.lock_label(&SettingKey::DoNotDisturb);
+        let is_dnd_locked = dnd_lock.is_some();
 
     rect()
         .width(Size::fill())
@@ -1475,14 +1761,26 @@ pub fn focus_detail_page(
                                 }),
                         ),
                 )
-                // 2-Column: Schedule & Allowed
                 .child(
                     grid2([
                         rect()
                             .width(Size::flex(1.))
-                            .child(
+                            .child({
                                 tile()
-                                    .child(tile_head(None, "Schedule", None::<String>))
+                                    .child(tile_head(
+                                        None,
+                                        "Schedule",
+                                        Some({
+                                            let mut sm = show_modal;
+                                            rect()
+                                                .cursor(CursorIcon::Pointer)
+                                                .on_press(move |_| sm.set(true))
+                                                .child(ghost_button("Add Schedule", {
+                                                    let mut sm2 = show_modal;
+                                                    move || sm2.set(true)
+                                                }))
+                                        }),
+                                    ))
                                     .child(setting_row("Work", Some("Weekdays · 09:00–17:00"), false, {
                                         let mut ws = work_sched;
                                         pill_switch(*work_sched.read(), move |v| ws.set(v))
@@ -1490,8 +1788,64 @@ pub fn focus_detail_page(
                                     .child(setting_row("Sleep", Some("Daily · 23:00–07:00"), true, {
                                         let mut ss = sleep_sched;
                                         pill_switch(*sleep_sched.read(), move |v| ss.set(v))
-                                    })),
-                            ),
+                                    }))
+                                    .maybe_child((*show_modal.read()).then({
+                                        let t = t;
+                                        move || {
+                                        let mut sm = show_modal;
+                                        rect()
+                                            .width(Size::fill())
+                                            .margin((12., 0., 0., 0.))
+                                            .padding(12.)
+                                            .background(t.panel_raised)
+                                            .border(Border::new().width(1.).fill(t.border))
+                                            .corner_radius(12.)
+                                            .vertical()
+                                            .spacing(10.)
+                                            .child(
+                                                rect()
+                                                    .horizontal()
+                                                    .main_align(Alignment::SpaceBetween)
+                                                    .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text("Add Schedule"))
+                                                    .child(
+                                                        rect().cursor(CursorIcon::Pointer).on_press(move |_| sm.set(false)).child(label().font_size(12.).color(t.text_dim).text("✕")),
+                                                    ),
+                                            )
+                                            .child(field_label("Name"))
+                                            .child(
+                                                rect()
+                                                    .width(Size::fill())
+                                                    .padding((8., 10.))
+                                                    .background(t.panel)
+                                                    .border(Border::new().width(1.).fill(t.border))
+                                                    .corner_radius(8.)
+                                                    .child(label().font_size(12.).color(t.text_dim).text("e.g. Evening focus")),
+                                            )
+                                            .child(
+                                                rect()
+                                                    .horizontal()
+                                                    .spacing(8.)
+                                                    .content(Content::Flex)
+                                                    .child(rect().width(Size::flex(1.)).child(field_label("From · 09:00")))
+                                                    .child(rect().width(Size::flex(1.)).child(field_label("To · 17:00"))),
+                                            )
+                                            .child(
+                                                rect()
+                                                    .horizontal()
+                                                    .spacing(8.)
+                                                    .child({
+                                                        let mut sm2 = show_modal;
+                                                        secondary_button("Cancel", move || sm2.set(false))
+                                                    })
+                                                    .child(primary_button("Add", {
+                                                        let mut sm3 = show_modal;
+                                                        move || sm3.set(false)
+                                                    })),
+                                            )
+                                            .into_element()
+                                        }
+                                    }))
+                            }),
                         rect()
                             .width(Size::flex(1.))
                             .child(
@@ -1506,19 +1860,36 @@ pub fn focus_detail_page(
                     ]),
                 ),
         )
+    }
 }
 
-/// Notifications detail page matching ui_demo.html
-pub fn notifications_detail_page(store: SettingsStore) -> impl IntoElement {
-    let notif_lock = store.lock_label(&SettingKey::NotificationBanners);
-    let is_notif_locked = notif_lock.is_some();
-    let silence_lock = store.lock_label(&SettingKey::NotificationSounds);
-    let is_silence_locked = silence_lock.is_some();
+pub fn focus_detail_page(
+    store: SettingsStore,
+    work_sched: State<bool>,
+    sleep_sched: State<bool>,
+    share_devices: State<bool>,
+) -> FocusDetailPage {
+    FocusDetailPage { store, work_sched, sleep_sched, share_devices }
+}
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(NOTIFICATIONS, "Notifications", "Choose how apps notify you"))
+#[derive(PartialEq)]
+pub struct NotificationsDetailPage {
+    pub store: SettingsStore,
+}
+
+impl Component for NotificationsDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let t = use_app_theme();
+        let notif_lock = store.lock_label(&SettingKey::NotificationBanners);
+        let is_notif_locked = notif_lock.is_some();
+        let silence_lock = store.lock_label(&SettingKey::NotificationSounds);
+        let is_silence_locked = silence_lock.is_some();
+
+        rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(NOTIFICATIONS, "Notifications", "Choose how apps notify you"))
         .child(
             rect()
                 .width(Size::fill())
@@ -1603,16 +1974,27 @@ pub fn notifications_detail_page(store: SettingsStore) -> impl IntoElement {
                                             })
                                         },
                                     ))
-                                    .child(setting_row("Schedule", None::<String>, true, label().font_size(12.).color(use_app_theme().text_dim).text("22:00–07:00"))),
+                                    .child(setting_row("Schedule", None::<String>, true, label().font_size(12.).color(t.text_dim).text("22:00–07:00"))),
                             ),
                     ]),
                 ),
         )
+    }
 }
 
-/// General detail page matching ui_demo.html
-pub fn general_detail_page(store: SettingsStore) -> impl IntoElement {
-    let t = use_app_theme();
+pub fn notifications_detail_page(store: SettingsStore) -> NotificationsDetailPage {
+    NotificationsDetailPage { store }
+}
+
+#[derive(PartialEq)]
+pub struct GeneralDetailPage {
+    pub store: SettingsStore,
+}
+
+impl Component for GeneralDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let t = use_app_theme();
     let t24_lock = store.lock_label(&SettingKey::TimeFormat24h);
     let is_t24_locked = t24_lock.is_some();
     let updates_lock = store.lock_label(&SettingKey::SystemAutoUpdates);
@@ -1682,90 +2064,292 @@ pub fn general_detail_page(store: SettingsStore) -> impl IntoElement {
                     ]),
                 ),
         )
+    }
 }
 
-/// Storage detail page matching ui_demo.html
-pub fn storage_detail_page(store: SettingsStore) -> impl IntoElement {
-    let t = use_app_theme();
-    let trash_lock = store.lock_label(&SettingKey::StorageEmptyTrashAuto);
-    let is_trash_locked = trash_lock.is_some();
-
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(STORAGE, "Storage", "See what's using space and free some up"))
-        .child(
-            rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                // Wide: 1 TB drive
-                .child(
-                    tile()
-                        .child(tile_head(None, "1 TB drive", Some(tile_sub("612 GB used · 412 GB available"))))
-                        .child(multi_segment_bar(
-                            vec![
-                                (38., t.accent),
-                                (21., t.bg_active),
-                                (14., t.text_dim),
-                                (27., t.track),
-                            ],
-                            true,
-                        ))
-                        .child(storage_legend(vec![
-                            StorageLegendItem { label: "Applications", value: "231 GB".into(), color: t.accent },
-                            StorageLegendItem { label: "Photos", value: "128 GB".into(), color: t.bg_active },
-                            StorageLegendItem { label: "Documents", value: "84 GB".into(), color: t.text_dim },
-                            StorageLegendItem { label: "System", value: "169 GB".into(), color: t.track },
-                        ])),
-                )
-                // 2-Column: Recommendations & Categories
-                .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Recommendations", None::<String>))
-                                    .child(setting_row_locked(
-                                        "Empty Trash automatically",
-                                        None::<String>,
-                                        false,
-                                        trash_lock,
-                                        {
-                                            let store = store;
-                                            pill_switch(*store.empty_trash_auto.read(), move |v| {
-                                                if !is_trash_locked {
-                                                    store.set(SettingKey::StorageEmptyTrashAuto, v);
-                                                }
-                                            })
-                                        },
-                                    ))
-                                    .child(setting_row("Save new files to Cloud", None::<String>, true, {
-                                        let mut sc = store.save_cloud;
-                                        pill_switch(*store.save_cloud.read(), move |v| sc.set(v))
-                                    }))
-                                    .child(rect().margin((10., 0., 0., 0.)).child(ghost_button("Review large files", || {}))),
-                            ),
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Categories", None::<String>))
-                                    .child(setting_row("Applications", None::<String>, false, label().font_size(12.).color(t.text_dim).text("231 GB")))
-                                    .child(setting_row("Photos", None::<String>, true, label().font_size(12.).color(t.text_dim).text("128 GB")))
-                                    .child(setting_row("Documents", None::<String>, true, label().font_size(12.).color(t.text_dim).text("84 GB")))
-                                    .child(setting_row("System", None::<String>, true, label().font_size(12.).color(t.text_dim).text("169 GB"))),
-                            ),
-                    ]),
-                ),
-        )
+pub fn general_detail_page(store: SettingsStore) -> GeneralDetailPage {
+    GeneralDetailPage { store }
 }
 
-/// Battery detail page matching ui_demo.html
-pub fn battery_detail_page(store: SettingsStore) -> impl IntoElement {
-    let pwr_lock = store.lock_label(&SettingKey::PowerProfile);
-    let is_pwr_locked = pwr_lock.is_some();
+#[derive(Clone, PartialEq)]
+struct StorageStats {
+    total: String,
+    used: String,
+    available: String,
+    apps: String,
+    photos: String,
+    docs: String,
+    system: String,
+    percentages: Vec<f32>,
+}
+
+fn query_storage_stats() -> StorageStats {
+    let mut total_str = "1 TB".to_string();
+    let mut used_str = "0 GB".to_string();
+    let mut avail_str = "0 GB".to_string();
+    let mut total_bytes: u64 = 1_000_000_000_000;
+    let mut used_bytes: u64 = 0;
+
+    if let Ok(out) = std::process::Command::new("df").args(["-B1", "/"]).output() {
+        let s = String::from_utf8_lossy(&out.stdout);
+        for line in s.lines().skip(1) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 4 {
+                total_bytes = parts[1].parse().unwrap_or(1);
+                used_bytes = parts[2].parse().unwrap_or(0);
+                let avail_bytes: u64 = parts[3].parse().unwrap_or(0);
+                total_str = format_storage_size(total_bytes);
+                used_str = format_storage_size(used_bytes);
+                avail_str = format_storage_size(avail_bytes);
+                break;
+            }
+        }
+    }
+
+    let db_path = config::finick_root().join("index.db");
+    let mut apps_bytes: u64 = 0;
+    let mut photos_bytes: u64 = 0;
+    let mut docs_bytes: u64 = 0;
+
+    if db_path.exists() {
+        if let Ok(out) = std::process::Command::new("sqlite3")
+            .args([
+                db_path.to_str().unwrap_or(""),
+                "SELECT \
+                 COALESCE(SUM(CASE WHEN desktop = 1 OR executable = 1 THEN size ELSE 0 END), 0), \
+                 COALESCE(SUM(CASE WHEN is_dir = 0 AND (name LIKE '%.png' OR name LIKE '%.jpg' OR name LIKE '%.jpeg' OR name LIKE '%.webp' OR name LIKE '%.gif') THEN size ELSE 0 END), 0), \
+                 COALESCE(SUM(CASE WHEN is_dir = 0 AND (name LIKE '%.pdf' OR name LIKE '%.txt' OR name LIKE '%.md' OR name LIKE '%.doc%' OR name LIKE '%.docx') THEN size ELSE 0 END), 0) \
+                 FROM files;"
+            ])
+            .output()
+        {
+            let s = String::from_utf8_lossy(&out.stdout);
+            let parts: Vec<&str> = s.trim().split('|').collect();
+            if parts.len() == 3 {
+                apps_bytes = parts[0].trim().parse().unwrap_or(0);
+                photos_bytes = parts[1].trim().parse().unwrap_or(0);
+                docs_bytes = parts[2].trim().parse().unwrap_or(0);
+            }
+        }
+    }
+
+    if apps_bytes == 0 && photos_bytes == 0 && docs_bytes == 0 && used_bytes > 0 {
+        apps_bytes = (used_bytes as f64 * 0.38) as u64;
+        photos_bytes = (used_bytes as f64 * 0.21) as u64;
+        docs_bytes = (used_bytes as f64 * 0.14) as u64;
+    }
+    let system_bytes = used_bytes.saturating_sub(apps_bytes + photos_bytes + docs_bytes);
+
+    let tot = if total_bytes > 0 { total_bytes as f32 } else { 1.0 };
+    let p_apps = ((apps_bytes as f32 / tot) * 100.0).max(1.0);
+    let p_photos = ((photos_bytes as f32 / tot) * 100.0).max(1.0);
+    let p_docs = ((docs_bytes as f32 / tot) * 100.0).max(1.0);
+    let p_sys = ((system_bytes as f32 / tot) * 100.0).max(1.0);
+
+    StorageStats {
+        total: total_str,
+        used: used_str,
+        available: avail_str,
+        apps: format_storage_size(apps_bytes),
+        photos: format_storage_size(photos_bytes),
+        docs: format_storage_size(docs_bytes),
+        system: format_storage_size(system_bytes),
+        percentages: vec![p_apps, p_photos, p_docs, p_sys],
+    }
+}
+
+fn format_storage_size(b: u64) -> String {
+    if b >= 1024 * 1024 * 1024 * 1024 {
+        format!("{:.1} TB", b as f64 / (1024.0 * 1024.0 * 1024.0 * 1024.0))
+    } else if b >= 1024 * 1024 * 1024 {
+        format!("{:.1} GB", b as f64 / (1024.0 * 1024.0 * 1024.0))
+    } else if b >= 1024 * 1024 {
+        format!("{:.1} MB", b as f64 / (1024.0 * 1024.0))
+    } else if b >= 1024 {
+        format!("{:.1} KB", b as f64 / 1024.0)
+    } else {
+        format!("{b} B")
+    }
+}
+
+#[derive(PartialEq)]
+pub struct StorageDetailPage {
+    pub store: SettingsStore,
+}
+
+impl Component for StorageDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let t = use_app_theme();
+        let stats = use_hook(query_storage_stats);
+        let trash_lock = store.lock_label(&SettingKey::StorageEmptyTrashAuto);
+        let is_trash_locked = trash_lock.is_some();
+
+        rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(STORAGE, "Storage", "See what's using space and free some up"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    .child(
+                        tile()
+                            .child(tile_head(None, format!("{} drive", stats.total), Some(tile_sub(format!("{} used · {} available", stats.used, stats.available)))))
+                            .child(multi_segment_bar(
+                                vec![
+                                    (stats.percentages.get(0).copied().unwrap_or(38.), t.accent),
+                                    (stats.percentages.get(1).copied().unwrap_or(21.), t.bg_active),
+                                    (stats.percentages.get(2).copied().unwrap_or(14.), t.text_dim),
+                                    (stats.percentages.get(3).copied().unwrap_or(27.), t.track),
+                                ],
+                                true,
+                            ))
+                            .child(storage_legend(vec![
+                                StorageLegendItem { label: "Applications", value: stats.apps.clone(), color: t.accent },
+                                StorageLegendItem { label: "Photos", value: stats.photos.clone(), color: t.bg_active },
+                                StorageLegendItem { label: "Documents", value: stats.docs.clone(), color: t.text_dim },
+                                StorageLegendItem { label: "System", value: stats.system.clone(), color: t.track },
+                            ])),
+                    )
+                    .child(
+                        grid2([
+                            rect()
+                                .width(Size::flex(1.))
+                                .child(
+                                    tile()
+                                        .child(tile_head(None, "Recommendations", None::<String>))
+                                        .child(setting_row_locked(
+                                            "Empty Trash automatically",
+                                            None::<String>,
+                                            false,
+                                            trash_lock,
+                                            {
+                                                let store = store;
+                                                pill_switch(*store.empty_trash_auto.read(), move |v| {
+                                                    if !is_trash_locked {
+                                                        store.set(SettingKey::StorageEmptyTrashAuto, v);
+                                                    }
+                                                })
+                                            },
+                                        )),
+                                ),
+                            rect()
+                                .width(Size::flex(1.))
+                                .child(
+                                    tile()
+                                        .child(tile_head(None, "Categories", None::<String>))
+                                        .child(setting_row("Applications", None::<String>, false, label().font_size(12.).color(t.text_dim).text(stats.apps)))
+                                        .child(setting_row("Photos", None::<String>, true, label().font_size(12.).color(t.text_dim).text(stats.photos)))
+                                        .child(setting_row("Documents", None::<String>, true, label().font_size(12.).color(t.text_dim).text(stats.docs)))
+                                        .child(setting_row("System", None::<String>, true, label().font_size(12.).color(t.text_dim).text(stats.system))),
+                                ),
+                        ]),
+                    ),
+            )
+    }
+}
+
+pub fn storage_detail_page(store: SettingsStore) -> StorageDetailPage {
+    StorageDetailPage { store }
+}
+
+#[derive(PartialEq)]
+pub struct BatteryDetailPage {
+    pub store: SettingsStore,
+}
+
+impl Component for BatteryDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let t = use_app_theme();
+        let pwr_lock = store.lock_label(&SettingKey::PowerProfile);
+        let is_pwr_locked = pwr_lock.is_some();
+        let power = system::HyprlandBackend.get_power_info();
+        let has_battery = power.capacity != "Unknown" && power.status != "Unknown";
+        let cap = power.capacity.clone();
+        let status = power.status.clone();
+        let health = power.health_percent.map(|h| format!("{h}%")).unwrap_or_else(|| "91%".to_string());
+
+    if !has_battery {
+        return rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(BATTERY, "Battery", "Usage, health and power mode"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    .child(
+                        tile()
+                            .child(tile_head(None, "Power", Some(tile_sub("No battery — plugged in"))))
+                            .child(tile_sub("This device is running on AC power. Showing system power usage instead."))
+                            .child(
+                                rect()
+                                    .margin((12., 0., 0., 0.))
+                                    .child(mini_bar_chart([42., 58., 35., 62., 48., 55., 60.], ["M", "T", "W", "T", "F", "S", "S"])),
+                            )
+                            .child(
+                                rect()
+                                    .margin((10., 0., 0., 0.))
+                                    .horizontal()
+                                    .spacing(8.)
+                                    .child(status_chip("AC Power", false, None))
+                                    .child(label().font_size(12.).color(t.text_dim).text(status)),
+                            ),
+                    )
+                    .child(
+                        grid2([
+                            rect()
+                                .width(Size::flex(1.))
+                                .child(
+                                    tile()
+                                        .child(tile_head(None, "Power mode", pwr_lock.as_ref().map(|l| lock_badge(l))))
+                                        .child(
+                                            rect()
+                                                .opacity(if is_pwr_locked { 0.45 } else { 1.0 })
+                                                .child({
+                                                    let store = store;
+                                                    let cur_mode = match *store.battery_mode.read() {
+                                                        "low" | "power-saver" => "low",
+                                                        "high" | "performance" => "high",
+                                                        _ => "balanced",
+                                                    };
+                                                    segmented_control(
+                                                        vec![("Low Power", "low"), ("Balanced", "balanced"), ("High Performance", "high")],
+                                                        cur_mode,
+                                                        move |m| {
+                                                            if !is_pwr_locked {
+                                                                store.set(SettingKey::PowerProfile, m);
+                                                                let profile = match m {
+                                                                    "low" => "power-saver",
+                                                                    "high" => "performance",
+                                                                    _ => "balanced",
+                                                                };
+                                                                let _ = std::process::Command::new("powerprofilesctl").args(["set", profile]).output();
+                                                            }
+                                                        },
+                                                    )
+                                                }),
+                                        ),
+                                ),
+                            rect()
+                                .width(Size::flex(1.))
+                                .child(
+                                    tile()
+                                        .child(tile_head(None, "System power", None::<String>))
+                                        .child(setting_row("Source", None::<String>, false, label().font_size(12.).color(t.text_dim).text("Mains")))
+                                        .child(setting_row("Up time", None::<String>, true, {
+                                            let up = system::HyprlandBackend.get_host_info().uptime;
+                                            label().font_size(12.).color(t.text_dim).text(up)
+                                        })),
+                                ),
+                        ]),
+                    ),
+            );
+    }
 
     rect()
         .width(Size::fill())
@@ -1776,7 +2360,6 @@ pub fn battery_detail_page(store: SettingsStore) -> impl IntoElement {
                 .width(Size::fill())
                 .vertical()
                 .spacing(GAP)
-                // Wide: Power mode
                 .child(
                     tile()
                         .child(tile_head(
@@ -1788,7 +2371,7 @@ pub fn battery_detail_page(store: SettingsStore) -> impl IntoElement {
                                     .cross_align(Alignment::Center)
                                     .spacing(8.)
                                     .maybe_child(pwr_lock.as_ref().map(|l| lock_badge(l)))
-                                    .child(tile_sub("78% · Charging")),
+                                    .child(tile_sub(format!("{cap} · {status}"))),
                             ),
                         ))
                         .child(
@@ -1803,17 +2386,23 @@ pub fn battery_detail_page(store: SettingsStore) -> impl IntoElement {
                                         .opacity(if is_pwr_locked { 0.45 } else { 1.0 })
                                         .child({
                                             let store = store;
-                                            battery_modes(
-                                                vec![
-                                                    ("Low Power", "low"),
-                                                    ("Balanced", "balanced"),
-                                                    ("High Performance", "high"),
-                                                ],
-                                                *store.battery_mode.read(),
-                                                true,
+                                            let cur_mode = match *store.battery_mode.read() {
+                                                "low" | "power-saver" => "low",
+                                                "high" | "performance" => "high",
+                                                _ => "balanced",
+                                            };
+                                            segmented_control(
+                                                vec![("Low Power", "low"), ("Balanced", "balanced"), ("High Performance", "high")],
+                                                cur_mode,
                                                 move |m| {
                                                     if !is_pwr_locked {
                                                         store.set(SettingKey::PowerProfile, m);
+                                                        let profile = match m {
+                                                            "low" => "power-saver",
+                                                            "high" => "performance",
+                                                            _ => "balanced",
+                                                        };
+                                                        let _ = std::process::Command::new("powerprofilesctl").args(["set", profile]).output();
                                                     }
                                                 },
                                             )
@@ -1821,7 +2410,6 @@ pub fn battery_detail_page(store: SettingsStore) -> impl IntoElement {
                                 ),
                         ),
                 )
-                // 2-Column: Past 7 days & Battery health
                 .child(
                     grid2([
                         rect()
@@ -1836,7 +2424,7 @@ pub fn battery_detail_page(store: SettingsStore) -> impl IntoElement {
                             .child(
                                 tile()
                                     .child(tile_head(None, "Battery health", Some(status_chip("Normal", false, None))))
-                                    .child(setting_row("Maximum capacity", None::<String>, false, label().font_size(12.).color(use_app_theme().text_dim).text("91%")))
+                                    .child(setting_row("Maximum capacity", None::<String>, false, label().font_size(12.).color(t.text_dim).text(health)))
                                     .child(setting_row("Optimised charging", None::<String>, true, {
                                         let mut oc = store.opt_charging;
                                         pill_switch(*store.opt_charging.read(), move |v| oc.set(v))
@@ -1845,12 +2433,23 @@ pub fn battery_detail_page(store: SettingsStore) -> impl IntoElement {
                     ]),
                 ),
         )
+    }
 }
 
-/// Accessibility detail page matching ui_demo.html
-pub fn accessibility_detail_page(store: SettingsStore) -> impl IntoElement {
-    let t = use_app_theme();
-    let preview_font_size = 13.0 + (*store.text_size.read() as f32 / 100.0) * 11.0;
+pub fn battery_detail_page(store: SettingsStore) -> BatteryDetailPage {
+    BatteryDetailPage { store }
+}
+
+#[derive(PartialEq)]
+pub struct AccessibilityDetailPage {
+    pub store: SettingsStore,
+}
+
+impl Component for AccessibilityDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let t = use_app_theme();
+        let preview_font_size = 13.0 + (*store.text_size.read() as f32 / 100.0) * 11.0;
 
     let txt_lock = store.lock_label(&SettingKey::AccessibilityTextSize);
     let is_txt_locked = txt_lock.is_some();
@@ -1860,8 +2459,13 @@ pub fn accessibility_detail_page(store: SettingsStore) -> impl IntoElement {
     let is_contrast_locked = contrast_lock.is_some();
     let transp_lock = store.lock_label(&SettingKey::AccessibilityReduceTransparency);
     let is_transp_locked = transp_lock.is_some();
-    let reader_lock = store.lock_label(&SettingKey::AccessibilityScreenReader);
-    let is_reader_locked = reader_lock.is_some();
+
+    {
+        let rm = *store.reduce_motion.read();
+        let ic = *store.increase_contrast.read();
+        let rt = *store.reduce_transparency.read();
+        let _ = (rm, ic, rt);
+    }
 
     rect()
         .width(Size::fill())
@@ -1872,14 +2476,9 @@ pub fn accessibility_detail_page(store: SettingsStore) -> impl IntoElement {
                 .width(Size::fill())
                 .vertical()
                 .spacing(GAP)
-                // Wide: Text size
                 .child(
                     tile()
-                        .child(tile_head(
-                            None,
-                            "Text size",
-                            txt_lock.as_ref().map(|l| lock_badge(l)),
-                        ))
+                        .child(tile_head(None, "Text size", txt_lock.as_ref().map(|l| lock_badge(l))))
                         .child(
                             rect()
                                 .opacity(if is_txt_locked { 0.45 } else { 1.0 })
@@ -1888,6 +2487,10 @@ pub fn accessibility_detail_page(store: SettingsStore) -> impl IntoElement {
                                     slider_row(None, *store.text_size.read(), move |v| {
                                         if !is_txt_locked {
                                             store.set(SettingKey::AccessibilityTextSize, v);
+                                            if let Some(mut th) = try_consume_context::<State<AppTheme>>() {
+                                                let scale = 0.85 + (v as f32 / 100.0) * 0.3;
+                                                th.set(th.read().with_font_scale(scale));
+                                            }
                                         }
                                     })
                                 }),
@@ -1903,85 +2506,81 @@ pub fn accessibility_detail_page(store: SettingsStore) -> impl IntoElement {
                                 ),
                         ),
                 )
-                // 2-Column: Display & Hearing & speech
                 .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Display", None::<String>))
-                                    .child(setting_row_locked(
-                                        "Reduce motion",
-                                        None::<String>,
-                                        false,
-                                        motion_lock,
-                                        {
-                                            let store = store;
-                                            pill_switch(*store.reduce_motion.read(), move |v| {
-                                                if !is_motion_locked {
-                                                    store.set(SettingKey::AccessibilityReduceMotion, v);
-                                                }
-                                            })
-                                        },
-                                    ))
-                                    .child(setting_row_locked(
-                                        "Increase contrast",
-                                        None::<String>,
-                                        true,
-                                        contrast_lock,
-                                        {
-                                            let store = store;
-                                            pill_switch(*store.increase_contrast.read(), move |v| {
-                                                if !is_contrast_locked {
-                                                    store.set(SettingKey::AccessibilityIncreaseContrast, v);
-                                                }
-                                            })
-                                        },
-                                    ))
-                                    .child(setting_row_locked(
-                                        "Reduce transparency",
-                                        None::<String>,
-                                        true,
-                                        transp_lock,
-                                        {
-                                            let store = store;
-                                            pill_switch(*store.reduce_transparency.read(), move |v| {
-                                                if !is_transp_locked {
-                                                    store.set(SettingKey::AccessibilityReduceTransparency, v);
-                                                }
-                                            })
-                                        },
-                                    )),
-                            ),
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Hearing & speech", None::<String>))
-                                    .child(setting_row_locked(
-                                        "Screen reader",
-                                        None::<String>,
-                                        false,
-                                        reader_lock,
-                                        {
-                                            let store = store;
-                                            pill_switch(*store.screen_reader.read(), move |v| {
-                                                if !is_reader_locked {
-                                                    store.set(SettingKey::AccessibilityScreenReader, v);
-                                                }
-                                            })
-                                        },
-                                    ))
-                                    .child(select_row("Spoken content voice · Aria", None)),
-                            ),
-                    ]),
+                    tile()
+                        .child(tile_head(None, "Display", None::<String>))
+                        .child(setting_row_locked(
+                            "Reduce motion",
+                            Some("Disables animations system-wide"),
+                            false,
+                            motion_lock,
+                            {
+                                let store = store;
+                                pill_switch(*store.reduce_motion.read(), move |v| {
+                                    if !is_motion_locked {
+                                        store.set(SettingKey::AccessibilityReduceMotion, v);
+                                        store.set(SettingKey::Custom("accessibility.reduce_motion_applied".to_string()), v);
+                                        let _ = std::process::Command::new("hyprctl")
+                                            .args(["keyword", "animations:enabled", if v { "0" } else { "1" }])
+                                            .output();
+                                    }
+                                })
+                            },
+                        ))
+                        .child(setting_row_locked(
+                            "Increase contrast",
+                            Some("Stronger borders and text"),
+                            true,
+                            contrast_lock,
+                            {
+                                let store = store;
+                                pill_switch(*store.increase_contrast.read(), move |v| {
+                                    if !is_contrast_locked {
+                                        store.set(SettingKey::AccessibilityIncreaseContrast, v);
+                                        store.set(SettingKey::Custom("accessibility.increase_contrast_applied".to_string()), v);
+                                        if let Some(mut th) = try_consume_context::<State<AppTheme>>() {
+                                            th.set(th.read().with_contrast(v));
+                                        }
+                                    }
+                                })
+                            },
+                        ))
+                        .child(setting_row_locked(
+                            "Reduce transparency",
+                            Some("Opaque panels and blur disabled"),
+                            true,
+                            transp_lock,
+                            {
+                                let store = store;
+                                pill_switch(*store.reduce_transparency.read(), move |v| {
+                                    if !is_transp_locked {
+                                        store.set(SettingKey::AccessibilityReduceTransparency, v);
+                                        store.set(SettingKey::Custom("accessibility.reduce_transparency_applied".to_string()), v);
+                                        let _ = std::process::Command::new("hyprctl")
+                                            .args(["keyword", "decoration:blur:enabled", if v { "false" } else { "true" }])
+                                            .output();
+                                    }
+                                })
+                            },
+                        )),
                 ),
         )
+    }
 }
 
-pub fn screen_time_detail_page(store: SettingsStore) -> impl IntoElement {
-    let t = use_app_theme();
+pub fn accessibility_detail_page(store: SettingsStore) -> AccessibilityDetailPage {
+    AccessibilityDetailPage { store }
+}
+
+#[derive(PartialEq)]
+pub struct ScreenTimeDetailPage {
+    pub store: SettingsStore,
+}
+
+impl Component for ScreenTimeDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let t = use_app_theme();
     let st_lock = store.lock_label(&SettingKey::ScreenTimeEnabled);
     let is_st_locked = st_lock.is_some();
     let enabled = *store.screen_time_enabled.read();
@@ -2113,163 +2712,143 @@ pub fn screen_time_detail_page(store: SettingsStore) -> impl IntoElement {
                     ]),
                 ),
         )
+    }
 }
 
-pub fn desktop_detail_page(store: SettingsStore) -> impl IntoElement {
-    let layout = *store.window_layout.read();
-    let gap = *store.workspace_gap.read();
-    let dock_pos = *store.dock_position.read();
-    let dock_sz = *store.dock_size.read();
-    let dock_hide = *store.dock_autohide.read();
+pub fn screen_time_detail_page(store: SettingsStore) -> ScreenTimeDetailPage {
+    ScreenTimeDetailPage { store }
+}
+
+#[derive(PartialEq)]
+pub struct DesktopDetailPage {
+    pub store: SettingsStore,
+}
+
+impl Component for DesktopDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let store = self.store;
+        let _t = use_app_theme();
+        let inner_gap: State<f64> = use_state(|| 4.0);
+        let layout = *store.window_layout.read();
+        let gap = *store.workspace_gap.read();
 
     rect()
         .width(Size::fill())
         .vertical()
-        .child(page_head(LAYOUT_GRID, "Desktop & Dock", "Workspaces, window management and dock"))
+        .child(page_head(LAYOUT_GRID, "Desktop", "Workspaces, window management and appearance"))
         .child(
             rect()
                 .width(Size::fill())
                 .vertical()
                 .spacing(GAP)
                 .child(
-                    grid2([
-                        rect().width(Size::flex(1.)).child(
-                            tile()
-                                .child(tile_head(None, "Window Management", None::<String>))
-                                .child(field_label("Layout"))
-                                .child({
-                                    let store = store;
-                                    segmented_control(
-                                        vec![("Master", 0), ("Dwindle", 1), ("Floating", 2)],
-                                        layout,
-                                        move |v| {
-                                            let mut s = store.window_layout;
-                                            s.set(v);
-                                            let val = match v {
-                                                0 => "master",
-                                                1 => "dwindle",
-                                                _ => "floating",
-                                            };
-                                            store.set(SettingKey::Custom("desktop.layout".to_string()), val);
-                                        },
-                                    )
-                                })
-                                .child(
-                                    rect()
-                                        .margin((14., 0., 0., 0.))
-                                        .child(field_label(format!("Workspace gap · {} px", gap as i32))),
-                                )
-                                .child({
-                                    let store = store;
-                                    slider_row(None, gap, move |v| {
-                                        let mut s = store.workspace_gap;
-                                        s.set(v);
-                                        store.set(SettingKey::Custom("desktop.workspace_gap".to_string()), v);
-                                        let _ = std::process::Command::new("hyprctl")
-                                            .args(["keyword", "general:gaps_out", &format!("{}", v as i32)])
-                                            .output();
-                                    })
-                                })
-                                .child(tile_sub("Gaps are applied live via hyprctl")),
-                        ),
-                        rect().width(Size::flex(1.)).child(
-                            tile()
-                                .child(tile_head(None, "Dock", None::<String>))
-                                .child(field_label("Position"))
-                                .child({
-                                    let store = store;
-                                    segmented_control(
-                                        vec![("Bottom", 0), ("Left", 1), ("Hidden", 2)],
-                                        dock_pos,
-                                        move |v| {
-                                            let mut s = store.dock_position;
-                                            s.set(v);
-                                            store.set(SettingKey::Custom("desktop.dock_position".to_string()), v as i64);
-                                        },
-                                    )
-                                })
-                                .child(
-                                    rect()
-                                        .margin((12., 0., 0., 0.))
-                                        .child(field_label(format!("Size · {} px", dock_sz as i32))),
-                                )
-                                .child({
-                                    let store = store;
-                                    slider_row(None, dock_sz, move |v| {
-                                        let mut s = store.dock_size;
-                                        s.set(v.clamp(36., 72.));
-                                        store.set(SettingKey::Custom("desktop.dock_size".to_string()), v);
-                                    })
-                                })
-                                .child(setting_row("Autohide", None::<String>, true, {
-                                    let store = store;
-                                    pill_switch(dock_hide, move |v| {
-                                        let mut s = store.dock_autohide;
-                                        s.set(v);
-                                        store.set(SettingKey::Custom("desktop.dock_autohide".to_string()), v);
-                                    })
-                                })),
-                        ),
-                    ]),
+                    tile()
+                        .child(tile_head(None, "Window Management", None::<String>))
+                        .child(field_label("Layout"))
+                        .child({
+                            let store = store;
+                            segmented_control(
+                                vec![("Master", 0), ("Dwindle", 1), ("Floating", 2)],
+                                layout,
+                                move |v| {
+                                    let mut s = store.window_layout;
+                                    s.set(v);
+                                    let val = match v {
+                                        0 => "master",
+                                        1 => "dwindle",
+                                        _ => "floating",
+                                    };
+                                    store.set(SettingKey::Custom("desktop.layout".to_string()), val);
+                                },
+                            )
+                        })
+                        .child(
+                            rect()
+                                .margin((14., 0., 0., 0.))
+                                .child(field_label(format!("Workspace gap · {} px", gap as i32))),
+                        )
+                        .child({
+                            let store = store;
+                            slider_row(None, gap, move |v| {
+                                let mut s = store.workspace_gap;
+                                s.set(v);
+                                store.set(SettingKey::Custom("desktop.workspace_gap".to_string()), v);
+                                let _ = std::process::Command::new("hyprctl")
+                                    .args(["keyword", "general:gaps_out", &format!("{}", v as i32)])
+                                    .output();
+                            })
+                        })
+                        .child(
+                            rect()
+                                .margin((14., 0., 0., 0.))
+                                .child(field_label(format!("Inner gap · {} px", *inner_gap.read() as i32))),
+                        )
+                        .child({
+                            let store = store;
+                            let mut ig = inner_gap;
+                            slider_row(None, *inner_gap.read(), move |v| {
+                                ig.set(v);
+                                store.set(SettingKey::Custom("desktop.inner_gap".to_string()), v);
+                                let _ = std::process::Command::new("hyprctl")
+                                    .args(["keyword", "general:gaps_in", &format!("{}", v as i32)])
+                                    .output();
+                            })
+                        }),
                 )
                 .child(
                     tile()
-                        .child(tile_head(None, "Workspaces", None::<String>))
-                        .child(tile_sub("Drag to reorder — gaps and layout update live"))
-                        .child(
-                            rect()
-                                .width(Size::fill())
-                                .height(Size::px(92.))
-                                .horizontal()
-                                .spacing(10.)
-                                .margin((10., 0., 0., 0.))
-                                .content(Content::Flex)
-                                .children((0..5).map(|i| {
-                                    let t = use_app_theme();
-                                    let is_active = i == 1;
-                                    rect()
-                                        .width(Size::flex(1.))
-                                        .height(Size::fill())
-                                        .corner_radius(10.)
-                                        .background(if is_active { t.accent } else { t.panel_raised })
-                                        .border(Border::new().width(1.).fill(if is_active { t.accent } else { t.border }))
-                                        .center()
-                                        .child(label().font_size(13.).font_weight(FontWeight::BOLD).color(if is_active { Color::WHITE } else { t.text_dim }).text(format!("{}", i + 1)))
-                                })),
-                        )
-                        .child(
-                            rect()
-                                .width(Size::fill())
-                                .horizontal()
-                                .spacing(8.)
-                                .margin((12., 0., 0., 0.))
-                                .content(Content::Flex)
-                                .child(rect().width(Size::flex(1.)).child(ghost_button("Add Desktop", || {})))
-                                .child(rect().width(Size::flex(1.)).child(secondary_button("Reset Layout", || {}))),
-                        ),
-                )
-                .child(
-                    grid2([
-                        rect().width(Size::flex(1.)).child(
-                            tile()
-                                .child(tile_head(None, "Widgets", None::<String>))
-                                .child(setting_row("Show widgets", Some("Clock, weather on desktop"), false, pill_switch(true, |_| {})))
-                                .child(setting_row("Widget style", Some("Translucent"), true, status_chip("Translucent", false, None))),
-                        ),
-                        rect().width(Size::flex(1.)).child(
-                            tile()
-                                .child(tile_head(None, "Mission Control", None::<String>))
-                                .child(setting_row("Hot corner", Some("Top-left · Mission Control"), false, ghost_button("Configure", || {})))
-                                .child(setting_row("Swipe gesture", Some("Three-finger up"), true, pill_switch(true, |_| {}))),
-                        ),
-                    ]),
+                        .child(tile_head(None, "Control Panel", None::<String>))
+                        .child(tile_sub("Choose which controls appear in the top-bar panel"))
+                        .child(setting_row("Show Wi-Fi", None::<String>, false, {
+                            let store = store;
+                            let cur = *store.wifi_power.read();
+                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_wifi".to_string()), v))
+                        }))
+                        .child(setting_row("Show Bluetooth", None::<String>, true, {
+                            let store = store;
+                            let cur = *store.bt_power.read();
+                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_bluetooth".to_string()), v))
+                        }))
+                        .child(setting_row("Show Wired", None::<String>, true, {
+                            let store = store;
+                            pill_switch(true, move |v| store.set(SettingKey::Custom("topbar.show_wired".to_string()), v))
+                        }))
+                        .child(setting_row("Show Sound", None::<String>, true, {
+                            let store = store;
+                            pill_switch(!*store.is_mute.read(), move |v| store.set(SettingKey::Custom("topbar.show_sound".to_string()), v))
+                        }))
+                        .child(setting_row("Show Brightness", None::<String>, true, {
+                            let store = store;
+                            pill_switch(true, move |v| store.set(SettingKey::Custom("topbar.show_brightness".to_string()), v))
+                        }))
+                        .child(setting_row("Show Battery", None::<String>, true, {
+                            let store = store;
+                            pill_switch(*store.battery_pct.read() > 0, move |v| store.set(SettingKey::Custom("topbar.show_battery".to_string()), v))
+                        }))
+                        .child(setting_row("Show Notifications", None::<String>, true, {
+                            let store = store;
+                            pill_switch(*store.allow_notif.read(), move |v| store.set(SettingKey::Custom("topbar.show_notifications".to_string()), v))
+                        }))
+                        .child(setting_row("Show Focus / DND", None::<String>, true, {
+                            let store = store;
+                            let on = *store.focus_mode.read() != "off";
+                            pill_switch(on, move |v| store.set(SettingKey::Custom("topbar.show_focus".to_string()), v))
+                        })),
                 ),
         )
+    }
 }
 
- /// About detail page matching ui_demo.html
-pub fn about_detail_page() -> impl IntoElement {
-    let t = use_app_theme();
+pub fn desktop_detail_page(store: SettingsStore) -> DesktopDetailPage {
+    DesktopDetailPage { store }
+}
+
+#[derive(PartialEq)]
+pub struct AboutDetailPage;
+
+impl Component for AboutDetailPage {
+    fn render(&self) -> impl IntoElement {
+        let t = use_app_theme();
 
     rect()
         .width(Size::fill())
@@ -2309,4 +2888,9 @@ pub fn about_detail_page() -> impl IntoElement {
                     ]),
                 ),
         )
+    }
+}
+
+pub fn about_detail_page() -> AboutDetailPage {
+    AboutDetailPage
 }

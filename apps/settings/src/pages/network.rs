@@ -213,18 +213,23 @@ pub fn fetch_network_info() -> NetworkInfo {
         info.vpns = vpns;
     }
 
-    // 6. Query Primary IP and Interface from `ip route`
-    if let Ok(output) = Command::new("ip").args(["route", "get", "1.1.1.1"]).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let parts: Vec<&str> = stdout.split_whitespace().collect();
-        for i in 0..parts.len() {
-            if parts[i] == "dev" && i + 1 < parts.len() {
-                info.primary_interface = parts[i + 1].to_string();
-            }
-            if parts[i] == "src" && i + 1 < parts.len() {
-                info.primary_ip = parts[i + 1].to_string();
+    let wifi_connected = info.active_ssid.is_some() && info.wifi_enabled;
+    if wifi_connected {
+        if let Ok(output) = Command::new("ip").args(["route", "get", "1.1.1.1"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let parts: Vec<&str> = stdout.split_whitespace().collect();
+            for i in 0..parts.len() {
+                if parts[i] == "dev" && i + 1 < parts.len() {
+                    info.primary_interface = parts[i + 1].to_string();
+                }
+                if parts[i] == "src" && i + 1 < parts.len() {
+                    info.primary_ip = parts[i + 1].to_string();
+                }
             }
         }
+    } else {
+        info.primary_ip = "—".to_string();
+        info.primary_interface = "—".to_string();
     }
 
     if !real_data_detected {

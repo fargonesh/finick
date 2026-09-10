@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 freya = { git = "https://github.com/marc2332/freya", branch = "main", features = ["all"] }
+freya-components = { git = "https://github.com/marc2332/freya", branch = "main" }

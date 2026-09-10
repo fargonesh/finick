@@ -40,7 +40,14 @@ pub fn nav_item(
         .background(bg)
         .cursor(CursorIcon::Pointer)
         .on_press(move |_| on_press())
-        .child(icon(icon_svg, 17., icon_color))
+        .child({
+            let icon_sz = match t.icon_size_pref {
+                0 => 14.,
+                2 => 21.,
+                _ => 17.,
+            };
+            icon(icon_svg, icon_sz, icon_color)
+        })
         .child(
             label()
                 .font_size(13.)
@@ -75,6 +82,14 @@ pub fn brand_row(
     let name_str = user_name.into();
     let sub_str = subtitle.into();
 
+    let user_img = std::env::var("HOME").ok().and_then(|home| {
+        let p1 = std::path::PathBuf::from(&home).join(".face.icon");
+        let p2 = std::path::PathBuf::from(&home).join(".face");
+        let p3 = std::path::PathBuf::from(&home).join(".config/finick/user.png");
+        let target = if p1.is_file() { Some(p1) } else if p2.is_file() { Some(p2) } else if p3.is_file() { Some(p3) } else { None };
+        target.and_then(|p| std::fs::read(p).ok())
+    });
+
     rect()
         .width(Size::fill())
         .horizontal()
@@ -88,13 +103,22 @@ pub fn brand_row(
                 .corner_radius(RADIUS_PILL)
                 .background(t.bg_active)
                 .center()
-                .child(
-                    label()
-                        .font_size(13.)
-                        .font_weight(FontWeight::BOLD)
-                        .color(t.accent)
-                        .text(init_str),
-                ),
+                .child({
+                    if let Some(bytes) = user_img {
+                        ImageViewer::new(Bytes::from(bytes))
+                            .width(Size::px(32.))
+                            .height(Size::px(32.))
+                            .corner_radius(RADIUS_PILL)
+                            .into_element()
+                    } else {
+                        label()
+                            .font_size(13.)
+                            .font_weight(FontWeight::BOLD)
+                            .color(t.accent)
+                            .text(init_str)
+                            .into_element()
+                    }
+                }),
         )
         .child(
             rect()
@@ -106,12 +130,14 @@ pub fn brand_row(
                         .color(t.text)
                         .text(name_str),
                 )
-                .child(
-                    label()
-                        .font_size(11.5)
-                        .color(t.text_dim)
-                        .text(sub_str),
-                ),
+                .maybe(!sub_str.is_empty(), |el| {
+                    el.child(
+                        label()
+                            .font_size(11.5)
+                            .color(t.text_dim)
+                            .text(sub_str),
+                    )
+                }),
         )
 }
 

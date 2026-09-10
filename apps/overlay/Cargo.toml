@@ -1,7 +1,8 @@
 [package]
-name = "topbar"
+name = "overlay"
 version = "0.1.0"
 edition = "2024"
+default-run = "overlay"
 
 [dependencies]
 config = { path = "../../libs/config" }
@@ -18,6 +19,14 @@ freya = { git = "https://github.com/marc2332/freya", branch = "main", features =
 tokio = { version = "1.43", features = ["full"] }
 winit = "0.30"
 
+[lib]
+name = "overlay"
+path = "src/lib.rs"
+
+[[bin]]
+name = "overlay"
+path = "src/bin/overlay.rs"
+
 [[bin]]
 name = "topbar"
-path = "src/main.rs"
+path = "src/bin/topbar.rs"

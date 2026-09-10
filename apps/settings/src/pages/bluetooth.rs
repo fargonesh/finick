@@ -31,6 +31,7 @@ impl Component for Bluetooth {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             std::thread::spawn(move || {
+                let _ = Command::new("bluetoothctl").args(["scan", "on"]).output();
                 let mut is_powered = false;
                 if let Ok(output) = Command::new("bluetoothctl").arg("show").output() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -278,8 +279,10 @@ impl Component for Bluetooth {
                                         .child(
                                             rect()
                                                 .horizontal()
-                                                .spacing(8.)
-                                                .child(secondary_button(
+                                                .cross_align(Alignment::Center)
+                                                .spacing(6.)
+                                                .content(Content::Flex)
+                                                .child(ghost_button(
                                                     if is_conn { "Disconnect" } else { "Connect" },
                                                     {
                                                         let mac_c = mac.clone();
@@ -304,7 +307,7 @@ impl Component for Bluetooth {
                                                         }
                                                     },
                                                 ))
-                                                .child(secondary_button("Forget", {
+                                                .child(ghost_button("Forget", {
                                                     let mac_c = mac.clone();
                                                     let mut l_c = l;
                                                     let mut ls_c = load_state;

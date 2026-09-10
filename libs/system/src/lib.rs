@@ -1,6 +1,9 @@
-use std::{
-    collections::{HashMap, HashSet},
-    process::Command,
+use {
+    serde::{Deserialize, Serialize},
+    std::{
+        collections::{HashMap, HashSet},
+        process::Command,
+    },
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -115,24 +118,24 @@ pub fn parse_hyprctl_monitors(out: &str) -> Vec<DisplayInfo> {
     Vec::new()
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct InputDevice {
     pub name: String,
     pub layout_or_type: String,
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct InputDevices {
     pub mice: Vec<InputDevice>,
     pub keyboards: Vec<InputDevice>,
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct AudioInfo {
     pub volume: f64,
     pub is_muted: bool,
     pub default_sink_name: String,
     pub default_source_name: String,
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct AudioDevice {
     pub id: String,
     pub name: String,
@@ -375,12 +378,24 @@ pub trait SystemBackend {
     fn get_bluetooth_status(&self) -> bool;
     fn set_bluetooth_status(&self, enabled: bool);
     fn get_storage_info(&self) -> StorageInfo;
+    fn empty_trash(&self) -> Result<(), String> { Ok(()) }
     fn get_paired_bluetooth_devices(&self) -> Vec<BluetoothDevice>;
     fn connect_bluetooth_device(&self, mac: &str);
     fn disconnect_bluetooth_device(&self, mac: &str);
     fn remove_bluetooth_device(&self, mac: &str);
     fn set_display_order(&self, ordered_names: &[String]) -> Result<(), String>;
     fn set_display_config(&self, name: &str, mode: Option<&str>, transform: Option<u8>) -> Result<(), String>;
+    fn set_display_positions(&self, positions: &[(String, i32, i32)]) -> Result<(), String> {
+        let _ = positions;
+        Ok(())
+    }
+    fn set_night_shift(&self, enabled: bool, color_temp: f32) -> Result<(), String> {
+        let _ = (enabled, color_temp);
+        Ok(())
+    }
+    fn restore_display_configs(&self) -> Result<(), String> { Ok(()) }
+    fn save_display_configs(&self) {}
+    fn set_mute(&self, _muted: bool) {}
     fn log_out(&self) -> bool;
     fn reboot(&self) -> bool;
     fn power_off(&self) -> bool;
@@ -388,9 +403,38 @@ pub trait SystemBackend {
     fn get_current_wallpaper(&self) -> Option<String>;
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PersistentDisplayConfig {
+    pub name: String,
+    pub mode: String,
+    pub position: String,
+    pub scale: String,
+    pub transform: u8,
+}
+
 pub struct HyprlandBackend;
 
 impl HyprlandBackend {
+    pub fn hyprctl_set_config(lua_code: &str, legacy_keyword: &str, legacy_val: &str) -> Result<(), String> {
+        if let Ok(output) = Command::new("hyprctl").args(["eval", lua_code]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if output.status.success() && stdout.starts_with("ok") {
+                return Ok(());
+            }
+        }
+        let output = Command::new("hyprctl")
+            .args(["keyword", legacy_keyword, legacy_val])
+            .output()
+            .map_err(|e| format!("failed to spawn hyprctl: {e}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stdout.contains("can't work") || stdout.contains("error") || !output.status.success() {
+            let detail = if !stderr.is_empty() { stderr } else { stdout };
+            return Err(format!("failed to configure hyprland: {detail}"));
+        }
+        Ok(())
+    }
+
     pub fn apply_monitor_config(name: &str, mode: &str, position: &str, scale: &str, transform: u8) -> Result<(), String> {
         let scale_val: f64 = scale.parse().unwrap_or(1.0);
         let eval_lua = format!(
@@ -471,6 +515,7 @@ impl SystemBackend for HyprlandBackend {
                 x = x.saturating_add(effective_w as i32);
             }
         }
+        self.save_display_configs();
         Ok(())
     }
 
@@ -495,13 +540,138 @@ impl SystemBackend for HyprlandBackend {
         let final_transform = transform.unwrap_or(target.transform);
         let pos = format!("{}x{}", target.x, target.y);
         Self::apply_monitor_config(name, &final_mode, &pos, &target.scale, final_transform)?;
+        self.save_display_configs();
+        Ok(())
+    }
 
-        // Re-align displays horizontally to prevent overlap
-        let mut sorted = self.get_displays();
-        sorted.sort_by_key(|d| d.x);
-        let names: Vec<String> = sorted.into_iter().map(|d| d.name).collect();
-        let _ = self.set_display_order(&names);
+    fn set_display_positions(&self, positions: &[(String, i32, i32)]) -> Result<(), String> {
+        if positions.is_empty() {
+            return Ok(());
+        }
+        let displays = self.get_displays();
+        let disp_map: HashMap<String, DisplayInfo> = displays.into_iter().map(|d| (d.name.clone(), d)).collect();
+        let mut adjusted: Vec<(String, i32, i32)> = Vec::new();
+        for (name, mut x, mut y) in positions.iter().cloned() {
+            if adjusted.is_empty() {
+                x = 0;
+                y = 0;
+            } else if let Some(d) = disp_map.get(&name) {
+                let (rw, rh) = parse_display_dimensions(&d.resolution);
+                let sc: f64 = d.scale.parse().unwrap_or(1.0);
+                let sc = if sc <= 0.0 { 1.0 } else { sc };
+                let mut sw = (rw as f64 / sc).round() as i32;
+                let mut sh = (rh as f64 / sc).round() as i32;
+                if d.transform == 1 || d.transform == 3 {
+                    std::mem::swap(&mut sw, &mut sh);
+                }
+                let mut best: Option<(i32, i32, i32)> = None;
+                for (on, ox, oy) in &adjusted {
+                    if let Some(od) = disp_map.get(on) {
+                        let (orw, orh) = parse_display_dimensions(&od.resolution);
+                        let osc: f64 = od.scale.parse().unwrap_or(1.0);
+                        let osc = if osc <= 0.0 { 1.0 } else { osc };
+                        let mut ow = (orw as f64 / osc).round() as i32;
+                        let mut oh = (orh as f64 / osc).round() as i32;
+                        if od.transform == 1 || od.transform == 3 {
+                            std::mem::swap(&mut ow, &mut oh);
+                        }
+                        for (cx, cy) in [(*ox + ow, *oy), (*ox - sw, *oy), (*ox, *oy + oh), (*ox, *oy - sh)] {
+                            let dx = x - cx;
+                            let dy = y - cy;
+                            let dist = dx * dx + dy * dy;
+                            if best.is_none() || dist < best.unwrap().0 {
+                                best = Some((dist, cx, cy));
+                            }
+                        }
+                    }
+                }
+                if let Some((_, bx, by)) = best {
+                    x = bx;
+                    y = by;
+                }
+            }
+            x = x.clamp(-3000, 3000);
+            y = y.clamp(-2000, 2000);
+            adjusted.push((name, x, y));
+        }
+        for (name, x, y) in &adjusted {
+            if let Some(d) = disp_map.get(name) {
+                let pos = format!("{x}x{y}");
+                let mode = if !d.resolution.is_empty() && !d.refresh_rate.is_empty() {
+                    if let Ok(hz) = d.refresh_rate.parse::<f64>() {
+                        format!("{}@{:.2}Hz", d.resolution, hz)
+                    } else {
+                        format!("{}@{}", d.resolution, d.refresh_rate)
+                    }
+                } else if !d.resolution.is_empty() {
+                    d.resolution.clone()
+                } else {
+                    "preferred".to_string()
+                };
+                Self::apply_monitor_config(name, &mode, &pos, &d.scale, d.transform)?;
+            }
+        }
+        self.save_display_configs();
+        Ok(())
+    }
 
+    fn set_night_shift(&self, enabled: bool, color_temp: f32) -> Result<(), String> {
+        apply_night_shift(enabled, color_temp);
+        Ok(())
+    }
+
+    fn save_display_configs(&self) {
+        if let Some(dir) = get_finick_config_dir() {
+            let _ = std::fs::create_dir_all(&dir);
+            let displays = self.get_displays();
+            if displays.is_empty() {
+                return;
+            }
+            let configs: Vec<PersistentDisplayConfig> = displays
+                .into_iter()
+                .map(|d| {
+                    let pos = format!("{}x{}", d.x, d.y);
+                    let mode = if !d.resolution.is_empty() && !d.refresh_rate.is_empty() {
+                        if let Ok(hz) = d.refresh_rate.parse::<f64>() {
+                            format!("{}@{:.2}Hz", d.resolution, hz)
+                        } else {
+                            format!("{}@{}", d.resolution, d.refresh_rate)
+                        }
+                    } else if !d.resolution.is_empty() {
+                        d.resolution
+                    } else {
+                        "preferred".to_string()
+                    };
+                    PersistentDisplayConfig {
+                        name: d.name,
+                        mode,
+                        position: pos,
+                        scale: if d.scale.is_empty() { "1".to_string() } else { d.scale },
+                        transform: d.transform,
+                    }
+                })
+                .collect();
+            if let Ok(json) = serde_json::to_string_pretty(&configs) {
+                let _ = std::fs::write(dir.join("monitors.json"), json);
+            }
+        }
+    }
+
+    fn restore_display_configs(&self) -> Result<(), String> {
+        if let Some(dir) = get_finick_config_dir() {
+            let file = dir.join("monitors.json");
+            if let Ok(content) = std::fs::read_to_string(file) {
+                if let Ok(configs) = serde_json::from_str::<Vec<PersistentDisplayConfig>>(&content) {
+                    let current = self.get_displays();
+                    let current_names: std::collections::HashSet<String> = current.into_iter().map(|d| d.name).collect();
+                    for c in configs {
+                        if current_names.contains(&c.name) {
+                            let _ = Self::apply_monitor_config(&c.name, &c.mode, &c.position, &c.scale, c.transform);
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -641,6 +811,11 @@ impl SystemBackend for HyprlandBackend {
     }
 
     fn toggle_mute(&self) { let _ = Command::new("wpctl").args(["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]).output(); }
+
+    fn set_mute(&self, muted: bool) {
+        let arg = if muted { "1" } else { "0" };
+        let _ = Command::new("wpctl").args(["set-mute", "@DEFAULT_AUDIO_SINK@", arg]).output();
+    }
 
     fn get_power_info(&self) -> PowerInfo {
         let mut capacity = "Unknown".to_string();
@@ -1002,6 +1177,19 @@ impl SystemBackend for HyprlandBackend {
         }
     }
 
+    fn empty_trash(&self) -> Result<(), String> {
+        let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+        let trash_files = home.join(".local/share/Trash/files");
+        let trash_info = home.join(".local/share/Trash/info");
+        for dir in [trash_files, trash_info] {
+            if dir.exists() {
+                let _ = std::fs::remove_dir_all(&dir);
+                let _ = std::fs::create_dir_all(&dir);
+            }
+        }
+        Ok(())
+    }
+
     fn get_paired_bluetooth_devices(&self) -> Vec<BluetoothDevice> {
         let mut devices = Vec::new();
         let mut connected_macs = HashSet::new();
@@ -1026,10 +1214,43 @@ impl SystemBackend for HyprlandBackend {
                 let parts: Vec<&str> = trimmed.splitn(3, ' ').collect();
                 if parts.len() >= 2 {
                     let mac = parts[1].trim().to_string();
-                    let name = if parts.len() >= 3 && !parts[2].trim().is_empty() {
+                    let raw_name = if parts.len() >= 3 && !parts[2].trim().is_empty() {
                         parts[2].trim().to_string()
                     } else {
-                        mac.clone()
+                        String::new()
+                    };
+                    let clean = raw_name.replace([':', '-'], "");
+                    let name = if raw_name.is_empty() || (clean.len() == 12 && clean.chars().all(|c| c.is_ascii_hexdigit()))
+                    {
+                        // Query bluetoothctl info for Alias or Name
+                        Command::new("bluetoothctl")
+                            .args(["info", &mac])
+                            .output()
+                            .ok()
+                            .and_then(|o| {
+                                let s = String::from_utf8_lossy(&o.stdout);
+                                let mut alias = None;
+                                let mut name = None;
+                                for l in s.lines() {
+                                    let t = l.trim();
+                                    if let Some(rest) = t.strip_prefix("Alias:") {
+                                        alias = Some(rest.trim().to_string());
+                                    }
+                                    if let Some(rest) = t.strip_prefix("Name:") {
+                                        name = Some(rest.trim().to_string());
+                                    }
+                                }
+                                alias.or(name)
+                            })
+                            .unwrap_or_else(|| {
+                                if !raw_name.is_empty() {
+                                    raw_name
+                                } else {
+                                    format!("Device ({})", &mac[..mac.len().min(8)])
+                                }
+                            })
+                    } else {
+                        raw_name
                     };
                     let is_connected = connected_macs.contains(&mac.to_uppercase());
                     if !devices.iter().any(|d: &BluetoothDevice| d.mac.eq_ignore_ascii_case(&mac)) {
@@ -1123,7 +1344,11 @@ impl SystemBackend for HyprlandBackend {
                     return Err(format!("Failed to spawn swaybg for color {hex}"));
                 }
             }
-            let _ = Command::new("hyprctl").args(["keyword", "misc:background_color", &format!("0xff{hex}")]).output();
+            let _ = Self::hyprctl_set_config(
+                &format!("hl.config({{ misc = {{ background_color = \"0xff{hex}\" }} }})"),
+                "misc:background_color",
+                &format!("0xff{hex}"),
+            );
         }
 
         if let Some(finick_dir) = get_finick_config_dir() {
@@ -1188,11 +1413,62 @@ fn resolve_swaybg() -> Option<std::path::PathBuf> {
     None
 }
 
+pub fn night_temp_from_slider(color_temp: f32) -> i32 { (6500.0 - color_temp * 30.0).clamp(1000.0, 6500.0) as i32 }
+
+pub fn apply_night_shift(enabled: bool, color_temp: f32) {
+    if enabled {
+        let temp = night_temp_from_slider(color_temp);
+        let t = temp.to_string();
+        let _ = Command::new("pkill").args(["-9", "hyprsunset"]).output();
+        let _ = Command::new("pkill").args(["-9", "wlsunset"]).output();
+        let _ = Command::new("pkill").args(["-9", "gammastep"]).output();
+        if Command::new("which").arg("hyprsunset").output().map(|o| o.status.success()).unwrap_or(false) {
+            let _ = Command::new("hyprsunset").args(["-t", &t]).spawn();
+            return;
+        }
+        if Command::new("which").arg("wlsunset").output().map(|o| o.status.success()).unwrap_or(false) {
+            let _ = Command::new("wlsunset").args(["-t", &t, "-T", "6500"]).spawn();
+            return;
+        }
+        if Command::new("which").arg("gammastep").output().map(|o| o.status.success()).unwrap_or(false) {
+            let _ = Command::new("gammastep").args(["-O", &t]).spawn();
+            return;
+        }
+        // Native Hyprland screen_shader fallback for Night Shift
+        let factor = ((temp as f32 - 2000.0) / 4500.0).clamp(0.4, 0.95);
+        let shader = format!(
+            "precision mediump float;\nvarying vec2 v_texcoord;\nuniform sampler2D tex;\nvoid main() {{\n    vec4 c = \
+             texture2D(tex, v_texcoord);\n    c.b *= {factor:.2};\n    gl_FragColor = c;\n}}\n"
+        );
+        let shader_path = "/tmp/finick-nightshift.frag";
+        let _ = std::fs::write(shader_path, shader);
+        let _ = Command::new("hyprctl").args(["keyword", "decoration:screen_shader", shader_path]).output();
+    } else {
+        let _ = Command::new("pkill").args(["hyprsunset"]).output();
+        let _ = Command::new("pkill").args(["wlsunset"]).output();
+        let _ = Command::new("gammastep").args(["-x"]).output();
+        let _ = Command::new("pkill").args(["gammastep"]).output();
+        let _ = Command::new("hyprctl").args(["keyword", "decoration:screen_shader", ""]).output();
+    }
+}
+
 fn get_finick_config_dir() -> Option<std::path::PathBuf> {
+    if let Ok(custom) = std::env::var("FINICK_CONFIG_DIR") {
+        return Some(std::path::PathBuf::from(custom));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let dot_finick = std::path::Path::new(&home).join(".config").join(".finick");
+        if dot_finick.exists() {
+            return Some(dot_finick);
+        }
+    }
     std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
-        .map(|c| c.join("finick"))
+        .map(|c| {
+            let dot = c.join(".finick");
+            if dot.exists() { dot } else { c.join("finick") }
+        })
 }
 
 #[cfg(test)]
@@ -1505,5 +1781,29 @@ mod tests {
         assert_eq!(WALLPAPER_COLOR_PRESETS.len(), 8);
         assert_eq!(WALLPAPER_COLOR_PRESETS[0].1, "#1e1e2e");
         assert_eq!(WALLPAPER_COLOR_PRESETS[1].1, "#1f2a44");
+    }
+
+    #[test]
+    fn test_persistent_display_config_serde() {
+        let configs = vec![
+            PersistentDisplayConfig {
+                name: "eDP-1".to_string(),
+                mode: "1920x1080@60.0".to_string(),
+                position: "0x0".to_string(),
+                scale: "1.0".to_string(),
+                transform: 0,
+            },
+            PersistentDisplayConfig {
+                name: "HDMI-A-1".to_string(),
+                mode: "2560x1440@144.0".to_string(),
+                position: "1920x0".to_string(),
+                scale: "1.25".to_string(),
+                transform: 1,
+            },
+        ];
+
+        let serialized = serde_json::to_string(&configs).expect("Serialization failed");
+        let deserialized: Vec<PersistentDisplayConfig> = serde_json::from_str(&serialized).expect("Deserialization failed");
+        assert_eq!(configs, deserialized);
     }
 }

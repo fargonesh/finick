@@ -182,6 +182,33 @@ pub fn fetch_language_info() -> LanguageRegionInfo {
     }
 }
 
+pub fn fast_initial_language_info() -> LanguageRegionInfo {
+    LanguageRegionInfo {
+        display_language: "English (United States)".to_string(),
+        display_code: "en_US.UTF-8".to_string(),
+        region_locale: "en_US.UTF-8".to_string(),
+        keyboard_layout: "us (English US)".to_string(),
+        measurement_units: "Metric (Celsius, km)".to_string(),
+        first_day_of_week: "Monday".to_string(),
+        number_example: "1,234,567.89".to_string(),
+        currency_example: "$1,234.56 USD".to_string(),
+        date_example: "Wednesday, September 2, 2026".to_string(),
+        installed_locales: Vec::new(),
+        preferred_languages: vec![
+            LanguageItem {
+                name: "English (United States)".to_string(),
+                code: "en_US.UTF-8".to_string(),
+                is_primary: true,
+            },
+            LanguageItem {
+                name: "English (United Kingdom)".to_string(),
+                code: "en_GB.UTF-8".to_string(),
+                is_primary: false,
+            },
+        ],
+    }
+}
+
 #[derive(PartialEq)]
 pub struct Language;
 
@@ -189,15 +216,13 @@ impl Component for Language {
     fn render(&self) -> impl IntoElement {
         let t = use_app_theme();
 
-        let lang_info = use_state(fetch_language_info);
+        let mut lang_info = use_state(fast_initial_language_info);
+        let search_query = use_state(String::new);
         let is_metric = use_state(|| true);
         let spell_check = use_state(|| true);
         let auto_correct = use_state(|| false);
-        let mut loaded = use_state(|| false);
 
-        if !*loaded.read() {
-            loaded.set(true);
-            let mut info_state = lang_info;
+        use_hook(move || {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             std::thread::spawn(move || {
@@ -207,15 +232,31 @@ impl Component for Language {
 
             freya::prelude::spawn(async move {
                 if let Some(data) = rx.recv().await {
-                    info_state.set(data);
+                    lang_info.set(data);
                 }
             });
-        }
+        });
 
         let current = lang_info.read().clone();
         let use_metric = *is_metric.read();
         let use_spell_check = *spell_check.read();
         let use_auto_correct = *auto_correct.read();
+
+        let q = search_query.read().trim().to_lowercase();
+        let filtered_locales: Vec<(String, String)> = current
+            .installed_locales
+            .iter()
+            .filter_map(|loc| {
+                let name = locale_code_to_friendly_name(loc);
+                if q.is_empty() || loc.to_lowercase().contains(&q) || name.to_lowercase().contains(&q) {
+                    Some((name, loc.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let total_locales = current.installed_locales.len();
+        let filtered_count = filtered_locales.len();
 
         rect()
             .width(Size::fill())
@@ -248,8 +289,19 @@ impl Component for Language {
                                     .text("DISPLAY LANGUAGE"),
                             )
                             .child(secondary_button("Refresh", {
-                                let mut l = loaded;
-                                move || l.set(false)
+                                let mut info = lang_info;
+                                move || {
+                                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                                    std::thread::spawn(move || {
+                                        let data = fetch_language_info();
+                                        let _ = tx.send(data);
+                                    });
+                                    freya::prelude::spawn(async move {
+                                        if let Some(data) = rx.recv().await {
+                                            info.set(data);
+                                        }
+                                    });
+                                }
                             })),
                     )
                     .child(
@@ -628,55 +680,141 @@ impl Component for Language {
                     .border(Border::new().width(1.).fill(t.border_card))
                     .overflow(Overflow::Clip)
                     .child(
-                        label()
-                            .font_size(13.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(t.text_secondary)
-                            .margin((0., 0., 14., 0.))
-                            .text("INSTALLED LOCALES & PACKS"),
-                    )
-                    .children(current.installed_locales.iter().map(|loc| {
                         rect()
                             .width(Size::fill())
                             .horizontal()
                             .main_align(Alignment::SpaceBetween)
                             .cross_align(Alignment::Center)
-                            .padding((10., 12.))
-                            .margin((0., 0., 6., 0.))
-                            .corner_radius(8.)
+                            .margin((0., 0., 12., 0.))
+                            .child(
+                                label()
+                                    .font_size(13.)
+                                    .font_weight(FontWeight::BOLD)
+                                    .color(t.text_secondary)
+                                    .text("INSTALLED LOCALES & PACKS"),
+                            )
+                            .child(
+                                label()
+                                    .font_size(12.)
+                                    .color(t.text_dim)
+                                    .text(if total_locales > 0 {
+                                        format!("{total_locales} installed")
+                                    } else {
+                                        "Loading locales...".to_string()
+                                    }),
+                            ),
+                    )
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .horizontal()
+                            .cross_align(Alignment::Center)
+                            .spacing(8.)
+                            .padding((6., 10.))
+                            .margin((0., 0., 12., 0.))
+                            .corner_radius(RADIUS_PILL)
                             .background(t.bg_base)
                             .border(Border::new().width(1.).fill(t.border_subtle))
+                            .child(icon(SEARCH, 13., t.text_dim))
                             .child(
                                 rect()
+                                    .width(Size::flex(1.))
                                     .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text(locale_code_to_friendly_name(loc)),
-                                    )
-                                    .child(
-                                        label()
-                                            .font_size(12.)
-                                            .color(t.text_secondary)
-                                            .text(loc.clone()),
+                                        Input::new(search_query)
+                                            .background(Color::TRANSPARENT)
+                                            .border_fill(Color::TRANSPARENT)
+                                            .focus_background(Color::TRANSPARENT)
+                                            .focus_border_fill(Color::TRANSPARENT)
+                                            .placeholder("Search installed locales..."),
                                     ),
                             )
-                            .child(
-                                rect()
-                                    .padding((4., 8.))
-                                    .corner_radius(4.)
-                                    .background(t.bg_card)
-                                    .child(
-                                        label()
-                                            .font_size(11.)
-                                            .font_weight(FontWeight::BOLD)
-                                            .color(t.accent_green)
-                                            .text("INSTALLED"),
-                                    ),
+                            .content(Content::Flex),
+                    )
+                    .child({
+                        if total_locales == 0 {
+                            rect()
+                                .width(Size::fill())
+                                .padding(24.)
+                                .center()
+                                .child(
+                                    label()
+                                        .font_size(13.)
+                                        .color(t.text_dim)
+                                        .text("Discovering installed system locales..."),
+                                )
+                                .into_element()
+                        } else if filtered_count == 0 {
+                            rect()
+                                .width(Size::fill())
+                                .padding(24.)
+                                .center()
+                                .child(
+                                    label()
+                                        .font_size(13.)
+                                        .color(t.text_dim)
+                                        .text(format!("No language packs matching \"{}\"", search_query.read())),
+                                )
+                                .into_element()
+                        } else {
+                            VirtualScrollView::new_with_data(
+                                (t, filtered_locales),
+                                |item, (t, items): &(AppTheme, Vec<(String, String)>)| {
+                                    let (friendly_name, code) = &items[item.index];
+                                    rect()
+                                        .key(item.index)
+                                        .width(Size::fill())
+                                        .height(Size::px(item.size))
+                                        .padding((3., 0.))
+                                        .child(
+                                            rect()
+                                                .width(Size::fill())
+                                                .height(Size::fill())
+                                                .horizontal()
+                                                .main_align(Alignment::SpaceBetween)
+                                                .cross_align(Alignment::Center)
+                                                .padding((8., 12.))
+                                                .corner_radius(8.)
+                                                .background(t.bg_base)
+                                                .border(Border::new().width(1.).fill(t.border_subtle))
+                                                .child(
+                                                    rect()
+                                                        .child(
+                                                            label()
+                                                                .font_size(13.)
+                                                                .font_weight(FontWeight::SEMI_BOLD)
+                                                                .color(t.text_primary)
+                                                                .text(friendly_name.clone()),
+                                                        )
+                                                        .child(
+                                                            label()
+                                                                .font_size(11.)
+                                                                .color(t.text_secondary)
+                                                                .text(code.clone()),
+                                                        ),
+                                                )
+                                                .child(
+                                                    rect()
+                                                        .padding((3., 8.))
+                                                        .corner_radius(4.)
+                                                        .background(t.bg_card)
+                                                        .child(
+                                                            label()
+                                                                .font_size(10.)
+                                                                .font_weight(FontWeight::BOLD)
+                                                                .color(t.accent_green)
+                                                                .text("INSTALLED"),
+                                                        ),
+                                                ),
+                                        )
+                                        .into()
+                                },
                             )
+                            .length(filtered_count)
+                            .item_size(56.)
+                            .height(Size::px(320.))
                             .into_element()
-                    })),
+                        }
+                    }),
             )
     }
 }

@@ -4,39 +4,15 @@ use {
         SETTINGS_SOCKET_NAME, SettingEntry, SettingKey, SettingValue, SettingsEvent, SubscriptionFilter,
         get_all_settings, set_and_apply,
     },
-    serde::{Deserialize, Serialize},
     system::{HyprlandBackend, SystemBackend},
+};
+
+pub use ipsea::notifications::{
+    close_notification, subscribe_channel, Notification, NotificationEvent, NOTIFICATIONS_SOCKET_NAME,
 };
 
 pub fn socket() -> String {
     SETTINGS_SOCKET_NAME.to_string()
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NotificationLevel {
-    Info,
-    Warning,
-    Error,
-    Critical,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Notification {
-    pub id: String,
-    pub title: String,
-    pub body: String,
-    pub level: NotificationLevel,
-    pub timestamp: u64,
-    pub app_name: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub enum NotifRequest {
-    Push { title: String, body: String, level: NotificationLevel, app_name: Option<String> },
-    List,
-    Dismiss { id: String },
-    Clear,
-    Subscribe,
 }
 
 #[allow(dead_code)]
@@ -133,6 +109,29 @@ pub fn load_initial_batch(
     });
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TopbarSettings {
+    pub show_wifi: bool,
+    pub show_bluetooth: bool,
+    pub show_sound: bool,
+    pub show_battery: bool,
+    pub text_size: f64,
+    pub text_color: String,
+}
+
+impl Default for TopbarSettings {
+    fn default() -> Self {
+        Self {
+            show_wifi: true,
+            show_bluetooth: true,
+            show_sound: true,
+            show_battery: true,
+            text_size: 13.0,
+            text_color: "Default".to_string(),
+        }
+    }
+}
+
 pub fn subscribe_live(
     wifi: State<bool>,
     bt: State<bool>,
@@ -141,6 +140,7 @@ pub fn subscribe_live(
     brightness: State<f64>,
     dnd: State<bool>,
     connected: State<bool>,
+    mut topbar_settings: State<TopbarSettings>,
 ) {
     let rx = match ipsea::settings::subscribe_channel(socket(), SubscriptionFilter::all()) {
         Ok(rx) => rx,
@@ -190,6 +190,19 @@ pub fn subscribe_live(
                         let mut s = dnd;
                         s.set_if_modified(on);
                     }
+                    SettingKey::Custom(ref k) => {
+                        let mut ts = topbar_settings.read().clone();
+                        match k.as_str() {
+                            "topbar.show_wifi" => if let Some(b) = value.as_bool() { ts.show_wifi = b; },
+                            "topbar.show_bluetooth" => if let Some(b) = value.as_bool() { ts.show_bluetooth = b; },
+                            "topbar.show_sound" => if let Some(b) = value.as_bool() { ts.show_sound = b; },
+                            "topbar.show_battery" => if let Some(b) = value.as_bool() { ts.show_battery = b; },
+                            "topbar.text_size" => if let Some(f) = value.as_f64() { ts.text_size = f; },
+                            "topbar.text_color" => if let Some(s) = value.as_str() { ts.text_color = s.to_string(); },
+                            _ => {}
+                        }
+                        topbar_settings.set(ts);
+                    }
                     SettingKey::PowerProfile => {}
                     _ => {}
                 },
@@ -209,8 +222,16 @@ pub fn apply(key: SettingKey, val: SettingValue) {
     });
 }
 
+pub fn clock_now_with_format(use_24h: bool) -> String {
+    if use_24h {
+        chrono::Local::now().format("%H:%M").to_string()
+    } else {
+        chrono::Local::now().format("%I:%M %p").to_string()
+    }
+}
+
 pub fn clock_now() -> String {
-    chrono::Local::now().format("%H:%M").to_string()
+    clock_now_with_format(true)
 }
 
 pub fn power_action(action: &'static str) {
@@ -226,27 +247,93 @@ pub fn power_action(action: &'static str) {
     });
 }
 
-pub fn fetch_notifications_blocking() -> Vec<Notification> {
-    let shared = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Notification>::new()));
-    let shared2 = shared.clone();
-    let _ = ipsea::send_command(
-        "notifications".to_string(),
-        &NotifRequest::List,
-        Some(move |n: Notification| {
-            if let Ok(mut g) = shared2.lock() {
-                g.push(n);
+pub fn subscribe_notifications_live(notifications: State<Vec<Notification>>) {
+    subscribe_notifications_live_from(NOTIFICATIONS_SOCKET_NAME, notifications);
+}
+
+pub fn subscribe_notifications_live_from(
+    socket_name: impl Into<std::path::PathBuf> + std::fmt::Display + Clone + Send + 'static,
+    notifications: State<Vec<Notification>>,
+) {
+    spawn(async move {
+        loop {
+            match subscribe_channel(socket_name.clone()) {
+                Ok(mut rx) => {
+                    while let Some(evt) = rx.recv().await {
+                        match evt {
+                            NotificationEvent::Show(notif) => {
+                                let mut notifs = notifications;
+                                let id = notif.id;
+                                let timeout = notif.timeout;
+
+                                let mut current = notifs.read().clone();
+                                if let Some(idx) = current.iter().position(|n| n.id == id) {
+                                    current[idx] = notif;
+                                } else {
+                                    current.push(notif);
+                                }
+                                notifs.set(current);
+
+                                // Auto-dismiss after timeout
+                                let auto_dismiss_ms = if timeout > 0 {
+                                    timeout as u64
+                                } else {
+                                    5000
+                                };
+
+                                let mut notifs_dismiss = notifications;
+                                spawn(async move {
+                                    tokio::time::sleep(std::time::Duration::from_millis(auto_dismiss_ms)).await;
+                                    let mut list = notifs_dismiss.read().clone();
+                                    if let Some(pos) = list.iter().position(|n| n.id == id) {
+                                        list.remove(pos);
+                                        notifs_dismiss.set(list);
+                                    }
+                                });
+                            }
+                            NotificationEvent::Close(id) => {
+                                let mut notifs = notifications;
+                                let mut current = notifs.read().clone();
+                                if let Some(pos) = current.iter().position(|n| n.id == id) {
+                                    current.remove(pos);
+                                    notifs.set(current);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
             }
-        }),
-    );
-    shared.lock().map(|g| g.clone()).unwrap_or_default()
+        }
+    });
+}
+
+pub fn dismiss_notification(id: u32) {
+    dismiss_notification_from(NOTIFICATIONS_SOCKET_NAME, id);
+}
+
+pub fn dismiss_notification_from(
+    socket_name: impl Into<std::path::PathBuf> + std::fmt::Display,
+    id: u32,
+) {
+    let _ = close_notification(socket_name, id);
+}
+
+pub fn fetch_notifications_blocking() -> Vec<Notification> {
+    fetch_notifications_blocking_from(NOTIFICATIONS_SOCKET_NAME)
+}
+
+pub fn fetch_notifications_blocking_from(
+    socket_name: impl Into<std::path::PathBuf> + std::fmt::Display,
+) -> Vec<Notification> {
+    ipsea::notifications::get_active_notifications(socket_name).unwrap_or_default()
 }
 
 pub fn clear_notifications() {
-    std::thread::spawn(|| {
-        let _: std::io::Result<()> = ipsea::send_command::<NotifRequest, Notification, fn(Notification)>(
-            "notifications".to_string(),
-            &NotifRequest::Clear,
-            None,
-        );
-    });
+    let notifs = fetch_notifications_blocking();
+    for n in notifs {
+        dismiss_notification(n.id);
+    }
 }

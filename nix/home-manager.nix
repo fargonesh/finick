@@ -12,11 +12,19 @@ in
       description = "Finick package containing all binaries";
     };
 
-    topbar = {
+    overlay = {
       enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
-        description = "Whether to run topbar as a user service";
+        description = "Whether to run overlay as a user service";
+      };
+    };
+
+    topbar = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Whether to run topbar as a user service (deprecated, use overlay)";
       };
     };
 
@@ -46,7 +54,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    home.packages = lib.optionals (cfg.settings.enable || cfg.files.enable || cfg.topbar.enable) [ cfg.package ];
+    home.packages = lib.optionals (cfg.settings.enable || cfg.files.enable || cfg.overlay.enable || cfg.topbar.enable) [ cfg.package ];
 
     xdg.enable = true;
     xdg.mimeApps.enable = lib.mkDefault true;
@@ -56,14 +64,14 @@ in
       })
     ];
 
-    systemd.user.services.finick-topbar = lib.mkIf cfg.topbar.enable {
+    systemd.user.services.finick-overlay = lib.mkIf (cfg.overlay.enable || cfg.topbar.enable) {
       Unit = {
-        Description = "Finick Top Bar";
+        Description = "Finick Overlay";
         PartOf = [ "graphical-session.target" ];
         After = [ "graphical-session.target" ];
       };
       Service = {
-        ExecStart = "${cfg.package}/bin/topbar";
+        ExecStart = "${cfg.package}/bin/overlay";
         Restart = "on-failure";
         RestartSec = 2;
       };

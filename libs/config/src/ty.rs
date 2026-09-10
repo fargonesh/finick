@@ -710,6 +710,8 @@ pub struct GeneralSettings {
     pub time_24h: Setting<bool>,
     #[serde(default = "default_true_setting")]
     pub auto_updates: Setting<bool>,
+    #[serde(default = "default_true_setting")]
+    pub screen_time_enabled: Setting<bool>,
 }
 
 impl Default for GeneralSettings {
@@ -717,6 +719,7 @@ impl Default for GeneralSettings {
         Self {
             time_24h: Setting::new(true),
             auto_updates: Setting::new(true),
+            screen_time_enabled: Setting::new(true),
         }
     }
 }
@@ -927,6 +930,9 @@ pub struct SettingsPayload {
     /// Key-level lock metadata registry.
     #[serde(default, skip_serializing_if = "SettingLockRegistry::is_empty")]
     pub locks: SettingLockRegistry,
+    /// Arbitrary custom key-value settings.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub custom: HashMap<String, serde_json::Value>,
 }
 
 impl Default for SettingsPayload {
@@ -937,6 +943,7 @@ impl Default for SettingsPayload {
             personalization: PersonalizationConfig::default(),
             system: SystemConfig::default(),
             locks: SettingLockRegistry::default(),
+            custom: HashMap::new(),
         }
     }
 }

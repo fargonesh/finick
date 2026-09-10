@@ -115,7 +115,7 @@ pub const ALL_NAV_ROUTES: &[RouteInfo] = &[
     },
     RouteInfo {
         route: Route::Desktop,
-        title: "Desktop & Dock",
+        title: "Desktop",
         icon_svg: LAYOUT_GRID,
         group: Some("Personalisation"),
         keywords: "desktop dock workspaces window manager hyprland layout gaps",
@@ -200,7 +200,7 @@ pub fn main() {
 
     launch(
         LaunchConfig::new()
-            .with_window(WindowConfig::new(app).with_title("Settings").with_size(1080., 740.))
+            .with_window(WindowConfig::new(app).with_title("Settings").with_size(1080., 740.).with_min_size(640., 480.))
             .with_plugin(freya_devtools::DevtoolsPlugin::default())
             .with_plugin(freya_performance_plugin::PerformanceOverlayPlugin::default()),
     )
@@ -244,243 +244,300 @@ fn app() -> impl IntoElement {
     let filtered_len = filtered_routes.len();
     let _active_focus_idx = if filtered_len > 0 { (*focused_nav_idx.read()).min(filtered_len - 1) } else { 0 };
 
-    rect()
-        .width(Size::fill())
-        .height(Size::fill())
-        .horizontal()
-        .content(Content::Flex)
-        .background(t.bg)
-        .on_global_key_down({
-            let mut current_route = current_route;
-            let mut search_query = search_query;
-            let mut focused_nav_idx = focused_nav_idx;
-            let search_focus = search_focus;
-            let search_a11y_id = search_a11y_id;
-            let routes = filtered_routes.clone();
+    responsive_view(780.0, move |compact| {
+        let sidebar_w = if compact { 180. } else { 232. };
+        let content_pad = if compact { (18., 16., 32., 16.) } else { (30., 34., 64., 34.) };
+        let top_pad = if compact { (0., 14.) } else { (0., 24.) };
 
-            move |e: Event<KeyboardEventData>| {
-                let is_search_focused = search_focus.read().is_focused();
-                let key = &e.data().key;
-                let count = routes.len();
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .horizontal()
+            .content(Content::Flex)
+            .background(t.bg)
+            .overflow(Overflow::Clip)
+            .on_global_key_down({
+                let mut current_route = current_route;
+                let mut search_query = search_query;
+                let mut focused_nav_idx = focused_nav_idx;
+                let search_focus = search_focus;
+                let search_a11y_id = search_a11y_id;
+                let routes = filtered_routes.clone();
 
-                match key {
-                    Key::Character(s) if s == "/" && !is_search_focused => {
-                        search_a11y_id.request_focus();
-                    }
-                    Key::Named(NamedKey::Escape) => {
-                        search_a11y_id.request_unfocus();
-                        if !search_query.read().is_empty() {
-                            search_query.set(String::new());
+                move |e: Event<KeyboardEventData>| {
+                    let is_search_focused = search_focus.read().is_focused();
+                    let key = &e.data().key;
+                    let count = routes.len();
+
+                    match key {
+                        Key::Character(s) if s == "/" && !is_search_focused => {
+                            search_a11y_id.request_focus();
                         }
-                    }
-                    Key::Named(NamedKey::ArrowDown) => {
-                        if count > 0 {
-                            let curr = *focused_nav_idx.read();
-                            focused_nav_idx.set((curr + 1) % count);
+                        Key::Named(NamedKey::Escape) => {
+                            search_a11y_id.request_unfocus();
+                            if !search_query.read().is_empty() {
+                                search_query.set(String::new());
+                            }
                         }
-                    }
-                    Key::Named(NamedKey::ArrowUp) => {
-                        if count > 0 {
-                            let curr = *focused_nav_idx.read();
-                            let prev = if curr == 0 { count - 1 } else { curr - 1 };
-                            focused_nav_idx.set(prev);
-                        }
-                    }
-                    Key::Named(NamedKey::Tab) => {
-                        if count > 0 {
-                            let curr = *focused_nav_idx.read();
-                            if e.data().modifiers.shift() {
-                                let prev = if curr == 0 { count - 1 } else { curr - 1 };
-                                focused_nav_idx.set(prev);
-                            } else {
+                        Key::Named(NamedKey::ArrowDown) => {
+                            if count > 0 {
+                                let curr = *focused_nav_idx.read();
                                 focused_nav_idx.set((curr + 1) % count);
                             }
                         }
-                    }
-                    Key::Named(NamedKey::Enter) => {
-                        if count > 0 {
+                        Key::Named(NamedKey::ArrowUp) => {
+                            if count > 0 {
+                                let curr = *focused_nav_idx.read();
+                                let prev = if curr == 0 { count - 1 } else { curr - 1 };
+                                focused_nav_idx.set(prev);
+                            }
+                        }
+                        Key::Named(NamedKey::Tab) => {
+                            if count > 0 {
+                                let curr = *focused_nav_idx.read();
+                                if e.data().modifiers.shift() {
+                                    let prev = if curr == 0 { count - 1 } else { curr - 1 };
+                                    focused_nav_idx.set(prev);
+                                } else {
+                                    focused_nav_idx.set((curr + 1) % count);
+                                }
+                            }
+                        }
+                        Key::Named(NamedKey::Enter) => {
+                            if count > 0 {
+                                let idx = (*focused_nav_idx.read()).min(count - 1);
+                                current_route.set(routes[idx].route);
+                                search_a11y_id.request_unfocus();
+                            }
+                        }
+                        Key::Character(s) if s == " " && !is_search_focused && count > 0 => {
                             let idx = (*focused_nav_idx.read()).min(count - 1);
                             current_route.set(routes[idx].route);
-                            search_a11y_id.request_unfocus();
                         }
+                        _ => {}
                     }
-                    Key::Character(s) if s == " " && !is_search_focused && count > 0 => {
-                        let idx = (*focused_nav_idx.read()).min(count - 1);
-                        current_route.set(routes[idx].route);
-                    }
-                    _ => {}
                 }
-            }
-        })
-        // ----------------- SIDEBAR -----------------
-        .child(
-            rect()
-                .width(Size::px(232.))
-                .height(Size::fill())
-                .background(t.sidebar_bg)
-                .border(Border::new().width(1.).fill(t.border))
-                .padding((16., 12., 18., 12.))
-                .vertical()
-                .spacing(16.)
-                // Brand avatar row matching ui_demo.html
-                .child(brand_row("F", "Flora", "Studio · connected"))
-                // Search bar
-                .child(sidebar_search(search_query, "Search"))
-                // Scrollable nav list
-                .child(ScrollView::new().width(Size::fill()).height(Size::fill()).child(
-                    rect().width(Size::fill()).vertical().spacing(2.).children({
-                        let mut elements = Vec::new();
-                        let mut current_grp: Option<&'static str> = None;
+            })
+            // ----------------- SIDEBAR -----------------
+            .child(
+                rect()
+                    .width(Size::px(sidebar_w))
+                    .height(Size::fill())
+                    .background(t.sidebar_bg)
+                    .border(Border::new().width(1.).fill(t.border))
+                    .padding((16., 12., 18., 12.))
+                    .overflow(Overflow::Clip)
+                    .vertical()
+                    .spacing(16.)
+                    // Brand avatar row matching ui_demo.html
+                    .child(
+                        rect()
+                            .cursor(CursorIcon::Pointer)
+                            .on_press({
+                                let mut cr = current_route;
+                                move |_| cr.set(Route::Accounts)
+                            })
+                            .child(brand_row("F", "Flora", "")),
+                    )
+                    // Search bar
+                    .child(sidebar_search(search_query, "Search"))
+                    // Scrollable nav list
+                    .child(ScrollView::new().width(Size::fill()).height(Size::fill()).child(
+                        rect().width(Size::fill()).vertical().spacing(2.).children({
+                            let mut elements = Vec::new();
+                            let mut current_grp: Option<&'static str> = None;
 
-                        for item in &filtered_routes {
-                            if item.route == Route::About {
-                                continue; // rendered at the bottom
-                            }
-
-                            // Render group label when transitioning groups
-                            if item.group != current_grp {
-                                current_grp = item.group;
-                                if let Some(grp_label) = current_grp {
-                                    elements.push(nav_group_label(grp_label).into_element());
+                            for item in &filtered_routes {
+                                if item.route == Route::About {
+                                    continue; // rendered at the bottom
                                 }
-                            }
 
-                            let is_active = *current_route.read() == item.route;
-                            let route_val = item.route;
-                            let mut cr = current_route;
-
-                            elements.push(
-                                nav_item(item.icon_svg, item.title, is_active, move || cr.set(route_val)).into_element(),
-                            );
-                        }
-
-                        elements
-                    }),
-                ))
-                // Bottom About item with top border
-                .child(
-                    rect()
-                        .width(Size::fill())
-                        .padding((10., 0., 0., 0.))
-                        .border(Border::new().width(1.).fill(t.border))
-                        .child({
-                            let is_active = *current_route.read() == Route::About;
-                            let mut cr = current_route;
-                            nav_item(ABOUT, "About", is_active, move || cr.set(Route::About))
-                        }),
-                ),
-        )
-        // ----------------- CONTENT AREA -----------------
-        .child(
-            rect()
-                .width(Size::flex(1.))
-                .height(Size::fill())
-                .vertical()
-                // Top Navigation Bar
-                .child(
-                    rect()
-                        .width(Size::fill())
-                        .height(Size::px(56.))
-                        .padding((0., 24.))
-                        .horizontal()
-                        .cross_align(Alignment::Center)
-                        .main_align(Alignment::SpaceBetween)
-                        .border(Border::new().width(1.).fill(t.border))
-                        .background(t.panel)
-                        .child(
-                            rect()
-                                .horizontal()
-                                .cross_align(Alignment::Center)
-                                .spacing(10.)
-                                .child({
-                                    if *current_route.read() != Route::Overview {
-                                        let mut cr = current_route;
-                                        rect()
-                                            .cursor(CursorIcon::Pointer)
-                                            .padding((4., 8.))
-                                            .corner_radius(RADIUS_PILL)
-                                            .background(t.panel_raised)
-                                            .border(Border::new().width(1.).fill(t.border))
-                                            .on_press(move |_| cr.set(Route::Overview))
-                                            .child(
-                                                label()
-                                                    .font_size(12.5)
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .color(t.text)
-                                                    .text("‹ Overview"),
-                                            )
-                                            .into_element()
-                                    } else {
-                                        rect().into_element()
+                                // Render group label when transitioning groups
+                                if item.group != current_grp {
+                                    current_grp = item.group;
+                                    if let Some(grp_label) = current_grp {
+                                        elements.push(nav_group_label(grp_label).into_element());
                                     }
-                                })
-                                .child(label().font_size(15.).font_weight(FontWeight::BOLD).color(t.text).text({
-                                    let r = *current_route.read();
-                                    ALL_NAV_ROUTES.iter().find(|x| x.route == r).map(|x| x.title).unwrap_or("Settings")
-                                })),
-                        )
-                        .child(
-                            rect()
-                                .horizontal()
-                                .cross_align(Alignment::Center)
-                                .spacing(8.)
-                                .child(status_chip(format!("Theme: {:?}", t.mode), true, None))
-                                .child(status_chip(t.accent_name, true, None)),
-                        ),
-                )
-                // Main Content View
-                .child(rect().width(Size::flex(1.)).height(Size::fill()).child(
-                    ScrollView::new().width(Size::fill()).height(Size::fill()).child(
-                        rect().width(Size::fill()).padding((30., 34., 64., 34.)).child({
-                            match *current_route.read() {
-                                Route::Overview => overview_page(
-                                    current_route,
-                                    theme_state,
-                                    store,
-                                    wired_info.read().clone(),
-                                    about_info.read().clone(),
-                                    displays.read().clone(),
-                                )
-                                .into_element(),
-                                Route::Appearance => appearance_detail_page(theme_state, store).into_element(),
-                                Route::Wifi => wifi_detail_page(store).into_element(),
-                                Route::Bluetooth => bluetooth_detail_page(store).into_element(),
-                                Route::Display => display_detail_page(store, displays).into_element(),
-                                Route::Sound => sound_detail_page(store).into_element(),
-                                Route::Focus => {
-                                    focus_detail_page(store, work_sched, sleep_sched, share_devices).into_element()
                                 }
-                                Route::Notifications => notifications_detail_page(store).into_element(),
-                                Route::ScreenTime => screen_time_detail_page(store).into_element(),
-                                Route::Desktop => desktop_detail_page(store).into_element(),
-                                Route::General => general_detail_page(store).into_element(),
-                                Route::Storage => storage_detail_page(store).into_element(),
-                                Route::Battery => battery_detail_page(store).into_element(),
-                                Route::Accessibility => accessibility_detail_page(store).into_element(),
-                                Route::About => about_detail_page().into_element(),
-                                Route::DateTime => pages::DateTime.into_element(),
-                                Route::Privacy => pages::Privacy.into_element(),
-                                Route::Language => pages::Language.into_element(),
-                                Route::Printers => pages::Printers.into_element(),
-                                Route::Accounts => {
-                                    // Real human users from /etc/passwd
-                                    rect()
-                                        .width(Size::fill())
-                                        .vertical()
-                                        .child(page_head(GENERAL, "Accounts", "User accounts and permissions"))
-                                        .child(tile().child(tile_head(None, "Human Users", None::<String>)).child(
-                                            setting_row(
-                                                "Flora Hill (UID 1000)",
-                                                Some("Shell: /run/current-system/sw/bin/bash"),
-                                                false,
-                                                status_chip("Administrator", true, None),
-                                            ),
-                                        ))
-                                        .into_element()
-                                }
+
+                                let is_active = *current_route.read() == item.route;
+                                let route_val = item.route;
+                                let mut cr = current_route;
+
+                                elements.push(
+                                    nav_item(item.icon_svg, item.title, is_active, move || cr.set(route_val)).into_element(),
+                                );
                             }
+
+                            elements
                         }),
+                    ))
+                    // Bottom About item with top border
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .padding((10., 0., 0., 0.))
+                            .border(Border::new().width(1.).fill(t.border))
+                            .child({
+                                let is_active = *current_route.read() == Route::About;
+                                let mut cr = current_route;
+                                nav_item(ABOUT, "About", is_active, move || cr.set(Route::About))
+                            }),
                     ),
-                )),
-        )
+            )
+            // ----------------- CONTENT AREA -----------------
+            .child(
+                rect()
+                    .width(Size::flex(1.))
+                    .height(Size::fill())
+                    .vertical()
+                    // Top Navigation Bar
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .height(Size::px(56.))
+                            .padding(top_pad)
+                            .horizontal()
+                            .cross_align(Alignment::Center)
+                            .main_align(Alignment::SpaceBetween)
+                            .border(Border::new().width(1.).fill(t.border))
+                            .background(t.panel)
+                            .content(Content::Flex)
+                            .child(
+                                rect()
+                                    .horizontal()
+                                    .cross_align(Alignment::Center)
+                                    .spacing(10.)
+                                    .content(Content::Flex)
+                                    .child({
+                                        if *current_route.read() != Route::Overview {
+                                            let mut cr = current_route;
+                                            rect()
+                                                .cursor(CursorIcon::Pointer)
+                                                .padding((4., 8.))
+                                                .corner_radius(RADIUS_PILL)
+                                                .background(t.panel_raised)
+                                                .border(Border::new().width(1.).fill(t.border))
+                                                .on_press(move |_| cr.set(Route::Overview))
+                                                .child(
+                                                    label()
+                                                        .font_size(12.5)
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .color(t.text)
+                                                        .text("‹ Overview"),
+                                                )
+                                                .into_element()
+                                        } else {
+                                            rect().into_element()
+                                        }
+                                    })
+                                    .child(label().font_size(15.).font_weight(FontWeight::BOLD).color(t.text).text({
+                                        let r = *current_route.read();
+                                        ALL_NAV_ROUTES.iter().find(|x| x.route == r).map(|x| x.title).unwrap_or("Settings")
+                                    })),
+                            ),
+                    )
+                    // Main Content View
+                    .child(rect().width(Size::flex(1.)).height(Size::fill()).content(Content::Flex).child(
+                        ScrollView::new().width(Size::fill()).height(Size::fill()).child(
+                            rect().width(Size::fill()).padding(content_pad).overflow(Overflow::Clip).child({
+                                match *current_route.read() {
+                                    Route::Overview => overview_page(
+                                        current_route,
+                                        theme_state,
+                                        store,
+                                        wired_info.read().clone(),
+                                        about_info.read().clone(),
+                                        displays.read().clone(),
+                                    )
+                                    .into_element(),
+                                    Route::Appearance => appearance_detail_page(theme_state, store).into_element(),
+                                    Route::Wifi => wifi_detail_page(store).into_element(),
+                                    Route::Bluetooth => bluetooth_detail_page(store).into_element(),
+                                    Route::Display => display_detail_page(store, displays).into_element(),
+                                    Route::Sound => sound_detail_page(store).into_element(),
+                                    Route::Focus => {
+                                        focus_detail_page(store, work_sched, sleep_sched, share_devices).into_element()
+                                    }
+                                    Route::Notifications => notifications_detail_page(store).into_element(),
+                                    Route::ScreenTime => screen_time_detail_page(store).into_element(),
+                                    Route::Desktop => desktop_detail_page(store).into_element(),
+                                    Route::General => general_detail_page(store).into_element(),
+                                    Route::Storage => storage_detail_page(store).into_element(),
+                                    Route::Battery => battery_detail_page(store).into_element(),
+                                    Route::Accessibility => accessibility_detail_page(store).into_element(),
+                                    Route::About => about_detail_page().into_element(),
+                                    Route::DateTime => pages::DateTime.into_element(),
+                                    Route::Privacy => pages::Privacy.into_element(),
+                                    Route::Language => pages::Language.into_element(),
+                                    Route::Printers => pages::Printers.into_element(),
+                                    Route::Accounts => {
+                                        // Real human users from /etc/passwd and avatar customization
+                                        rect()
+                                            .width(Size::fill())
+                                            .vertical()
+                                            .spacing(GAP)
+                                            .child(page_head(GENERAL, "Accounts", "User accounts and permissions"))
+                                            .child(tile().child(tile_head(None, "User Profile", None::<String>)).child(
+                                                setting_row(
+                                                    "Profile Icon",
+                                                    Some("Choose an image to use as your avatar across Finick"),
+                                                    false,
+                                                    secondary_button("Change icon…", || {
+                                                        freya::prelude::spawn(async move {
+                                                            if let Some(file) = rfd::AsyncFileDialog::new()
+                                                                .add_filter("Images", &[
+                                                                    "png", "jpg", "jpeg", "webp", "bmp", "svg",
+                                                                ])
+                                                                .pick_file()
+                                                                .await
+                                                            {
+                                                                let path_str = file.path().to_string_lossy().to_string();
+                                                                if let Ok(home) = std::env::var("HOME") {
+                                                                    let target = format!("{home}/.face.icon");
+                                                                    let target_png =
+                                                                        format!("{home}/.config/finick/user.png");
+                                                                    let _ = std::fs::create_dir_all(format!(
+                                                                        "{home}/.config/finick"
+                                                                    ));
+                                                                    let _ = std::process::Command::new("magick")
+                                                                        .args([
+                                                                            "convert", &path_str, "-resize", "128x128^",
+                                                                            "-gravity", "center", "-extent", "128x128",
+                                                                            &target,
+                                                                        ])
+                                                                        .output()
+                                                                        .or_else(|_| {
+                                                                            std::process::Command::new("convert")
+                                                                                .args([
+                                                                                    &path_str, "-resize", "128x128^",
+                                                                                    "-gravity", "center", "-extent",
+                                                                                    "128x128", &target,
+                                                                                ])
+                                                                                .output()
+                                                                        });
+                                                                    let _ = std::fs::copy(&target, &target_png);
+                                                                    let _ = std::fs::copy(&target, format!("{home}/.face"));
+                                                                }
+                                                            }
+                                                        });
+                                                    }),
+                                                ),
+                                            ))
+                                            .child(tile().child(tile_head(None, "Human Users", None::<String>)).child(
+                                                setting_row(
+                                                    "Flora Hill (UID 1000)",
+                                                    Some("Shell: /run/current-system/sw/bin/bash"),
+                                                    false,
+                                                    status_chip("Administrator", true, None),
+                                                ),
+                                            ))
+                                            .into_element()
+                                    }
+                                }
+                            }),
+                        ),
+                    )),
+            )
+    })
 }

@@ -64,6 +64,8 @@ impl Component for OverviewPage {
             let is_accent_locked = accent_lock.is_some();
             let wp_lock = store.lock_label(&SettingKey::Wallpaper);
             let is_wp_locked = wp_lock.is_some();
+            let cur_mode = theme_state.read().mode;
+            let cur_accent = theme_state.read().accent_name;
 
             tile()
                 .child(tile_head(
@@ -83,7 +85,7 @@ impl Component for OverviewPage {
                                         let store = store;
                                         segmented_control(
                                             vec![("Light", ThemeMode::Light), ("Dark", ThemeMode::Dark), ("Auto", ThemeMode::Auto)],
-                                            t.mode,
+                                            cur_mode,
                                             move |mode| {
                                                 if !is_theme_locked {
                                                     let new_t = theme.read().with_mode(mode);
@@ -123,12 +125,17 @@ impl Component for OverviewPage {
                         .child({
                             let mut theme = theme_state;
                             let store = store;
-                            swatch_picker(t.accent_name, false, move |acc| {
+                            let cur_wp = store.wallpaper.read().clone();
+                            accent_picker_with_material(cur_accent, cur_wp, false, move |acc| {
                                 if !is_accent_locked {
                                     let new_t = theme.read().with_accent(acc);
                                     theme.set(new_t);
                                     set_theme(&new_t);
                                     store.set(SettingKey::AccentColor, acc.name.to_string());
+                                    let clean_hex = acc.hex.trim_start_matches('#');
+                                    let _ = std::process::Command::new("hyprctl")
+                                        .args(["keyword", "general:col.active_border", &format!("0xff{clean_hex}")])
+                                        .status();
                                 }
                             })
                         }),
@@ -147,9 +154,10 @@ impl Component for OverviewPage {
                         .opacity(if is_wp_locked { 0.45 } else { 1.0 })
                         .child({
                             let store = store;
-                            wallpaper_picker(4, *store.wallpaper_idx.read(), false, move |idx| {
+                            let cur_wp = store.wallpaper.read().clone();
+                            wallpaper_color_picker(&cur_wp, move |hex| {
                                 if !is_wp_locked {
-                                    store.set(SettingKey::Wallpaper, idx as i64);
+                                    store.set(SettingKey::Wallpaper, hex);
                                 }
                             })
                         }),
@@ -316,8 +324,9 @@ impl Component for OverviewPage {
                 ))
                 .child(
                     rect()
-                        .vertical()
+                        .horizontal()
                         .spacing(8.)
+                        .content(Content::Flex)
                         .opacity(if is_dnd_locked { 0.45 } else { 1.0 })
                         .child({
                             let store = store;
@@ -574,7 +583,15 @@ impl Component for OverviewPage {
                 .child(setting_row("Software", None::<String>, true, status_chip("Up to date", false, None)))
         };
 
-        if compact {
+        let has_brightness = HyprlandBackend.supports_brightness();
+        let has_battery = {
+            let p = HyprlandBackend.get_power_info();
+            p.capacity != "Unknown" && p.status != "Unknown"
+        };
+        let show_display = has_brightness || !displays.is_empty();
+        let show_battery = has_battery;
+
+        let inner = if compact {
             rect()
                 .width(Size::fill())
                 .vertical()
@@ -584,12 +601,13 @@ impl Component for OverviewPage {
                 .child(wired_card)
                 .child(bluetooth_card)
                 .child(focus_card)
-                .child(display_card)
+                .maybe_child(show_display.then(|| display_card.clone()))
                 .child(sound_card)
                 .child(storage_card)
                 .child(notifications_card)
-                .child(battery_card)
+                .maybe_child(show_battery.then(|| battery_card.clone()))
                 .child(about_card)
+                .into_element()
         } else {
             rect()
                 .width(Size::fill())
@@ -601,7 +619,7 @@ impl Component for OverviewPage {
                         .horizontal()
                         .spacing(GAP)
                         .content(Content::Flex)
-                        .child(rect().width(Size::flex(1.)).child(appearance_card))
+                        .child(rect().width(Size::flex(1.)).height(Size::fill()).child(appearance_card))
                         .child(
                             rect()
                                 .width(Size::flex(1.))
@@ -617,18 +635,22 @@ impl Component for OverviewPage {
                         .horizontal()
                         .spacing(GAP)
                         .content(Content::Flex)
-                        .child(rect().width(Size::flex(1.)).child(bluetooth_card))
-                        .child(rect().width(Size::flex(1.)).child(focus_card)),
+                        .child(rect().width(Size::flex(1.)).height(Size::fill()).child(bluetooth_card))
+                        .child(rect().width(Size::flex(1.)).height(Size::fill()).child(focus_card)),
                 )
-                .child(
+                .maybe_child(show_display.then(|| {
                     rect()
                         .width(Size::fill())
                         .horizontal()
                         .spacing(GAP)
                         .content(Content::Flex)
-                        .child(rect().width(Size::flex(1.)).child(display_card))
-                        .child(rect().width(Size::flex(1.)).child(sound_card)),
-                )
+                        .child(rect().width(Size::flex(1.)).height(Size::fill()).child(display_card.clone()))
+                        .child(rect().width(Size::flex(1.)).height(Size::fill()).child(sound_card.clone()))
+                        .into_element()
+                }))
+                .maybe_child((!show_display).then(|| {
+                    rect().width(Size::fill()).child(sound_card.clone()).into_element()
+                }))
                 .child(storage_card)
                 .child(
                     rect()
@@ -636,11 +658,13 @@ impl Component for OverviewPage {
                         .horizontal()
                         .spacing(GAP)
                         .content(Content::Flex)
-                        .child(rect().width(Size::flex(2.)).child(notifications_card))
-                        .child(rect().width(Size::flex(1.)).child(battery_card))
-                        .child(rect().width(Size::flex(1.)).child(about_card)),
+                        .child(rect().width(Size::flex(2.)).height(Size::fill()).child(notifications_card))
+                        .maybe_child(show_battery.then(|| rect().width(Size::flex(1.)).height(Size::fill()).child(battery_card.clone()).into_element()))
+                        .child(rect().width(Size::flex(1.)).height(Size::fill()).child(about_card)),
                 )
-        }
+                .into_element()
+        };
+        rect().width(Size::fill()).child(inner).into_element()
     })
     }
 }

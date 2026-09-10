@@ -1,5 +1,5 @@
 {
-  description = "Finick — Hyprland desktop environment (topbar, settings, files)";
+  description = "Finick — Hyprland desktop environment (overlay, settings, files)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -88,6 +88,12 @@
         finick = pkgs.symlinkJoin {
           name = "finick";
           paths = (map (bin:
+            let
+              cargoArgs =
+                if bin == "overlay" then "-p overlay --bin overlay"
+                else if bin == "topbar" then "-p overlay --bin overlay"
+                else "-p ${bin}";
+            in
             pkgs.writeShellScriptBin bin ''
               set -e
               REPO="$HOME/Documents/Projects/finick"
@@ -105,10 +111,10 @@
               if command -v devenv >/dev/null 2>&1; then
                 DEVENV_BIN="devenv"
               fi
-              exec "$DEVENV_BIN" --quiet shell -- bash -c 'cd "$1"; shift; exec cargo run -p '"${bin}"' --manifest-path "'"$REPO"'/Cargo.toml" -- "$@"' bash "$ORIG_DIR" "$@"
+              exec "$DEVENV_BIN" --quiet shell -- bash -c 'cd "$1"; shift; exec cargo run ${cargoArgs} --manifest-path "'"$REPO"'/Cargo.toml" -- "$@"' bash "$ORIG_DIR" "$@"
             '')
-            [ "topbar" "settings" "files" "settings-daemon" "index" "finickctl" ]) ++ [ desktopEntries ];
-          meta.mainProgram = "settings";
+            [ "overlay" "topbar" "settings" "files" "settings-daemon" "index" "finickctl" ]) ++ [ desktopEntries ];
+          meta.mainProgram = "overlay";
         };
       in
       {
@@ -118,7 +124,9 @@
         };
 
         apps = {
-          topbar = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/topbar"; };
+          default = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/overlay"; };
+          overlay = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/overlay"; };
+          topbar = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/overlay"; };
           settings = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/settings"; };
           files = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/files"; };
           settings-daemon = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/settings-daemon"; };

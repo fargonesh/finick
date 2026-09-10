@@ -20,6 +20,8 @@ pub struct SettingsStore {
     pub volume: State<f64>,
     pub is_mute: State<bool>,
     pub feedback_on_change: State<bool>,
+    pub default_sink: State<String>,
+    pub default_source: State<String>,
 
     // Display
     pub brightness: State<f64>,
@@ -176,12 +178,21 @@ impl SettingsStore {
                 if let Some(i) = val.as_i64() {
                     let mut s = self.volume;
                     s.set(i as f64);
+                } else if let Some(f) = val.as_f64() {
+                    let mut s = self.volume;
+                    s.set(f);
                 }
             }
             SettingKey::AudioMuted => {
                 if let Some(b) = val.as_bool() {
                     let mut s = self.is_mute;
                     s.set(b);
+                }
+            }
+            SettingKey::AudioDefaultSink => {
+                if let Some(s) = val.as_str() {
+                    let mut sink = self.default_sink;
+                    sink.set(s.to_string());
                 }
             }
             SettingKey::DisplayBrightness => {
@@ -238,14 +249,19 @@ impl SettingsStore {
             }
             SettingKey::Wallpaper => {
                 if let Some(i) = val.as_i64() {
+                    let idx = i as usize;
                     let mut s = self.wallpaper_idx;
-                    s.set(i as usize);
+                    s.set(idx);
+                    let color = system::WALLPAPER_COLOR_PRESETS.get(idx).map(|(_, c)| *c).unwrap_or("#1e1e2e");
                     let mut wp = self.wallpaper;
-                    wp.set(format!("preset:{i}"));
+                    wp.set(color.to_string());
                 } else if let Some(str_val) = val.as_str() {
                     let mut wp = self.wallpaper;
                     wp.set(str_val.to_string());
                     if let Some(idx) = str_val.strip_prefix("preset:").and_then(|p| p.parse::<usize>().ok()) {
+                        let mut s = self.wallpaper_idx;
+                        s.set(idx);
+                    } else if let Some(idx) = system::WALLPAPER_COLOR_PRESETS.iter().position(|(_, hex)| *hex == str_val) {
                         let mut s = self.wallpaper_idx;
                         s.set(idx);
                     }
@@ -261,6 +277,31 @@ impl SettingsStore {
                 if let Some(i) = val.as_i64() {
                     let mut s = self.icon_size_pref;
                     s.set(i as usize);
+                }
+            }
+            SettingKey::AccentColor => {
+                if let Some(s) = val.as_str() {
+                    if let Some(acc) = ui::ACCENTS.iter().find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s)) {
+                        if let Some(mut theme_state) = try_consume_context::<State<ui::AppTheme>>() {
+                            let new_t = theme_state.read().with_accent(*acc);
+                            theme_state.set(new_t);
+                            ui::set_theme(&new_t);
+                        }
+                    }
+                }
+            }
+            SettingKey::ThemeMode => {
+                if let Some(s) = val.as_str() {
+                    let mode = match s {
+                        "light" => ui::ThemeMode::Light,
+                        "auto" => ui::ThemeMode::Auto,
+                        _ => ui::ThemeMode::Dark,
+                    };
+                    if let Some(mut theme_state) = try_consume_context::<State<ui::AppTheme>>() {
+                        let new_t = theme_state.read().with_mode(mode);
+                        theme_state.set(new_t);
+                        ui::set_theme(&new_t);
+                    }
                 }
             }
             SettingKey::DoNotDisturb => {
@@ -364,6 +405,67 @@ impl SettingsStore {
                     s.set(b);
                 }
             }
+            SettingKey::Custom(key_str) => {
+                match key_str.as_str() {
+                    "desktop.dock_position" => {
+                        if let Some(i) = val.as_i64() {
+                            let mut s = self.dock_position;
+                            s.set(i as usize);
+                        }
+                    }
+                    "desktop.dock_size" => {
+                        if let Some(f) = val.as_f64() {
+                            let mut s = self.dock_size;
+                            s.set(f);
+                        } else if let Some(i) = val.as_i64() {
+                            let mut s = self.dock_size;
+                            s.set(i as f64);
+                        }
+                    }
+                    "desktop.dock_autohide" => {
+                        if let Some(b) = val.as_bool() {
+                            let mut s = self.dock_autohide;
+                            s.set(b);
+                        }
+                    }
+                    "desktop.layout" => {
+                        if let Some(i) = val.as_i64() {
+                            let mut s = self.window_layout;
+                            s.set(i as usize);
+                        } else if let Some(s_val) = val.as_str() {
+                            let idx = match s_val {
+                                "dwindle" => 1,
+                                "floating" | "float" => 2,
+                                _ => 0, // master
+                            };
+                            let mut s = self.window_layout;
+                            s.set(idx);
+                        }
+                    }
+                    "desktop.workspace_gap" => {
+                        if let Some(f) = val.as_f64() {
+                            let mut s = self.workspace_gap;
+                            s.set(f);
+                        } else if let Some(i) = val.as_i64() {
+                            let mut s = self.workspace_gap;
+                            s.set(i as f64);
+                        }
+                    }
+                    "appearance.wallpaper_folder" => {
+                        if let Some(s_val) = val.as_str() {
+                            let mut s = self.wallpaper_folder;
+                            s.set(s_val.to_string());
+                        }
+                    }
+                    "appearance.wallpaper_interval" => {
+                        if let Some(i) = val.as_i64() {
+                            let mut s = self.wallpaper_interval;
+                            s.set(i as usize);
+                        }
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
     }
@@ -399,6 +501,8 @@ pub fn use_init_settings_store() -> SettingsStore {
     let volume = use_state(move || audio_info.volume);
     let is_mute = use_state(move || audio_info.is_muted);
     let feedback_on_change = use_state(|| true);
+    let default_sink = use_state(move || audio_info.default_sink_name);
+    let default_source = use_state(move || audio_info.default_source_name);
 
     let brightness = use_state(|| 72.0);
     let auto_brightness = use_state(|| true);
@@ -468,6 +572,8 @@ pub fn use_init_settings_store() -> SettingsStore {
         volume,
         is_mute,
         feedback_on_change,
+        default_sink,
+        default_source,
         brightness,
         auto_brightness,
         true_tone,

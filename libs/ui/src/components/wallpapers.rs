@@ -2,14 +2,14 @@ use freya::prelude::*;
 use crate::theme::{use_app_theme, RADIUS_SM};
 
 pub const WALLPAPER_COLOR_DEFAULTS: &[(&str, &str, Color)] = &[
-    ("Deep Slate", "#1e1e2e", Color::from_rgb(0x1E, 0x1E, 0x2E)),
-    ("Midnight Navy", "#1f2a44", Color::from_rgb(0x1F, 0x2A, 0x44)),
-    ("Twilight Plum", "#3a2e47", Color::from_rgb(0x3A, 0x2E, 0x47)),
-    ("Forest Spruce", "#263836", Color::from_rgb(0x26, 0x38, 0x36)),
-    ("Warm Burgundy", "#402e2e", Color::from_rgb(0x40, 0x2E, 0x2E)),
-    ("Earth Umber", "#3d382c", Color::from_rgb(0x3D, 0x38, 0x2C)),
-    ("Steel Blue", "#282b35", Color::from_rgb(0x28, 0x2B, 0x35)),
-    ("Carbon Black", "#11111b", Color::from_rgb(0x11, 0x11, 0x1B)),
+    ("Indigo Haze", "#5B5FE9", Color::from_rgb(0x5B, 0x5F, 0xE9)),
+    ("Coral Glow", "#FF7A66", Color::from_rgb(0xFF, 0x7A, 0x66)),
+    ("Amber Light", "#E8B86A", Color::from_rgb(0xE8, 0xB8, 0x6A)),
+    ("Teal Mist", "#4ECDC4", Color::from_rgb(0x4E, 0xCD, 0xC4)),
+    ("Rose Bloom", "#F07AAE", Color::from_rgb(0xF0, 0x7A, 0xAE)),
+    ("Sky Blue", "#7C8CF0", Color::from_rgb(0x7C, 0x8C, 0xF0)),
+    ("Sage Green", "#8ED0A8", Color::from_rgb(0x8E, 0xD0, 0xA8)),
+    ("Sand Warm", "#E6C79A", Color::from_rgb(0xE6, 0xC7, 0x9A)),
 ];
 
 /// Wallpaper color swatch picker displaying curated default solid colors

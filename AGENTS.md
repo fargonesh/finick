@@ -1,7 +1,7 @@
 ## Layout conventions
 
 - In Freya layouts, any `rect()` with children using `Size::flex(...)` must also set `.content(Content::Flex)` on that immediate parent container.
-- In freta, Hook functions must follow these rules:
+- In Freya, Hook functions must follow these rules:
   1. You cannot call them conditionally
 
   The following is not allowed and will result in this runtime error.

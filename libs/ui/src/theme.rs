@@ -1,4 +1,9 @@
 use freya::prelude::*;
+use freya_components::theming::{
+    component_themes::Theme as FreyaTheme,
+    hooks::use_init_theme,
+    themes::{dark_theme, light_theme},
+};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ThemeMode {
@@ -109,6 +114,11 @@ pub struct AppTheme {
     pub border_subtle: Color,
     pub border_card: Color,
     pub border_focus: Color,
+
+    // Interface settings
+    pub scrollbar_pref: usize,
+    pub icon_size_pref: usize,
+    pub font_scale: f32,
 }
 
 pub type Theme = AppTheme;
@@ -122,6 +132,46 @@ impl AppTheme {
         t.primary_accent = accent.color;
         t.border_focus = accent.color;
         t
+    }
+
+    pub fn with_icon_size(&self, size: usize) -> Self {
+        let mut t = *self;
+        t.icon_size_pref = size;
+        t
+    }
+
+    pub fn with_scrollbar_pref(&self, pref: usize) -> Self {
+        let mut t = *self;
+        t.scrollbar_pref = pref;
+        t
+    }
+
+    pub fn with_font_scale(&self, scale: f32) -> Self {
+        let mut t = *self;
+        t.font_scale = scale;
+        t
+    }
+
+    pub fn with_contrast(&self, high: bool) -> Self {
+        let mut t = *self;
+        if high {
+            t.border = t.text;
+            t.border_subtle = t.text_dim;
+            t.border_card = t.text;
+        }
+        t
+    }
+
+    pub fn to_freya_theme(&self) -> FreyaTheme {
+        let mut ft = if self.mode == ThemeMode::Dark {
+            dark_theme()
+        } else {
+            light_theme()
+        };
+        ft.colors.primary = self.accent;
+        ft.colors.border_focus = self.border_focus;
+        ft.colors.secondary = self.accent;
+        ft
     }
 
     /// Create a theme with a specific mode (Light/Dark/Auto)
@@ -182,6 +232,10 @@ pub const DARK_THEME: AppTheme = AppTheme {
     border_subtle: Color::from_rgb(0x2B, 0x2C, 0x31),
     border_card: Color::from_rgb(0x2B, 0x2C, 0x31),
     border_focus: Color::from_rgb(0x5B, 0x5F, 0xE9),
+
+    scrollbar_pref: 0,
+    icon_size_pref: 1,
+    font_scale: 1.0,
 };
 
 pub const LIGHT_THEME: AppTheme = AppTheme {
@@ -226,11 +280,22 @@ pub const LIGHT_THEME: AppTheme = AppTheme {
     border_subtle: Color::from_rgb(0xE4, 0xE4, 0xDF),
     border_card: Color::from_rgb(0xE4, 0xE4, 0xDF),
     border_focus: Color::from_rgb(0x5B, 0x5F, 0xE9),
+
+    scrollbar_pref: 0,
+    icon_size_pref: 1,
+    font_scale: 1.0,
 };
 
 pub fn use_init_app_theme(theme: AppTheme) -> State<AppTheme> {
+    let mut freya_th = use_init_theme(|| theme.to_freya_theme());
     let st = use_state(|| theme);
     provide_context(st);
+
+    use_side_effect(move || {
+        let current_theme = *st.read();
+        freya_th.set(current_theme.to_freya_theme());
+    });
+
     st
 }
 
