@@ -85,54 +85,6 @@
           '';
         };
 
-        buildDeps = with pkgs; [
-          rustToolchain
-          stdenv.cc
-          binutils
-          pkg-config
-          git
-          python3
-          mold
-          lld
-        ];
-
-        libDeps = with pkgs; [
-          openssl
-          gtk4
-          libadwaita
-          glib
-          alsa-lib
-          atk
-          gtk3
-          pango
-          cairo
-          gdk-pixbuf
-          webkitgtk_4_1
-          libsoup_3
-          librsvg
-          dbus
-          libxkbcommon
-          wayland
-          vulkan-loader
-          libglvnd
-          sqlite
-          stdenv.cc.cc.lib
-        ];
-
-        cliTools = with pkgs; [
-          hyprland
-          wireplumber
-          networkmanager
-          bluez
-          util-linux
-          coreutils
-          procps
-          systemd
-          iproute2
-          xdg-utils
-          hostname
-        ];
-
         finick = pkgs.symlinkJoin {
           name = "finick";
           paths = (map (bin:
@@ -145,14 +97,15 @@
               if [ ! -f "$REPO/Cargo.toml" ]; then
                 REPO="/home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick"
               fi
-              export PATH="${pkgs.lib.makeBinPath (buildDeps ++ cliTools)}:$PATH"
-              export PKG_CONFIG_PATH="${pkgs.lib.makeSearchPathOutput "dev" "lib/pkgconfig" libDeps}''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath libDeps}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-              export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
-              export BINDGEN_EXTRA_CLANG_ARGS="-isystem ${pkgs.glibc.dev}/include -isystem ${pkgs.linuxHeaders}/include"
               export CARGO_TARGET_DIR="''${CARGO_TARGET_DIR:-$HOME/.cache/finick/target}"
               export CARGO_HOME="''${CARGO_HOME:-$HOME/.cargo}"
-              exec ${rustToolchain}/bin/cargo run -p ${bin} --manifest-path "$REPO/Cargo.toml" -- "$@"
+              ORIG_DIR="$PWD"
+              cd "$REPO"
+              DEVENV_BIN="${pkgs.devenv}/bin/devenv"
+              if command -v devenv >/dev/null 2>&1; then
+                DEVENV_BIN="devenv"
+              fi
+              exec "$DEVENV_BIN" --quiet shell -- bash -c 'cd "$1"; shift; exec cargo run -p '"${bin}"' --manifest-path "'"$REPO"'/Cargo.toml" -- "$@"' bash "$ORIG_DIR" "$@"
             '')
             [ "topbar" "settings" "files" "settings-daemon" "index" "finickctl" ]) ++ [ desktopEntries ];
           meta.mainProgram = "settings";
