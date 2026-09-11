@@ -12,6 +12,95 @@ use {
     ui::*,
 };
 fn trunc(s: &str, n: usize) -> String { if s.chars().count() <= n { s.to_string() } else { let mut t: String = s.chars().take(n-1).collect(); t.push('…'); t } }
+
+pub fn compute_panel_height(
+    wifi_on: bool,
+    has_connected_wifi: bool,
+    available_wifi_count: usize,
+    has_wired: bool,
+    bt_on: bool,
+    connected_bt_count: usize,
+    other_bt_count: usize,
+    has_battery: bool,
+    notif_count: usize,
+) -> i32 {
+    let base = 12 + 20 + 28; // window padding + panel inner padding + header
+
+    // Left column: Wi-Fi (+ Wired)
+    let wifi_card_h = if !wifi_on {
+        76
+    } else {
+        let conn_h = if has_connected_wifi { 28 } else { 0 };
+        let shown_networks = available_wifi_count.min(5);
+        let net_h = if shown_networks == 0 && !has_connected_wifi {
+            22
+        } else {
+            shown_networks * 28
+        };
+        66 + conn_h + net_h
+    };
+    let wired_card_h = if has_wired { 10 + 64 } else { 0 };
+    let left_col_h = wifi_card_h + wired_card_h;
+
+    // Right column: Bluetooth + Focus
+    let bt_card_h = if !bt_on {
+        76
+    } else {
+        let conn_h = if connected_bt_count > 0 {
+            connected_bt_count.min(3) * 36
+        } else {
+            22
+        };
+        let other_h = other_bt_count.min(4) * 28;
+        let empty_h = if connected_bt_count == 0 && other_bt_count == 0 { 22 } else { 0 };
+        66 + conn_h + other_h + empty_h
+    };
+    let focus_card_h = 10 + 64;
+    let right_col_h = bt_card_h + focus_card_h;
+
+    let cards_row_h = left_col_h.max(right_col_h);
+
+    // Sliders
+    let sliders_h = 76;
+
+    // Battery
+    let battery_h = if has_battery { 10 + 60 } else { 0 };
+
+    // Notifications
+    let notifs_h = if notif_count == 0 {
+        72
+    } else if notif_count <= 3 {
+        52 + notif_count * 82
+    } else {
+        52 + 300
+    };
+
+    // Actions row
+    let actions_h = 68;
+
+    let gaps = if has_battery { 50 } else { 40 };
+
+    let total = base + gaps + cards_row_h + sliders_h + battery_h + notifs_h + actions_h;
+    (total as i32).clamp(360, 760)
+}
+
+fn resize_panel_window(target_h: i32) {
+    std::thread::spawn(move || {
+        let lua = format!(
+            r#"
+            for _, w in ipairs(hl.get_windows()) do
+                if w.title == 'control-panel' or w.class == 'overlay-panel' or w.class == 'topbar-panel' then
+                    local addr = 'address:' .. tostring(w.address)
+                    hl.dispatch(hl.dsp.window.resize({{ window = addr, x = 460, y = {target_h}, relative = false }}))
+                    break
+                end
+            end
+            "#
+        );
+        let _ = std::process::Command::new("hyprctl").args(["eval", &lua]).output();
+    });
+}
+
 pub fn control_panel_app() -> Element {
     let _st = use_init_app_theme(get_theme());
     let t = use_app_theme();
@@ -23,44 +112,22 @@ pub fn control_panel_app() -> Element {
     let dnd = use_state(|| false);
     let connected = use_state(|| false);
     let wired = use_state(|| Option::<WiredInfo>::None);
-    let wired_initial = use_hook(|| HyprlandBackend.get_wired_info());
-    {
-        let mut wired_state = wired;
-        let init = wired_initial;
-        if init != *wired_state.read() {
-            wired_state.set(init);
-        }
-    }
     let battery_pct = use_state(|| 0u8);
     let battery_status = use_state(|| "Unknown".to_string());
-    let battery_initial = use_hook(|| HyprlandBackend.get_power_info());
-    {
-        let mut pct = battery_pct;
-        let mut st = battery_status;
-        let info = battery_initial.clone();
-        let p = parse_capacity_pct(&info.capacity);
-        pct.set_if_modified(p);
-        st.set_if_modified(info.status.clone());
-    }
     let notifications = use_state(Vec::<crate::state::Notification>::new);
-    let notif_initial = use_hook(fetch_notifications_blocking);
-    {
-        let mut n = notifications;
-        n.set_if_modified(notif_initial.clone());
-    }
     let wifi_details = use_state(|| (CurrentWifiInfo::default(), Vec::<WifiNetworkDetail>::new()));
-    let wifi_details_initial = use_hook(|| HyprlandBackend.get_wifi_details());
-    {
-        let mut s = wifi_details;
-        s.set_if_modified(wifi_details_initial.clone());
-    }
-    let bt_devices = use_state(|| Vec::<BluetoothDevice>::new());
-    let bt_devices_initial = use_hook(|| HyprlandBackend.get_paired_bluetooth_devices());
-    {
-        let mut s = bt_devices;
-        s.set_if_modified(bt_devices_initial.clone());
-    }
+    let bt_devices = use_state(Vec::<BluetoothDevice>::new);
     let topbar_settings = use_state(crate::state::TopbarSettings::default);
+    let wifi_modal_target: State<Option<WifiNetworkDetail>> = use_state(|| None);
+    let wifi_password: State<String> = use_state(String::new);
+    let wifi_connecting: State<bool> = use_state(|| false);
+    let wifi_error: State<Option<String>> = use_state(|| None);
+
+    let bt_modal_target: State<Option<BluetoothDevice>> = use_state(|| None);
+    let bt_pin: State<String> = use_state(String::new);
+    let bt_pairing: State<bool> = use_state(|| false);
+    let bt_error: State<Option<String>> = use_state(|| None);
+    let last_height = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(0i32)));
     use_hook(move || {
         load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected);
         subscribe_live(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings);
@@ -71,6 +138,70 @@ pub fn control_panel_app() -> Element {
         let mut notif_state = notifications;
         let mut wifi_state = wifi_details;
         let mut bt_state = bt_devices;
+
+        // Fetch initial data asynchronously without blocking window creation
+        spawn(async move {
+            let initial_notifs = tokio::task::spawn_blocking(fetch_notifications_blocking).await.unwrap_or_default();
+            notif_state.set_if_modified(initial_notifs);
+        });
+
+        spawn(async move {
+            let initial_wifi = tokio::task::spawn_blocking(|| HyprlandBackend.get_wifi_details()).await.unwrap_or_default();
+            wifi_state.set_if_modified(initial_wifi);
+        });
+
+        spawn(async move {
+            let initial_bt = tokio::task::spawn_blocking(|| HyprlandBackend.get_paired_bluetooth_devices()).await.unwrap_or_default();
+            bt_state.set_if_modified(initial_bt);
+        });
+
+        spawn(async move {
+            let wired_now = tokio::task::spawn_blocking(|| HyprlandBackend.get_wired_info()).await.unwrap_or(None);
+            wired_state.set_if_modified(wired_now);
+            let power = tokio::task::spawn_blocking(|| HyprlandBackend.get_power_info()).await.unwrap_or(system::PowerInfo {
+                capacity: "0%".to_string(),
+                status: "Unknown".to_string(),
+                health_percent: None,
+                cycle_count: None,
+            });
+            let p = parse_capacity_pct(&power.capacity);
+            pct_state.set_if_modified(p);
+            status_state.set_if_modified(power.status);
+        });
+
+        spawn(async move {
+            for delay in [10, 40, 90, 180, 350] {
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                let lua = r#"
+                    local win = nil
+                    for _, w in ipairs(hl.get_windows()) do
+                        if w.title == 'control-panel' or w.class == 'overlay-panel' or w.class == 'topbar-panel' then
+                            win = w
+                            break
+                        end
+                    end
+                    if win then
+                        local mon = hl.get_monitor_at_cursor()
+                        local px = math.floor(mon.x + mon.width - 460 - 12)
+                        local py = math.floor(mon.y + 44)
+                        local addr = 'address:' .. tostring(win.address)
+                        hl.dispatch(hl.dsp.window.float({ window = addr }))
+                        hl.dispatch(hl.dsp.window.pin({ window = addr }))
+                        hl.dispatch(hl.dsp.window.move({ window = addr, x = px, y = py }))
+                        hl.dispatch(hl.dsp.window.resize({ window = addr, x = 460, y = 480, relative = false }))
+                        return true
+                    end
+                    return false
+                "#;
+                if let Ok(out) = std::process::Command::new("hyprctl").args(["eval", lua]).output() {
+                    let s = String::from_utf8_lossy(&out.stdout);
+                    if s.contains("true") {
+                        break;
+                    }
+                }
+            }
+        });
+
         spawn(async move {
             let _ = std::process::Command::new("bluetoothctl").args(["scan", "on"]).output();
             loop {
@@ -89,9 +220,7 @@ pub fn control_panel_app() -> Element {
                 pct_state.set_if_modified(p);
                 status_state.set_if_modified(power.status.clone());
                 let notifs = tokio::task::spawn_blocking(fetch_notifications_blocking).await.unwrap_or_default();
-                if !notifs.is_empty() {
-                    notif_state.set_if_modified(notifs);
-                }
+                notif_state.set_if_modified(notifs);
                 let w = tokio::task::spawn_blocking(|| HyprlandBackend.get_wifi_details()).await.unwrap_or_default();
                 wifi_state.set_if_modified(w);
                 let b = tokio::task::spawn_blocking(|| HyprlandBackend.get_paired_bluetooth_devices()).await.unwrap_or_default();
@@ -143,6 +272,29 @@ pub fn control_panel_app() -> Element {
     let has_battery = power_snapshot.capacity != "Unknown" && power_snapshot.status != "Unknown";
     let (current_wifi, available_networks) = wifi_details.read().clone();
     let bt_list = bt_devices.read().clone();
+
+    let target_h = compute_panel_height(
+        *wifi.read(),
+        current_wifi.ssid.is_some(),
+        available_networks.len(),
+        wired_info.is_some(),
+        *bt.read(),
+        bt_list.iter().filter(|d| d.connected).count(),
+        bt_list.iter().filter(|d| !d.connected).count(),
+        has_battery,
+        notif_count,
+    );
+    let target_h = if wifi_modal_target.read().is_some() || bt_modal_target.read().is_some() {
+        target_h.max(460)
+    } else {
+        target_h
+    };
+
+    if last_height.get() != target_h {
+        last_height.set(target_h);
+        resize_panel_window(target_h);
+    }
+
     let wifi_card = {
         let wifi_on = *wifi.read();
         let mut card = tile().child(tile_head(
@@ -202,6 +354,8 @@ pub fn control_panel_app() -> Element {
                 let display = trunc(&ssid, 20);
                 let is_connected = current_wifi.ssid.as_ref() == Some(&ssid);
                 let iface_for_row = iface_clone.clone();
+                let is_secured = !net.is_saved && !net.security.is_empty() && net.security != "--" && !net.security.eq_ignore_ascii_case("Open");
+                let net_for_click = net.clone();
                 card = card.child(
                     rect()
                         .width(Size::fill())
@@ -213,15 +367,33 @@ pub fn control_panel_app() -> Element {
                         .corner_radius(8.)
                         .cursor(CursorIcon::Pointer)
                         .background(Color::TRANSPARENT)
-                        .on_press(move |_| {
-                            let s = ssid2.clone();
-                            let conn = is_connected;
-                            let iface = iface_for_row.clone();
-                            std::thread::spawn(move || {
-                                if conn {
-                                    if let Some(iface) = iface { let _ = std::process::Command::new("nmcli").args(["dev","disconnect", &iface]).output(); } else { HyprlandBackend.disconnect_wifi(); }
-                                } else { HyprlandBackend.connect_wifi(&s); }
-                            });
+                        .on_press({
+                            let mut wmt = wifi_modal_target;
+                            let mut wp = wifi_password;
+                            let mut we = wifi_error;
+                            let mut wc = wifi_connecting;
+                            move |_| {
+                                if is_connected {
+                                    let iface = iface_for_row.clone();
+                                    std::thread::spawn(move || {
+                                        if let Some(iface) = iface {
+                                            let _ = std::process::Command::new("nmcli").args(["dev", "disconnect", &iface]).output();
+                                        } else {
+                                            HyprlandBackend.disconnect_wifi();
+                                        }
+                                    });
+                                } else if is_secured {
+                                    wp.set(String::new());
+                                    we.set(None);
+                                    wc.set(false);
+                                    wmt.set(Some(net_for_click.clone()));
+                                } else {
+                                    let s = ssid2.clone();
+                                    std::thread::spawn(move || {
+                                        HyprlandBackend.connect_wifi(&s);
+                                    });
+                                }
+                            }
                         })
                         .child(label().font_size(12.).color(t.text).text(display))
                         .maybe(is_connected, |el| el.child(label().font_size(11.).color(t.accent).text("Connected")))
@@ -282,17 +454,22 @@ pub fn control_panel_app() -> Element {
                 card = card.child(tile_sub("No device connected"));
             }
             for dev in other_devs.iter() {
-                let mac = dev.mac.clone();
                 let name = dev.name.clone();
                 let display = trunc(&name, 20);
+                let dev_for_click = dev.clone();
                 card = card.child(
                     rect().width(Size::fill()).horizontal().cross_align(Alignment::Center).main_align(Alignment::SpaceBetween).content(Content::Flex).padding((6.,2.)).corner_radius(8.).cursor(CursorIcon::Pointer)
-                        .on_press(move |_| {
-                            let m = mac.clone();
-                            std::thread::spawn(move || {
-                                let _ = std::process::Command::new("bluetoothctl").args(["pair", &m]).output();
-                                HyprlandBackend.connect_bluetooth_device(&m);
-                            });
+                        .on_press({
+                            let mut bmt = bt_modal_target;
+                            let mut bp = bt_pin;
+                            let mut be = bt_error;
+                            let mut bpr = bt_pairing;
+                            move |_| {
+                                bp.set(String::new());
+                                be.set(None);
+                                bpr.set(false);
+                                bmt.set(Some(dev_for_click.clone()));
+                            }
                         })
                         .child(label().font_size(12.).color(t.text).text(display.clone()))
                 );
@@ -413,18 +590,41 @@ pub fn control_panel_app() -> Element {
         ))
         .maybe(notifs.is_empty(), |el| el.child(tile_sub("No notifications")))
         .maybe(!notifs.is_empty(), |el| {
-            let mut e = el;
-            for n in notifs.iter().take(5) {
+            let count = notifs.len();
+            let mut list_col = rect()
+                .width(Size::fill())
+                .vertical()
+                .spacing(10.)
+                .padding((4., 0.))
+                .content(Content::Flex);
+            for n in notifs.iter().rev() {
                 let notif_item = n.clone();
-                e = e.child(
+                let mut ns = notifications;
+                list_col = list_col.child(
                     NotificationPopup::from_notification(&notif_item)
+                        .with_auto_dismiss(false)
                         .with_width(Size::fill())
                         .on_close(move |id| {
+                            let mut list = ns.read().clone();
+                            if let Some(pos) = list.iter().position(|item| item.id == id) {
+                                list.remove(pos);
+                                ns.set(list);
+                            }
                             dismiss_notification(id);
                         }),
                 );
             }
-            e
+            if count > 3 {
+                el.child(
+                    ScrollView::new()
+                        .width(Size::fill())
+                        .height(Size::px(300.))
+                        .show_scrollbar(true)
+                        .child(list_col),
+                )
+            } else {
+                el.child(list_col)
+            }
         });
     let power_btn = |label_text: &'static str, svg: &'static str, bg: Color, fg: Color, action: fn()| {
         let txt = label_text.to_string();
@@ -544,12 +744,260 @@ pub fn control_panel_app() -> Element {
                 .show_scrollbar(false)
                 .child(panel_inner_content)
         );
-    rect()
-        .width(Size::px(440.))
-        .height(Size::px(620.))
+    let modal_el: Option<Element> = if let Some(target) = wifi_modal_target.read().clone() {
+        let is_connecting = *wifi_connecting.read();
+        let err_opt = wifi_error.read().clone();
+        let s_target = target.clone();
+        Some(
+            rect()
+                .position(Position::new_global().top(0.).left(0.))
+                .width(Size::fill())
+                .height(Size::fill())
+                .background(Color::from_argb(180, 0, 0, 0))
+                .center()
+                .content(Content::Flex)
+                .child(
+                    rect()
+                        .width(Size::px(340.))
+                        .padding(16.)
+                        .corner_radius(16.)
+                        .background(t.panel)
+                        .border(Border::new().width(1.).fill(t.border))
+                        .spacing(12.)
+                        .child(
+                            rect()
+                                .horizontal()
+                                .main_align(Alignment::SpaceBetween)
+                                .cross_align(Alignment::Center)
+                                .width(Size::fill())
+                                .content(Content::Flex)
+                                .child(
+                                    label()
+                                        .font_size(15.)
+                                        .font_weight(FontWeight::BOLD)
+                                        .color(t.text)
+                                        .text(format!("Join “{}”", trunc(&target.ssid, 18))),
+                                )
+                                .child(
+                                    rect()
+                                        .cursor(CursorIcon::Pointer)
+                                        .on_press({
+                                            let mut wmt = wifi_modal_target;
+                                            move |_| wmt.set(None)
+                                        })
+                                        .child(label().font_size(13.).color(t.text_dim).text("✕")),
+                                ),
+                        )
+                        .child(
+                            label()
+                                .font_size(11.)
+                                .color(t.text_dim)
+                                .text(format!("Security: {} · Signal: {}%", target.security, target.signal))
+                        )
+                        .child(
+                            rect()
+                                .vertical()
+                                .spacing(4.)
+                                .child(field_label("Password"))
+                                .child(Input::new(wifi_password).width(Size::fill()).placeholder("Enter password")),
+                        )
+                        .maybe_child(err_opt.map(|err| {
+                            rect()
+                                .padding((6., 10.))
+                                .corner_radius(6.)
+                                .background(Color::from_argb(35, 235, 80, 80))
+                                .child(label().font_size(11.).color(Color::from_rgb(235, 80, 80)).text(err))
+                        }))
+                        .child(
+                            rect()
+                                .horizontal()
+                                .spacing(8.)
+                                .main_align(Alignment::End)
+                                .content(Content::Flex)
+                                .child(secondary_button("Cancel", {
+                                    let mut wmt = wifi_modal_target;
+                                    move || wmt.set(None)
+                                }))
+                                .child(if is_connecting {
+                                    secondary_button("Connecting…", || {}).into_element()
+                                } else {
+                                    primary_button("Connect", {
+                                        let mut wmt = wifi_modal_target;
+                                        let mut wc = wifi_connecting;
+                                        let mut we = wifi_error;
+                                        let mut wdt = wifi_details;
+                                        let wp = wifi_password;
+                                        let target = s_target.clone();
+                                        move || {
+                                            wc.set(true);
+                                            we.set(None);
+                                            let pwd = wp.read().trim().to_string();
+                                            let ssid = target.ssid.clone();
+                                            freya::prelude::spawn(async move {
+                                                let pwd_opt = if pwd.is_empty() { None } else { Some(pwd) };
+                                                let res = tokio::task::spawn_blocking(move || {
+                                                    HyprlandBackend.connect_wifi_with_password(
+                                                        &ssid,
+                                                        pwd_opt.as_deref(),
+                                                        false,
+                                                    )
+                                                }).await.unwrap_or(Err("Task failed".to_string()));
+                                                match res {
+                                                    Ok(()) => {
+                                                        wmt.set(None);
+                                                        wc.set(false);
+                                                        let updated = tokio::task::spawn_blocking(|| {
+                                                            HyprlandBackend.get_wifi_details()
+                                                        }).await.unwrap_or_default();
+                                                        wdt.set(updated);
+                                                    }
+                                                    Err(e) => {
+                                                        wc.set(false);
+                                                        we.set(Some(e));
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    }).into_element()
+                                }),
+                        )
+                )
+                .into_element()
+        )
+    } else if let Some(target) = bt_modal_target.read().clone() {
+        let is_pairing = *bt_pairing.read();
+        let err_opt = bt_error.read().clone();
+        let s_target = target.clone();
+        Some(
+            rect()
+                .position(Position::new_global().top(0.).left(0.))
+                .width(Size::fill())
+                .height(Size::fill())
+                .background(Color::from_argb(180, 0, 0, 0))
+                .center()
+                .content(Content::Flex)
+                .child(
+                    rect()
+                        .width(Size::px(340.))
+                        .padding(16.)
+                        .corner_radius(16.)
+                        .background(t.panel)
+                        .border(Border::new().width(1.).fill(t.border))
+                        .spacing(12.)
+                        .child(
+                            rect()
+                                .horizontal()
+                                .main_align(Alignment::SpaceBetween)
+                                .cross_align(Alignment::Center)
+                                .width(Size::fill())
+                                .content(Content::Flex)
+                                .child(
+                                    label()
+                                        .font_size(15.)
+                                        .font_weight(FontWeight::BOLD)
+                                        .color(t.text)
+                                        .text(format!("Pair “{}”", trunc(&target.name, 18))),
+                                )
+                                .child(
+                                    rect()
+                                        .cursor(CursorIcon::Pointer)
+                                        .on_press({
+                                            let mut bmt = bt_modal_target;
+                                            move |_| bmt.set(None)
+                                        })
+                                        .child(label().font_size(13.).color(t.text_dim).text("✕")),
+                                ),
+                        )
+                        .child(
+                            label()
+                                .font_size(11.)
+                                .color(t.text_dim)
+                                .text(format!("Device: {}", target.mac))
+                        )
+                        .child(
+                            rect()
+                                .vertical()
+                                .spacing(4.)
+                                .child(field_label("PIN / Pairing Code"))
+                                .child(Input::new(bt_pin).width(Size::fill()).placeholder("e.g. 0000, 1234, or leave empty")),
+                        )
+                        .maybe_child(err_opt.map(|err| {
+                            rect()
+                                .padding((6., 10.))
+                                .corner_radius(6.)
+                                .background(Color::from_argb(35, 235, 80, 80))
+                                .child(label().font_size(11.).color(Color::from_rgb(235, 80, 80)).text(err))
+                        }))
+                        .child(
+                            rect()
+                                .horizontal()
+                                .spacing(8.)
+                                .main_align(Alignment::End)
+                                .content(Content::Flex)
+                                .child(secondary_button("Cancel", {
+                                    let mut bmt = bt_modal_target;
+                                    move || bmt.set(None)
+                                }))
+                                .child(if is_pairing {
+                                    secondary_button("Pairing…", || {}).into_element()
+                                } else {
+                                    primary_button("Pair", {
+                                        let mut bmt = bt_modal_target;
+                                        let mut bpr = bt_pairing;
+                                        let mut be = bt_error;
+                                        let mut btd = bt_devices;
+                                        let bp = bt_pin;
+                                        let target = s_target.clone();
+                                        move || {
+                                            bpr.set(true);
+                                            be.set(None);
+                                            let pin = bp.read().trim().to_string();
+                                            let mac = target.mac.clone();
+                                            freya::prelude::spawn(async move {
+                                                let pin_opt = if pin.is_empty() { None } else { Some(pin) };
+                                                let res = tokio::task::spawn_blocking(move || {
+                                                    HyprlandBackend.pair_bluetooth_device(
+                                                        &mac,
+                                                        pin_opt.as_deref(),
+                                                    )
+                                                }).await.unwrap_or(Err("Task failed".to_string()));
+                                                match res {
+                                                    Ok(()) => {
+                                                        bmt.set(None);
+                                                        bpr.set(false);
+                                                        let updated = tokio::task::spawn_blocking(|| {
+                                                            HyprlandBackend.get_paired_bluetooth_devices()
+                                                        }).await.unwrap_or_default();
+                                                        btd.set(updated);
+                                                    }
+                                                    Err(e) => {
+                                                        bpr.set(false);
+                                                        be.set(Some(e));
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    }).into_element()
+                                }),
+                        )
+                )
+                .into_element()
+        )
+    } else {
+        None
+    };
+
+    let root = rect()
+        .width(Size::fill())
+        .height(Size::fill())
         .padding(6.)
         .background(Color::TRANSPARENT)
         .content(Content::Flex)
-        .child(panel_inner)
-        .into_element()
+        .child(panel_inner);
+
+    if let Some(modal) = modal_el {
+        root.child(modal).into_element()
+    } else {
+        root.into_element()
+    }
 }

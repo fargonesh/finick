@@ -69,6 +69,8 @@ pub struct NotificationPopup {
     pub app_name: String,
     pub timeout: i32,
     pub width: Size,
+    pub auto_dismiss: bool,
+    pub stack_count: usize,
     pub on_close: Option<EventHandler<u32>>,
 }
 
@@ -82,6 +84,8 @@ impl std::fmt::Debug for NotificationPopup {
             .field("app_name", &self.app_name)
             .field("timeout", &self.timeout)
             .field("width", &self.width)
+            .field("auto_dismiss", &self.auto_dismiss)
+            .field("stack_count", &self.stack_count)
             .finish()
     }
 }
@@ -96,6 +100,8 @@ impl NotificationPopup {
             app_name: String::new(),
             timeout: 5000,
             width: Size::px(360.),
+            auto_dismiss: false,
+            stack_count: 1,
             on_close: None,
         }
     }
@@ -109,6 +115,8 @@ impl NotificationPopup {
             app_name: notif.app_name.clone(),
             timeout: notif.timeout,
             width: Size::px(360.),
+            auto_dismiss: false,
+            stack_count: 1,
             on_close: None,
         }
     }
@@ -133,6 +141,16 @@ impl NotificationPopup {
         self
     }
 
+    pub fn with_auto_dismiss(mut self, auto: bool) -> Self {
+        self.auto_dismiss = auto;
+        self
+    }
+
+    pub fn with_stack_count(mut self, count: usize) -> Self {
+        self.stack_count = count;
+        self
+    }
+
     pub fn on_close(mut self, handler: impl Into<EventHandler<u32>>) -> Self {
         self.on_close = Some(handler.into());
         self
@@ -152,21 +170,24 @@ impl Component for NotificationPopup {
 
         let id = self.id;
         let timeout = self.timeout;
+        let auto_dismiss = self.auto_dismiss;
         let on_close = self.on_close.clone();
 
-        // Auto-dismiss hook called at the top level of render
+        // Unconditional hook call at top level of render
         use_hook(move || {
-            let effective_timeout = if timeout > 0 {
-                timeout as u64
-            } else {
-                5000
-            };
+            if auto_dismiss {
+                let effective_timeout = if timeout > 0 {
+                    timeout as u64
+                } else {
+                    5000
+                };
 
-            if let Some(on_close) = on_close {
-                spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(effective_timeout)).await;
-                    on_close.call(id);
-                });
+                if let Some(on_close) = on_close {
+                    spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(effective_timeout)).await;
+                        on_close.call(id);
+                    });
+                }
             }
         });
 
@@ -197,19 +218,21 @@ impl Component for NotificationPopup {
         let body_text = self.body.clone();
         let icon_str = self.icon.clone();
         let on_close_handler = self.on_close.clone();
+        let count = self.stack_count;
 
         rect()
             .width(self.width.clone())
             .vertical()
             .spacing(8.)
-            .padding((10., 14.))
+            .padding((13., 15.))
             .corner_radius(16.)
             .background(card_bg)
             .border(Border::new().width(1.).fill(t.border))
+            .shadow(Shadow::new().color(Color::from_argb(45, 0, 0, 0)).blur(12.).spread(1.))
             .content(Content::Flex)
             .on_pointer_enter(move |_| card_h1.set(true))
             .on_pointer_leave(move |_| card_h2.set(false))
-            // Header Row: App Name tag + Spacer + Close Button
+            // Header Row: App Name tag + Stack Count Badge + Spacer + Close Button
             .child(
                 rect()
                     .width(Size::fill())
@@ -223,6 +246,23 @@ impl Component for NotificationPopup {
                             .color(t.accent)
                             .text(display_app),
                     )
+                    .maybe(count > 1, |el| {
+                        el.child(
+                            rect()
+                                .margin((0., 0., 0., 6.))
+                                .padding((1., 7.))
+                                .corner_radius(999.)
+                                .background(t.accent)
+                                .center()
+                                .child(
+                                    label()
+                                        .font_size(10.)
+                                        .font_weight(FontWeight::BOLD)
+                                        .color(Color::WHITE)
+                                        .text(format!("{count}")),
+                                ),
+                        )
+                    })
                     .child(rect().width(Size::flex(1.)))
                     .child(
                         rect()

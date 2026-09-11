@@ -372,6 +372,10 @@ pub trait SystemBackend {
     fn get_wifi_details(&self) -> (CurrentWifiInfo, Vec<WifiNetworkDetail>);
     fn get_wired_info(&self) -> Option<WiredInfo>;
     fn connect_wifi(&self, ssid: &str);
+    fn connect_wifi_with_password(&self, ssid: &str, password: Option<&str>, hidden: bool) -> Result<(), String> {
+        let _ = (ssid, password, hidden);
+        Ok(())
+    }
     fn disconnect_wifi(&self);
     fn forget_wifi(&self, ssid: &str);
     fn set_wifi_status(&self, enabled: bool);
@@ -383,6 +387,10 @@ pub trait SystemBackend {
     fn connect_bluetooth_device(&self, mac: &str);
     fn disconnect_bluetooth_device(&self, mac: &str);
     fn remove_bluetooth_device(&self, mac: &str);
+    fn pair_bluetooth_device(&self, mac: &str, pin: Option<&str>) -> Result<(), String> {
+        let _ = (mac, pin);
+        Ok(())
+    }
     fn set_display_order(&self, ordered_names: &[String]) -> Result<(), String>;
     fn set_display_config(&self, name: &str, mode: Option<&str>, transform: Option<u8>) -> Result<(), String>;
     fn set_display_positions(&self, positions: &[(String, i32, i32)]) -> Result<(), String> {
@@ -1083,6 +1091,30 @@ impl SystemBackend for HyprlandBackend {
 
     fn connect_wifi(&self, ssid: &str) { let _ = Command::new("nmcli").args(["dev", "wifi", "connect", ssid]).output(); }
 
+    fn connect_wifi_with_password(&self, ssid: &str, password: Option<&str>, hidden: bool) -> Result<(), String> {
+        let mut args = vec!["dev", "wifi", "connect", ssid];
+        let pwd_str;
+        if let Some(pwd) = password {
+            if !pwd.is_empty() {
+                pwd_str = pwd.to_string();
+                args.push("password");
+                args.push(&pwd_str);
+            }
+        }
+        if hidden {
+            args.push("hidden");
+            args.push("yes");
+        }
+        let output = Command::new("nmcli").args(&args).output().map_err(|e| format!("failed to run nmcli: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let err = if !stderr.is_empty() { stderr } else { stdout };
+            return Err(if err.is_empty() { "Connection failed".to_string() } else { err });
+        }
+        Ok(())
+    }
+
     fn disconnect_wifi(&self) {
         if let Ok(output) = Command::new("nmcli").args(["-t", "-f", "DEVICE,TYPE", "dev"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1270,6 +1302,35 @@ impl SystemBackend for HyprlandBackend {
 
     fn remove_bluetooth_device(&self, mac: &str) { let _ = Command::new("bluetoothctl").args(["remove", mac]).output(); }
 
+    fn pair_bluetooth_device(&self, mac: &str, pin: Option<&str>) -> Result<(), String> {
+        use std::io::Write;
+        let mut child = Command::new("bluetoothctl")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("failed to run bluetoothctl: {e}"))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let pin_cmd =
+                if let Some(p) = pin { if !p.is_empty() { format!("{p}\n") } else { String::new() } } else { String::new() };
+            let script = format!("agent on\ndefault-agent\npair {mac}\n{pin_cmd}yes\ntrust {mac}\nconnect {mac}\nquit\n");
+            let _ = stdin.write_all(script.as_bytes());
+        }
+
+        let output = child.wait_with_output().map_err(|e| format!("bluetoothctl wait failed: {e}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.contains("Failed to pair")
+            || stdout.contains("AuthenticationFailed")
+            || stdout.contains("AuthenticationTimeout")
+        {
+            let detail =
+                stdout.lines().find(|l| l.contains("Failed") || l.contains("Authentication")).unwrap_or("Pairing failed");
+            return Err(detail.trim().to_string());
+        }
+        Ok(())
+    }
+
     fn log_out(&self) -> bool {
         Command::new("loginctl")
             .args(["terminate-user", &std::env::var("USER").unwrap_or_default()])
@@ -1413,42 +1474,95 @@ fn resolve_swaybg() -> Option<std::path::PathBuf> {
     None
 }
 
-pub fn night_temp_from_slider(color_temp: f32) -> i32 { (6500.0 - color_temp * 30.0).clamp(1000.0, 6500.0) as i32 }
+pub fn kelvin_to_rgb_factors(temp_k: f32) -> (f32, f32, f32) {
+    let t = (temp_k / 100.0).clamp(10.0, 65.0) as f64;
+    let r = 1.0f32;
+    let raw_g = (99.4708025861 * t.ln() - 161.1195681661) / 255.0;
+    // Normalize relative to 6500K (~0.9965) so 6500K is neutral 1.0
+    let g = (raw_g.clamp(0.0, 1.0) as f32 / 0.9965).clamp(0.0, 1.0);
+    let raw_b = if t <= 19.0 { 0.0 } else { (138.5177312231 * (t - 10.0).ln() - 305.0447927307) / 255.0 };
+    // Normalize relative to 6500K (~0.9805) so 6500K is neutral 1.0
+    let b = (raw_b.clamp(0.0, 1.0) as f32 / 0.9805).clamp(0.0, 1.0);
+    (r, g, b)
+}
+
+pub fn night_temp_from_slider(color_temp: f32) -> i32 { (6500.0 - color_temp * 35.0).clamp(1000.0, 6500.0) as i32 }
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum NightShiftTool {
+    Hyprsunset,
+    Wlsunset,
+    Gammastep,
+    ScreenShader,
+}
+
+static NIGHT_SHIFT_TOOL: std::sync::OnceLock<NightShiftTool> = std::sync::OnceLock::new();
+
+fn get_night_shift_tool() -> NightShiftTool {
+    *NIGHT_SHIFT_TOOL.get_or_init(|| {
+        if Command::new("which").arg("hyprsunset").output().map(|o| o.status.success()).unwrap_or(false) {
+            NightShiftTool::Hyprsunset
+        } else if Command::new("which").arg("wlsunset").output().map(|o| o.status.success()).unwrap_or(false) {
+            NightShiftTool::Wlsunset
+        } else if Command::new("which").arg("gammastep").output().map(|o| o.status.success()).unwrap_or(false) {
+            NightShiftTool::Gammastep
+        } else {
+            NightShiftTool::ScreenShader
+        }
+    })
+}
 
 pub fn apply_night_shift(enabled: bool, color_temp: f32) {
+    let tool = get_night_shift_tool();
     if enabled {
         let temp = night_temp_from_slider(color_temp);
         let t = temp.to_string();
-        let _ = Command::new("pkill").args(["-9", "hyprsunset"]).output();
-        let _ = Command::new("pkill").args(["-9", "wlsunset"]).output();
-        let _ = Command::new("pkill").args(["-9", "gammastep"]).output();
-        if Command::new("which").arg("hyprsunset").output().map(|o| o.status.success()).unwrap_or(false) {
-            let _ = Command::new("hyprsunset").args(["-t", &t]).spawn();
-            return;
+        match tool {
+            NightShiftTool::Hyprsunset => {
+                let _ = Command::new("hyprctl").args(["hyprsunset", "temperature", &t]).output();
+                let _ = Command::new("pkill").args(["-9", "hyprsunset"]).output();
+                let _ = Command::new("hyprsunset").args(["-t", &t]).spawn();
+            }
+            NightShiftTool::Wlsunset => {
+                let _ = Command::new("pkill").args(["-9", "wlsunset"]).output();
+                let _ = Command::new("wlsunset").args(["-t", &t, "-T", "6500"]).spawn();
+            }
+            NightShiftTool::Gammastep => {
+                let _ = Command::new("pkill").args(["-9", "gammastep"]).output();
+                let _ = Command::new("gammastep").args(["-O", &t]).spawn();
+            }
+            NightShiftTool::ScreenShader => {
+                let (r_factor, g_factor, b_factor) = kelvin_to_rgb_factors(temp as f32);
+                let shader = format!(
+                    "#version 300 es\nprecision mediump float;\nin vec2 v_texcoord;\nlayout(location = 0) out vec4 \
+                     fragColor;\nuniform sampler2D tex;\nvoid main() {{\nvec4 c = texture(tex, v_texcoord);\nc.r = \
+                     min(1.0, c.r * {r_factor:.3});\nc.g = min(1.0, c.g * {g_factor:.3});\nc.b = min(1.0, c.b * \
+                     {b_factor:.3});\nfragColor = c;\n}}\n"
+                );
+                let shader_path = "/tmp/finick-nightshift.frag";
+                let _ = std::fs::write(shader_path, &shader);
+                let lua_set = format!("hl.config({{ decoration = {{ screen_shader = '{shader_path}' }} }})");
+                let _ = HyprlandBackend::hyprctl_set_config(&lua_set, "decoration:screen_shader", shader_path);
+            }
         }
-        if Command::new("which").arg("wlsunset").output().map(|o| o.status.success()).unwrap_or(false) {
-            let _ = Command::new("wlsunset").args(["-t", &t, "-T", "6500"]).spawn();
-            return;
-        }
-        if Command::new("which").arg("gammastep").output().map(|o| o.status.success()).unwrap_or(false) {
-            let _ = Command::new("gammastep").args(["-O", &t]).spawn();
-            return;
-        }
-        // Native Hyprland screen_shader fallback for Night Shift
-        let factor = ((temp as f32 - 2000.0) / 4500.0).clamp(0.4, 0.95);
-        let shader = format!(
-            "precision mediump float;\nvarying vec2 v_texcoord;\nuniform sampler2D tex;\nvoid main() {{\n    vec4 c = \
-             texture2D(tex, v_texcoord);\n    c.b *= {factor:.2};\n    gl_FragColor = c;\n}}\n"
-        );
-        let shader_path = "/tmp/finick-nightshift.frag";
-        let _ = std::fs::write(shader_path, shader);
-        let _ = Command::new("hyprctl").args(["keyword", "decoration:screen_shader", shader_path]).output();
     } else {
-        let _ = Command::new("pkill").args(["hyprsunset"]).output();
-        let _ = Command::new("pkill").args(["wlsunset"]).output();
-        let _ = Command::new("gammastep").args(["-x"]).output();
-        let _ = Command::new("pkill").args(["gammastep"]).output();
-        let _ = Command::new("hyprctl").args(["keyword", "decoration:screen_shader", ""]).output();
+        match tool {
+            NightShiftTool::Hyprsunset => {
+                let _ = Command::new("hyprctl").args(["hyprsunset", "identity"]).output();
+                let _ = Command::new("pkill").args(["hyprsunset"]).output();
+            }
+            NightShiftTool::Wlsunset => {
+                let _ = Command::new("pkill").args(["wlsunset"]).output();
+            }
+            NightShiftTool::Gammastep => {
+                let _ = Command::new("gammastep").args(["-x"]).output();
+                let _ = Command::new("pkill").args(["gammastep"]).output();
+            }
+            NightShiftTool::ScreenShader => {
+                let lua_unset = "hl.config({ decoration = { screen_shader = '' } })";
+                let _ = HyprlandBackend::hyprctl_set_config(lua_unset, "decoration:screen_shader", "");
+            }
+        }
     }
 }
 
@@ -1805,5 +1919,16 @@ mod tests {
         let serialized = serde_json::to_string(&configs).expect("Serialization failed");
         let deserialized: Vec<PersistentDisplayConfig> = serde_json::from_str(&serialized).expect("Deserialization failed");
         assert_eq!(configs, deserialized);
+    }
+
+    #[test]
+    fn test_apply_night_shift_shader_format() {
+        apply_night_shift(true, 50.0);
+        let content = std::fs::read_to_string("/tmp/finick-nightshift.frag").expect("shader file exists");
+        assert!(content.starts_with("#version 300 es"), "shader must start with #version 300 es");
+        assert!(content.contains("in vec2 v_texcoord;"));
+        assert!(content.contains("layout(location = 0) out vec4 fragColor;"));
+        assert!(content.contains("texture(tex, v_texcoord)"));
+        apply_night_shift(false, 50.0);
     }
 }

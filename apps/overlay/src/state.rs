@@ -257,14 +257,14 @@ pub fn subscribe_notifications_live_from(
 ) {
     spawn(async move {
         loop {
-            match subscribe_channel(socket_name.clone()) {
+            let sock_path = socket_name.clone();
+            match subscribe_channel(sock_path.clone()) {
                 Ok(mut rx) => {
                     while let Some(evt) = rx.recv().await {
                         match evt {
                             NotificationEvent::Show(notif) => {
                                 let mut notifs = notifications;
                                 let id = notif.id;
-                                let timeout = notif.timeout;
 
                                 let mut current = notifs.read().clone();
                                 if let Some(idx) = current.iter().position(|n| n.id == id) {
@@ -273,23 +273,6 @@ pub fn subscribe_notifications_live_from(
                                     current.push(notif);
                                 }
                                 notifs.set(current);
-
-                                // Auto-dismiss after timeout
-                                let auto_dismiss_ms = if timeout > 0 {
-                                    timeout as u64
-                                } else {
-                                    5000
-                                };
-
-                                let mut notifs_dismiss = notifications;
-                                spawn(async move {
-                                    tokio::time::sleep(std::time::Duration::from_millis(auto_dismiss_ms)).await;
-                                    let mut list = notifs_dismiss.read().clone();
-                                    if let Some(pos) = list.iter().position(|n| n.id == id) {
-                                        list.remove(pos);
-                                        notifs_dismiss.set(list);
-                                    }
-                                });
                             }
                             NotificationEvent::Close(id) => {
                                 let mut notifs = notifications;
@@ -301,6 +284,7 @@ pub fn subscribe_notifications_live_from(
                             }
                         }
                     }
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 Err(_) => {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;

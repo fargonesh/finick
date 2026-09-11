@@ -1,7 +1,6 @@
 # Build outputs
 /target/
-/scan/dist/
-/scan/node_modules/
+node_modules/
 
 # Nix
 result

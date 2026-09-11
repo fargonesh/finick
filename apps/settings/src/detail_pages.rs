@@ -456,6 +456,21 @@ pub fn appearance_detail_page(
     AppearanceDetailPage { theme_state, store }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct WifiModalData {
+    pub ssid: String,
+    pub security: String,
+    pub signal: u8,
+    pub is_manual: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BtModalData {
+    pub name: String,
+    pub mac: String,
+    pub is_manual: bool,
+}
+
 #[derive(PartialEq)]
 pub struct WifiDetailPage {
     pub store: SettingsStore,
@@ -471,6 +486,12 @@ impl Component for WifiDetailPage {
 
         let net_state: State<Option<NetworkInfo>> = use_state(|| None);
         let loading = use_state(|| true);
+        let wifi_modal_target: State<Option<WifiModalData>> = use_state(|| None);
+        let wifi_password: State<String> = use_state(String::new);
+        let wifi_connecting: State<bool> = use_state(|| false);
+        let wifi_error: State<Option<String>> = use_state(|| None);
+        let custom_ssid: State<String> = use_state(String::new);
+
         use_hook(move || {
             let mut ns = net_state;
             let mut ld = loading;
@@ -510,6 +531,162 @@ impl Component for WifiDetailPage {
             .find(|n| Some(&n.ssid) == net.active_ssid.as_ref())
             .map(|n| n.security.clone())
             .unwrap_or_else(|| if wifi_on { "—".to_string() } else { "—".to_string() });
+
+        let modal_el = if let Some(target) = wifi_modal_target.read().clone() {
+            let s_target = target.clone();
+            let is_manual = target.is_manual;
+            let connecting = *wifi_connecting.read();
+            let err_opt = wifi_error.read().clone();
+
+            rect()
+                .position(Position::new_global().top(0.).left(0.))
+                .width(Size::fill())
+                .height(Size::fill())
+                .background(Color::from_argb(140, 0, 0, 0))
+                .center()
+                .content(Content::Flex)
+                .child(
+                    rect()
+                        .width(Size::px(380.))
+                        .padding(20.)
+                        .corner_radius(16.)
+                        .background(t.bg_card)
+                        .border(Border::new().width(1.).fill(t.border_card))
+                        .spacing(14.)
+                        .child(
+                            rect()
+                                .horizontal()
+                                .main_align(Alignment::SpaceBetween)
+                                .cross_align(Alignment::Center)
+                                .width(Size::fill())
+                                .content(Content::Flex)
+                                .child(
+                                    label()
+                                        .font_size(16.)
+                                        .font_weight(FontWeight::BOLD)
+                                        .color(t.text_primary)
+                                        .text(if is_manual {
+                                            "Join Other Network".to_string()
+                                        } else {
+                                            format!("Join “{}”", target.ssid)
+                                        }),
+                                )
+                                .child(
+                                    rect()
+                                        .cursor(CursorIcon::Pointer)
+                                        .on_press({
+                                            let mut mt = wifi_modal_target;
+                                            move |_| mt.set(None)
+                                        })
+                                        .child(label().font_size(14.).color(t.text_dim).text("✕")),
+                                ),
+                        )
+                        .maybe(!is_manual, |el| {
+                            el.child(
+                                rect()
+                                    .horizontal()
+                                    .spacing(8.)
+                                    .child(
+                                        label()
+                                            .font_size(12.)
+                                            .color(t.text_dim)
+                                            .text(format!("Security: {} · Signal: {}%", target.security, target.signal)),
+                                    ),
+                            )
+                        })
+                        .maybe(is_manual, |el| {
+                            el.child(
+                                rect()
+                                    .vertical()
+                                    .spacing(6.)
+                                    .child(field_label("Network Name (SSID)"))
+                                    .child(Input::new(custom_ssid).width(Size::fill()).placeholder("Enter network name")),
+                            )
+                        })
+                        .child(
+                            rect()
+                                .vertical()
+                                .spacing(6.)
+                                .child(field_label("Password"))
+                                .child(Input::new(wifi_password).width(Size::fill()).placeholder("Enter Wi-Fi password")),
+                        )
+                        .maybe_child(err_opt.map(|err| {
+                            rect()
+                                .padding((6., 10.))
+                                .corner_radius(6.)
+                                .background(Color::from_argb(35, 235, 80, 80))
+                                .child(label().font_size(12.).color(Color::from_rgb(235, 80, 80)).text(err))
+                        }))
+                        .child(
+                            rect()
+                                .horizontal()
+                                .spacing(10.)
+                                .main_align(Alignment::End)
+                                .content(Content::Flex)
+                                .child(secondary_button("Cancel", {
+                                    let mut mt = wifi_modal_target;
+                                    move || mt.set(None)
+                                }))
+                                .child(if connecting {
+                                    secondary_button("Connecting…", || {}).into_element()
+                                } else {
+                                    primary_button("Connect", {
+                                        let mt = wifi_modal_target;
+                                        let mut conn = wifi_connecting;
+                                        let mut err_st = wifi_error;
+                                        let ns = net_state;
+                                        let ld = loading;
+                                        let target_c = s_target.clone();
+                                        let cssid_st = custom_ssid;
+                                        let pwd_st = wifi_password;
+                                        move || {
+                                            conn.set(true);
+                                            err_st.set(None);
+                                            let final_ssid = if target_c.is_manual {
+                                                cssid_st.read().trim().to_string()
+                                            } else {
+                                                target_c.ssid.clone()
+                                            };
+                                            let pwd = pwd_st.read().trim().to_string();
+                                            let is_man = target_c.is_manual;
+                                            let mut mt = mt;
+                                            let mut conn = conn;
+                                            let mut err_st = err_st;
+                                            let mut ns = ns;
+                                            let mut ld = ld;
+                                            freya::prelude::spawn(async move {
+                                                let final_ssid_t = final_ssid.clone();
+                                                let pwd_opt = if pwd.is_empty() { None } else { Some(pwd) };
+                                                let res = tokio::task::spawn_blocking(move || {
+                                                    system::HyprlandBackend.connect_wifi_with_password(
+                                                        &final_ssid_t,
+                                                        pwd_opt.as_deref(),
+                                                        is_man,
+                                                    )
+                                                }).await.unwrap_or(Err("Task failed".to_string()));
+                                                match res {
+                                                    Ok(()) => {
+                                                        mt.set(None);
+                                                        conn.set(false);
+                                                        let updated = tokio::task::spawn_blocking(fetch_network_info).await.unwrap_or_default();
+                                                        ns.set(Some(updated));
+                                                        ld.set(false);
+                                                    }
+                                                    Err(e) => {
+                                                        conn.set(false);
+                                                        err_st.set(Some(e));
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    }).into_element()
+                                }),
+                        ),
+                )
+                .into_element()
+        } else {
+            rect().into_element()
+        };
 
         rect()
             .width(Size::fill())
@@ -567,7 +744,11 @@ impl Component for WifiDetailPage {
                                     for nw in net.available_networks.iter().take(8) {
                                         let ssid = nw.ssid.clone();
                                         let is_conn = nw.connected || Some(&ssid) == net.active_ssid.as_ref();
-                                        let ssid_conn = ssid.clone();
+                                        let nw_clone = nw.clone();
+                                        let mut mt = wifi_modal_target;
+                                        let mut wp = wifi_password;
+                                        let mut we = wifi_error;
+                                        let mut wc = wifi_connecting;
                                         base = base.child(setting_row(
                                             ssid,
                                             Some(format!("Signal {}% · {}", nw.signal, nw.security)),
@@ -576,14 +757,52 @@ impl Component for WifiDetailPage {
                                                 status_chip("Connected", true, None).into_element()
                                             } else {
                                                 secondary_button("Connect", move || {
-                                                    let s = ssid_conn.clone();
-                                                    std::thread::spawn(move || {
-                                                        system::HyprlandBackend.connect_wifi(&s);
-                                                    });
+                                                    if nw_clone.security.eq_ignore_ascii_case("Open") || nw_clone.security.is_empty() {
+                                                        let s = nw_clone.ssid.clone();
+                                                        std::thread::spawn(move || {
+                                                            system::HyprlandBackend.connect_wifi(&s);
+                                                        });
+                                                    } else {
+                                                        wp.set(String::new());
+                                                        we.set(None);
+                                                        wc.set(false);
+                                                        mt.set(Some(WifiModalData {
+                                                            ssid: nw_clone.ssid.clone(),
+                                                            security: nw_clone.security.clone(),
+                                                            signal: nw_clone.signal,
+                                                            is_manual: false,
+                                                        }));
+                                                    }
                                                 }).into_element()
                                             },
                                         ));
                                     }
+                                    base = base.child(
+                                        rect()
+                                            .margin((8., 0., 0., 0.))
+                                            .horizontal()
+                                            .main_align(Alignment::End)
+                                            .content(Content::Flex)
+                                            .child(secondary_button("Join other network…", {
+                                                let mut mt = wifi_modal_target;
+                                                let mut cs = custom_ssid;
+                                                let mut wp = wifi_password;
+                                                let mut we = wifi_error;
+                                                let mut wc = wifi_connecting;
+                                                move || {
+                                                    cs.set(String::new());
+                                                    wp.set(String::new());
+                                                    we.set(None);
+                                                    wc.set(false);
+                                                    mt.set(Some(WifiModalData {
+                                                        ssid: String::new(),
+                                                        security: "WPA2/WPA3".to_string(),
+                                                        signal: 100,
+                                                        is_manual: true,
+                                                    }));
+                                                }
+                                            })),
+                                    );
                                 }
                                 base
                             }),
@@ -644,7 +863,8 @@ impl Component for WifiDetailPage {
                             ),
                     ]),
                 ),
-        )
+            )
+            .child(modal_el)
     }
 }
 
@@ -669,6 +889,11 @@ impl Component for BluetoothDetailPage {
         let devices: State<Vec<system::BluetoothDevice>> = use_state(Vec::new);
         let loading: State<bool> = use_state(|| true);
         let scan_nearby: State<Vec<system::BluetoothDevice>> = use_state(Vec::new);
+        let bt_modal_target: State<Option<BtModalData>> = use_state(|| None);
+        let bt_pin: State<String> = use_state(String::new);
+        let bt_pairing: State<bool> = use_state(|| false);
+        let bt_error: State<Option<String>> = use_state(|| None);
+        let custom_mac: State<String> = use_state(String::new);
 
         use_hook(move || {
             let mut dev = devices;
@@ -713,7 +938,7 @@ impl Component for BluetoothDetailPage {
                                     name,
                                     mac,
                                     connected: false,
-                                })
+                                    })
                             } else { None }
                         }).collect::<Vec<_>>()
                     } else { Vec::new() }
@@ -729,6 +954,170 @@ impl Component for BluetoothDetailPage {
         let paired = devices.read().clone();
         let nearby_devices = scan_nearby.read().clone();
         let is_loading = *loading.read();
+
+        let bt_modal_el = if let Some(target) = bt_modal_target.read().clone() {
+            let s_target = target.clone();
+            let is_manual = target.is_manual;
+            let pairing = *bt_pairing.read();
+            let err_opt = bt_error.read().clone();
+
+            rect()
+                .position(Position::new_global().top(0.).left(0.))
+                .width(Size::fill())
+                .height(Size::fill())
+                .background(Color::from_argb(140, 0, 0, 0))
+                .center()
+                .content(Content::Flex)
+                .child(
+                    rect()
+                        .width(Size::px(380.))
+                        .padding(20.)
+                        .corner_radius(16.)
+                        .background(t.bg_card)
+                        .border(Border::new().width(1.).fill(t.border_card))
+                        .spacing(14.)
+                        .child(
+                            rect()
+                                .horizontal()
+                                .main_align(Alignment::SpaceBetween)
+                                .cross_align(Alignment::Center)
+                                .width(Size::fill())
+                                .content(Content::Flex)
+                                .child(
+                                    label()
+                                        .font_size(16.)
+                                        .font_weight(FontWeight::BOLD)
+                                        .color(t.text_primary)
+                                        .text(if is_manual {
+                                            "Pair Bluetooth Device".to_string()
+                                        } else {
+                                            format!("Pair “{}”", target.name)
+                                        }),
+                                )
+                                .child(
+                                    rect()
+                                        .cursor(CursorIcon::Pointer)
+                                        .on_press({
+                                            let mut mt = bt_modal_target;
+                                            move |_| mt.set(None)
+                                        })
+                                        .child(label().font_size(14.).color(t.text_dim).text("✕")),
+                                ),
+                        )
+                        .maybe(!is_manual, |el| {
+                            el.child(
+                                rect()
+                                    .horizontal()
+                                    .spacing(8.)
+                                    .child(
+                                        label()
+                                            .font_size(12.)
+                                            .color(t.text_dim)
+                                            .text(format!("Device address: {}", target.mac)),
+                                    ),
+                            )
+                        })
+                        .maybe(is_manual, |el| {
+                            el.child(
+                                rect()
+                                    .vertical()
+                                    .spacing(6.)
+                                    .child(field_label("Device MAC Address"))
+                                    .child(Input::new(custom_mac).width(Size::fill()).placeholder("XX:XX:XX:XX:XX:XX")),
+                            )
+                        })
+                        .child(
+                            rect()
+                                .vertical()
+                                .spacing(6.)
+                                .child(field_label("PIN / Pairing Code"))
+                                .child(Input::new(bt_pin).width(Size::fill()).placeholder("e.g. 0000, 1234, or leave empty")),
+                        )
+                        .child(
+                            label()
+                                .font_size(11.)
+                                .color(t.text_dim)
+                                .text("Most modern Bluetooth devices (earphones, mice) do not require a PIN code. If requested, enter it above.")
+                        )
+                        .maybe_child(err_opt.map(|err| {
+                            rect()
+                                .padding((6., 10.))
+                                .corner_radius(6.)
+                                .background(Color::from_argb(35, 235, 80, 80))
+                                .child(label().font_size(12.).color(Color::from_rgb(235, 80, 80)).text(err))
+                        }))
+                        .child(
+                            rect()
+                                .horizontal()
+                                .spacing(10.)
+                                .main_align(Alignment::End)
+                                .content(Content::Flex)
+                                .child(secondary_button("Cancel", {
+                                    let mut mt = bt_modal_target;
+                                    move || mt.set(None)
+                                }))
+                                .child(if pairing {
+                                    secondary_button("Pairing…", || {}).into_element()
+                                } else {
+                                    primary_button("Pair Device", {
+                                        let mt = bt_modal_target;
+                                        let mut pr = bt_pairing;
+                                        let mut err_st = bt_error;
+                                        let dev_st = devices;
+                                        let near_st = scan_nearby;
+                                        let target_c = s_target.clone();
+                                        let cmac_st = custom_mac;
+                                        let pin_st = bt_pin;
+                                        move || {
+                                            pr.set(true);
+                                            err_st.set(None);
+                                            let mac = if target_c.is_manual {
+                                                cmac_st.read().trim().to_string()
+                                            } else {
+                                                target_c.mac.clone()
+                                            };
+                                            let pin_raw = pin_st.read().trim().to_string();
+                                            let pin_opt = if pin_raw.is_empty() { None } else { Some(pin_raw) };
+                                            let mut mt = mt;
+                                            let mut pr = pr;
+                                            let mut err_st = err_st;
+                                            let mut dev_st = dev_st;
+                                            let mut near_st = near_st;
+                                            freya::prelude::spawn(async move {
+                                                let mac_for_task = mac.clone();
+                                                let res = tokio::task::spawn_blocking(move || {
+                                                    system::HyprlandBackend.pair_bluetooth_device(
+                                                        &mac_for_task,
+                                                        pin_opt.as_deref(),
+                                                    )
+                                                }).await.unwrap_or(Err("Task failed".to_string()));
+                                                match res {
+                                                    Ok(()) => {
+                                                        mt.set(None);
+                                                        pr.set(false);
+                                                        let paired = tokio::task::spawn_blocking(|| {
+                                                            system::HyprlandBackend.get_paired_bluetooth_devices()
+                                                        }).await.unwrap_or_default();
+                                                        let paired_macs: std::collections::HashSet<String> = paired.iter().map(|d| d.mac.clone()).collect();
+                                                        let remaining_nearby: Vec<_> = near_st.read().clone().into_iter().filter(|d| !paired_macs.contains(&d.mac)).collect();
+                                                        dev_st.set(paired);
+                                                        near_st.set(remaining_nearby);
+                                                    }
+                                                    Err(e) => {
+                                                        pr.set(false);
+                                                        err_st.set(Some(e));
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    }).into_element()
+                                }),
+                        ),
+                )
+                .into_element()
+        } else {
+            rect().into_element()
+        };
 
         rect()
             .width(Size::fill())
@@ -840,25 +1229,57 @@ impl Component for BluetoothDetailPage {
                                     for dev in nearby_devices.iter().take(5) {
                                         let mac = dev.mac.clone();
                                         let name = dev.name.clone();
+                                        let mac_c = mac.clone();
+                                        let name_c = name.clone();
                                         base = base.child(setting_row(
                                             name,
-                                            Some(mac.clone()),
+                                            Some(mac),
                                             false,
-                                            secondary_button("Pair", move || {
-                                                let m = mac.clone();
-                                                std::thread::spawn(move || {
-                                                    let _ = std::process::Command::new("bluetoothctl").args(["pair", &m]).output();
-                                                    let _ = std::process::Command::new("bluetoothctl").args(["connect", &m]).output();
-                                                });
+                                            secondary_button("Pair", {
+                                                let mut bmt = bt_modal_target;
+                                                let mut bpin = bt_pin;
+                                                let mut berr = bt_error;
+                                                let dev_name = name_c.clone();
+                                                let dev_mac = mac_c.clone();
+                                                move || {
+                                                    bpin.set(String::new());
+                                                    berr.set(None);
+                                                    bmt.set(Some(BtModalData {
+                                                        name: dev_name.clone(),
+                                                        mac: dev_mac.clone(),
+                                                        is_manual: false,
+                                                    }));
+                                                }
                                             }),
                                         ));
                                     }
+                                    base = base.child(
+                                        rect()
+                                            .margin((10., 0., 0., 0.))
+                                            .child(ghost_button("Pair device by address…", {
+                                                let mut bmt = bt_modal_target;
+                                                let mut bpin = bt_pin;
+                                                let mut berr = bt_error;
+                                                let mut cmac = custom_mac;
+                                                move || {
+                                                    bpin.set(String::new());
+                                                    berr.set(None);
+                                                    cmac.set(String::new());
+                                                    bmt.set(Some(BtModalData {
+                                                        name: "Device".to_string(),
+                                                        mac: String::new(),
+                                                        is_manual: true,
+                                                    }));
+                                                }
+                                            }))
+                                    );
                                 }
                                 base
                             }),
                         ]),
                     ),
             )
+            .child(bt_modal_el)
     }
 }
 
@@ -881,6 +1302,13 @@ impl Component for DisplayDetailPage {
         let order_status: State<Option<Result<String, String>>> = use_state(|| None);
         let identify_active: State<bool> = use_state(|| false);
         let position_offsets: State<std::collections::HashMap<String, (i32,i32)>> = use_state(Default::default);
+        let local_color_temp: State<f64> = use_state(|| *store.color_temp.read());
+        let ct_gen: State<std::sync::Arc<std::sync::atomic::AtomicU64>> = use_state(|| {
+            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0))
+        });
+        let ct_last_apply_ms: State<std::sync::Arc<std::sync::atomic::AtomicU64>> = use_state(|| {
+            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0))
+        });
         let t = use_app_theme();
 
         let br_lock = store.lock_label(&SettingKey::DisplayBrightness);
@@ -1434,10 +1862,11 @@ impl Component for DisplayDetailPage {
                                                 .opacity(if is_ns_locked { 0.45 } else { 1.0 })
                                                 .child({
                                                     let store = store;
+                                                    let local_ct = local_color_temp;
                                                     pill_switch(*store.night_shift.read(), move |v| {
                                                         if !is_ns_locked {
                                                             store.set(SettingKey::DisplayNightShift, v);
-                                                            let ct = *store.color_temp.read() as f32;
+                                                            let ct = *local_ct.read() as f32;
                                                             std::thread::spawn(move || {
                                                                 let _ = system::HyprlandBackend.set_night_shift(v, ct);
                                                             });
@@ -1473,12 +1902,45 @@ impl Component for DisplayDetailPage {
                                     .opacity(if is_ct_locked { 0.45 } else { 1.0 })
                                     .child({
                                         let store = store;
-                                        slider_row(None, *store.color_temp.read(), move |v| {
+                                        let mut local_ct = local_color_temp;
+                                        let is_ns_active = *store.night_shift.read();
+                                        let gen_arc = ct_gen.read().clone();
+                                        let last_apply_arc = ct_last_apply_ms.read().clone();
+                                        slider_row(None, *local_color_temp.read(), move |v| {
                                             if !is_ct_locked {
-                                                store.set(SettingKey::DisplayColorTemp, v);
-                                                if *store.night_shift.read() {
-                                                    std::thread::spawn(move || { let _ = system::HyprlandBackend.set_night_shift(true, v as f32); });
+                                                local_ct.set(v);
+
+                                                let next_gen = gen_arc.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                                                let now_ms = std::time::SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .map(|d| d.as_millis() as u64)
+                                                    .unwrap_or(0);
+                                                let prev_ms = last_apply_arc.load(std::sync::atomic::Ordering::Relaxed);
+
+                                                // Live preview throttle: apply screen shader at most once per 60ms during dragging
+                                                if is_ns_active && (now_ms.saturating_sub(prev_ms) >= 60) {
+                                                    last_apply_arc.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+                                                    freya::prelude::spawn(async move {
+                                                        let _ = tokio::task::spawn_blocking(move || {
+                                                            let _ = system::HyprlandBackend.set_night_shift(true, v as f32);
+                                                        }).await;
+                                                    });
                                                 }
+
+                                                // Trailing debounce (70ms): apply final shader state and persist to store
+                                                let gen_check = gen_arc.clone();
+                                                let store = store;
+                                                freya::prelude::spawn(async move {
+                                                    tokio::time::sleep(std::time::Duration::from_millis(70)).await;
+                                                    if gen_check.load(std::sync::atomic::Ordering::SeqCst) == next_gen {
+                                                        if is_ns_active {
+                                                            let _ = tokio::task::spawn_blocking(move || {
+                                                                system::HyprlandBackend.set_night_shift(true, v as f32)
+                                                            }).await;
+                                                        }
+                                                        store.set(SettingKey::DisplayColorTemp, v);
+                                                    }
+                                                });
                                             }
                                         })
                                     }),

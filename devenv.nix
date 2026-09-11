@@ -47,10 +47,11 @@
     pkgs.vulkan-loader
     pkgs.libglvnd
 
-    # System CLI tools & utilities (shelled out by libs/system & apps)
-    pkgs.hyprland        # hyprctl (monitors, devices)
-    pkgs.wireplumber     # wpctl (audio volume/mute/status)
-    pkgs.networkmanager  # nmcli (wifi, networking)
+     # System CLI tools & utilities (shelled out by libs/system & apps)
+     pkgs.nodejs_22
+     pkgs.hyprland        # hyprctl (monitors, devices)
+     pkgs.wireplumber     # wpctl (audio volume/mute/status)
+     pkgs.networkmanager  # nmcli (wifi, networking)
     pkgs.bluez           # bluetoothctl (bluetooth devices)
     pkgs.util-linux      # rfkill
     pkgs.coreutils       # df, uname, date
@@ -101,6 +102,22 @@
     settings-daemon.exec = "cargo run -p settings-daemon -- \"$@\"";
     files.exec = "cargo run -p files -- \"$@\"";
     finickctl.exec = "cargo run -p finickctl -- \"$@\"";
+    web.exec = ''
+      set -e
+      cd web
+      if [ ! -d node_modules ]; then
+        echo "Installing web deps (vite)..."
+        npm install
+      fi
+      exec npm run dev -- "$@"
+    '';
+    web-build.exec = ''
+      set -e
+      cd web
+      if [ ! -d node_modules ]; then npm install; fi
+      npm run build
+      echo "Built to web/dist"
+    '';
   };
 
   languages.rust = {
