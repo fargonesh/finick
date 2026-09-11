@@ -1,0 +1,20 @@
+# Nixpacks configuration when root directory is set to web/
+providers = ["node"]
+
+[variables]
+NODE_ENV = "production"
+
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[phases.install]
+dependsOn = ["setup"]
+cmds = ["npm ci"]
+cacheDirectories = ["node_modules"]
+
+[phases.build]
+dependsOn = ["install"]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm run preview -- --port ${PORT:-4173}"
