@@ -113,7 +113,7 @@
               fi
               exec "$DEVENV_BIN" --quiet shell -- bash -c 'cd "$1"; shift; exec cargo run ${cargoArgs} --manifest-path "'"$REPO"'/Cargo.toml" -- "$@"' bash "$ORIG_DIR" "$@"
             '')
-            [ "overlay" "topbar" "settings" "files" "settings-daemon" "index" "finickctl" ]) ++ [ desktopEntries ];
+            [ "overlay" "topbar" "settings" "files" "finickd" "index" "finickctl" ]) ++ [ desktopEntries ];
           meta.mainProgram = "overlay";
         };
       in
@@ -129,7 +129,7 @@
           topbar = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/overlay"; };
           settings = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/settings"; };
           files = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/files"; };
-          settings-daemon = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/settings-daemon"; };
+          finickd = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/finickd"; };
           index = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/index"; };
           finickctl = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/finickctl"; };
         };

@@ -1977,6 +1977,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "finickd"
+version = "0.1.0"
+dependencies = [
+ "config",
+ "ipc",
+ "serde",
+ "serde_json",
+ "system",
+ "tokio",
+ "zbus",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6417,19 +6430,6 @@ dependencies = [
  "system",
  "tokio",
  "ui",
-]
-
-[[package]]
-name = "settings-daemon"
-version = "0.1.0"
-dependencies = [
- "config",
- "ipc",
- "serde",
- "serde_json",
- "system",
- "tokio",
- "zbus",
 ]
 
 [[package]]

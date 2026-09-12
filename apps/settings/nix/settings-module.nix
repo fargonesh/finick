@@ -47,12 +47,12 @@ in {
     hardware.bluetooth.enable = true;
 
     # 2. Setup the background service for Screen Time and Indexing
-    systemd.services.finick-settings-daemon = mkIf cfg.screenTime.enable {
+    systemd.services.finickd = mkIf cfg.screenTime.enable {
       description = "Finick Settings Daemon (Screen Time & Indexing)";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
       serviceConfig = {
-        ExecStart = "${pkgs.finick-settings}/bin/finick-settings-daemon";
+        ExecStart = "${pkgs.finick-settings}/bin/finickd";
         Restart = "always";
         User = "root"; # Needed for system-level stats (optional, depends on implementation)
       };

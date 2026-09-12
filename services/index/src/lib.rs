@@ -12,7 +12,7 @@ use {
         os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
         sync::{mpsc, Arc},
-        time::{Duration, SystemTime},
+        time::SystemTime,
     },
     ty::SearchResult,
 };
@@ -202,8 +202,6 @@ fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>
                     }
                 }
             }
-
-            std::thread::sleep(Duration::from_millis(100));
         }
     }
 }

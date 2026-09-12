@@ -463,16 +463,28 @@ fn app() -> impl IntoElement {
                                     Route::ScreenTime => screen_time_detail_page(store).into_element(),
                                     Route::Desktop => desktop_detail_page(store).into_element(),
                                     Route::General => general_detail_page(store).into_element(),
-                                    Route::Storage => storage_detail_page(store).into_element(),
+                                    Route::Storage => pages::Storage.into_element(),
                                     Route::Battery => battery_detail_page(store).into_element(),
                                     Route::Accessibility => accessibility_detail_page(store).into_element(),
-                                    Route::About => about_detail_page().into_element(),
+                                    Route::About => pages::About.into_element(),
                                     Route::DateTime => pages::DateTime.into_element(),
                                     Route::Privacy => pages::Privacy.into_element(),
                                     Route::Language => pages::Language.into_element(),
                                     Route::Printers => pages::Printers.into_element(),
                                     Route::Accounts => {
                                         // Real human users from /etc/passwd and avatar customization
+                                        let username = std::env::var("USER").unwrap_or_else(|_| "User".to_string());
+                                        let uid = std::process::Command::new("id")
+                                            .arg("-u")
+                                            .output()
+                                            .ok()
+                                            .and_then(|o| String::from_utf8(o.stdout).ok())
+                                            .map(|s| s.trim().to_string())
+                                            .unwrap_or_else(|| "1000".to_string());
+                                        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/run/current-system/sw/bin/bash".to_string());
+                                        let user_display = format!("{username} (UID {uid})");
+                                        let shell_display = format!("Shell: {shell}");
+
                                         rect()
                                             .width(Size::fill())
                                             .vertical()
@@ -526,8 +538,8 @@ fn app() -> impl IntoElement {
                                             ))
                                             .child(tile().child(tile_head(None, "Human Users", None::<String>)).child(
                                                 setting_row(
-                                                    "Flora Hill (UID 1000)",
-                                                    Some("Shell: /run/current-system/sw/bin/bash"),
+                                                    user_display,
+                                                    Some(shell_display),
                                                     false,
                                                     status_chip("Administrator", true, None),
                                                 ),

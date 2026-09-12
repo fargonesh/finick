@@ -89,7 +89,7 @@
     echo ""
   '';
 
-  # Services in ./services (e.g. index, settings-daemon)
+  # Services in ./services (e.g. index, finickd)
   processes = lib.mapAttrs' (name: _:
     lib.nameValuePair name {
       exec = "cargo run -p ${name}";
@@ -99,7 +99,7 @@
   scripts = {
     devtools.exec = "if [ ! -f ./.devenv/state/cargo-install/bin/freya-devtools-app ]; then cargo install --git https://github.com/marc2332/freya freya-devtools-app --root ./.devenv/state/cargo-install; fi; ./.devenv/state/cargo-install/bin/freya-devtools-app \"$@\"";
     settings.exec = "cargo run -p settings -- \"$@\"";
-    settings-daemon.exec = "cargo run -p settings-daemon -- \"$@\"";
+    finickd.exec = "cargo run -p finickd -- \"$@\"";
     files.exec = "cargo run -p files -- \"$@\"";
     finickctl.exec = "cargo run -p finickctl -- \"$@\"";
     web.exec = ''

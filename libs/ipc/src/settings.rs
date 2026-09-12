@@ -10,7 +10,7 @@ use {
 };
 
 /// Default socket name for the finick settings daemon.
-pub const SETTINGS_SOCKET_NAME: &str = "settings-daemon";
+pub const SETTINGS_SOCKET_NAME: &str = "finickd";
 
 // ============================================================================
 // Setting Categories
@@ -1413,9 +1413,9 @@ mod tests {
     }
 
     #[test]
-    fn test_live_settings_daemon() {
-        if std::path::Path::new("/tmp/settings-daemon.sock").exists() {
-            let res = get_setting("settings-daemon", SettingKey::ThemeMode);
+    fn test_live_finickd() {
+        if std::path::Path::new("/tmp/finickd.sock").exists() {
+            let res = get_setting("finickd", SettingKey::ThemeMode);
             assert!(res.is_ok(), "Failed to query live daemon: {:?}", res);
             let entry = res.unwrap();
             assert!(entry.is_some(), "ThemeMode should be present in live daemon");

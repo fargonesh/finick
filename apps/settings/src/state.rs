@@ -88,7 +88,7 @@ pub struct SettingsStore {
     pub location_access: State<bool>,
     pub firewall_enabled: State<bool>,
 
-    // Lock states from settings-daemon (e.g. NixOS-managed)
+    // Lock states from finickd (e.g. NixOS-managed)
     pub lock_states: State<HashMap<SettingKey, LockState>>,
 }
 
@@ -480,7 +480,7 @@ impl SettingsStore {
     }
 }
 
-/// Initializes settings state, connects to the settings-daemon via IPC,
+/// Initializes settings state, connects to the finickd via IPC,
 /// loads all initial entries, subscribes to real-time events, and provides context.
 pub fn use_init_settings_store() -> SettingsStore {
     let audio_info = HyprlandBackend.get_audio_info();

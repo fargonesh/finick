@@ -14,7 +14,6 @@ struct Args {
 #[allow(non_camel_case_types)]
 #[derive(strum::Display, strum::EnumString, Clone, Debug)]
 enum Program {
-    scan,
     index,
     accent,
     border,
@@ -27,14 +26,6 @@ fn accent_to_hex(s: &str) -> String { config::ty::accent_to_hex(s) }
 fn main() {
     let args = Args::parse();
     match args.program {
-        Program::scan => {
-            match ipsea::send_command(App::Scan, &(), Some(|_: ()| {})) {
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("Failed to connect to service. ({e:?})");
-                }
-            };
-        }
         Program::index => {
             let q = args.data.unwrap_or_else(|| {
                 eprintln!("No data provided");
@@ -82,7 +73,7 @@ fn main() {
             let hypr_color = format!("0xff{hex}");
             let _ =
                 std::process::Command::new("hyprctl").args(["keyword", "general:col.active_border", &hypr_color]).status();
-            let _ = ipsea::settings::set_and_apply("settings-daemon", ipsea::settings::SettingKey::AccentColor, &*color);
+            let _ = ipsea::settings::set_and_apply("finickd", ipsea::settings::SettingKey::AccentColor, &*color);
             if args.json {
                 println!("{}", serde_json::json!({ "accent": color, "hex": hex, "hypr_border": hypr_color }));
             } else {
@@ -99,7 +90,7 @@ fn main() {
                     .args(["keyword", "general:border_size", &size.to_string()])
                     .status();
                 let _ = ipsea::settings::set_and_apply(
-                    "settings-daemon",
+                    "finickd",
                     ipsea::settings::SettingKey::WindowBorderSize,
                     size as i64,
                 );
@@ -121,7 +112,7 @@ fn main() {
             });
             if let Some((k, v)) = key_or_kv.split_once('=') {
                 let key: ipsea::settings::SettingKey = k.trim().parse().unwrap();
-                let _ = ipsea::settings::set_and_apply("settings-daemon", key.clone(), v.trim());
+                let _ = ipsea::settings::set_and_apply("finickd", key.clone(), v.trim());
                 if key == ipsea::settings::SettingKey::AccentColor {
                     let hex = accent_to_hex(v.trim());
                     let _ = std::process::Command::new("hyprctl")
@@ -131,7 +122,7 @@ fn main() {
                 println!("Set {k} = {v}");
             } else {
                 let key: ipsea::settings::SettingKey = key_or_kv.trim().parse().unwrap();
-                match ipsea::settings::get_setting("settings-daemon", key) {
+                match ipsea::settings::get_setting("finickd", key) {
                     Ok(Some(entry)) => {
                         if args.json {
                             println!("{}", serde_json::to_string(&entry).unwrap());

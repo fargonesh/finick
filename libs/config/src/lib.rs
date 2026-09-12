@@ -69,7 +69,7 @@ pub fn settings_path() -> PathBuf {
 /// Resolves the path to the configuration file for a given App identity.
 pub fn config_path_for(app: &App) -> PathBuf {
     match app {
-        App::Settings | App::SettingsDaemon => settings_path(),
+        App::Settings | App::Finickd => settings_path(),
         _ => {
             let legacy = finick_root().join(app.to_string());
             if legacy.exists() && !legacy.is_dir() {
@@ -191,10 +191,9 @@ mod tests {
     #[test]
     fn test_app_variants_and_file_names() {
         assert_eq!(App::Settings.as_str(), "Settings");
-        assert_eq!(App::SettingsDaemon.as_str(), "SettingsDaemon");
+        assert_eq!(App::Finickd.as_str(), "Finickd");
         assert_eq!(App::TopBar.as_str(), "TopBar");
         assert_eq!(App::IndexService.as_str(), "IndexService");
-        assert_eq!(App::Scan.as_str(), "Scan");
         assert_eq!(App::Files.as_str(), "Files");
 
         assert_eq!(App::Settings.config_file_name(), "Settings.json");

@@ -2,8 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import gsap from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 import {
-  Wifi, Bluetooth, Sun, Monitor, Volume2, HardDrive, Battery,
-  Settings2, Folder, Search, Bell, Moon, Zap, Box, Layers, Terminal, Copy, Check, ArrowRight, Github, SunDim
+  Wifi, Bluetooth, Monitor, HardDrive, Settings2, Folder, Search, Layers, Terminal, Copy, Check, ArrowRight, Github, Sun, Moon, Box
 } from "lucide-react"
 
 gsap.registerPlugin(ScrollTrigger)
@@ -39,13 +38,14 @@ export default function App() {
   }, [accent])
 
   useLayoutEffect(() => {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    if (reduce) return
     const ctx = gsap.context(() => {
       gsap.from(".hero-eyebrow", { y: 16, opacity: 0, duration: 0.6, ease: "power3.out" })
       gsap.from(".hero-title", { y: 30, opacity: 0, duration: 0.8, ease: "power3.out", delay: 0.08 })
       gsap.from(".hero-lead", { y: 16, opacity: 0, duration: 0.6, ease: "power3.out", delay: 0.18 })
       gsap.from(".hero-cta .magnet", { y: 12, opacity: 0, duration: 0.5, stagger: 0.08, delay: 0.28, ease: "back.out(1.4)" })
-      gsap.from(".hero-meta", { opacity: 0, duration: 0.5, delay: 0.4 })
-
+      gsap.from(".hero-visual", { y: 20, opacity: 0, duration: 0.8, ease: "power3.out", delay: 0.2 })
       gsap.from("nav", { y: -16, opacity: 0, duration: 0.6, ease: "power3.out" })
 
       gsap.to(".progress", {
@@ -53,17 +53,8 @@ export default function App() {
         scrollTrigger: { trigger: document.body, start: "top top", end: "bottom bottom", scrub: 0.3 }
       })
 
-      gsap.to(".bg-glow--indigo", {
-        y: 120, ease: "none",
-        scrollTrigger: { trigger: "body", start: "top top", end: "bottom top", scrub: 1 }
-      })
-      gsap.to(".bg-glow--coral", {
-        y: -80, ease: "none",
-        scrollTrigger: { trigger: "body", start: "top top", end: "bottom top", scrub: 1 }
-      })
-
       gsap.from(".bento-card", {
-        y: 28, opacity: 0, rotation: 0.6, duration: 0.6, stagger: 0.08, ease: "power3.out",
+        y: 28, opacity: 0, duration: 0.6, stagger: 0.08, ease: "power3.out",
         scrollTrigger: { trigger: ".bento", start: "top 82%" }
       })
 
@@ -92,7 +83,7 @@ export default function App() {
           const rect = card.getBoundingClientRect()
           const x = (e.clientX - rect.left) / rect.width - 0.5
           const y = (e.clientY - rect.top) / rect.height - 0.5
-          gsap.to(card, { rotationY: x * 6, rotationX: -y * 6, transformPerspective: 800, duration: 0.4, ease: "power2.out" })
+          gsap.to(card, { rotationY: x * 4, rotationX: -y * 4, transformPerspective: 800, duration: 0.4, ease: "power2.out" })
         })
         card.addEventListener("mouseleave", () => {
           gsap.to(card, { rotationY: 0, rotationX: 0, duration: 0.6, ease: "power3.out" })
@@ -103,29 +94,30 @@ export default function App() {
       if (glow) {
         const xTo = gsap.quickTo(glow, "x", { duration: 0.6, ease: "power3" })
         const yTo = gsap.quickTo(glow, "y", { duration: 0.6, ease: "power3" })
-        window.addEventListener("mousemove", (e) => {
+        const onMove = (e) => {
           xTo(e.clientX)
           yTo(e.clientY)
           gsap.to(glow, { opacity: 0.18, duration: 0.3 })
-        })
-        window.addEventListener("mouseleave", () => gsap.to(glow, { opacity: 0, duration: 0.4 }))
+        }
+        const onLeave = () => gsap.to(glow, { opacity: 0, duration: 0.4 })
+        window.addEventListener("mousemove", onMove)
+        window.addEventListener("mouseleave", onLeave)
+        return () => {
+          window.removeEventListener("mousemove", onMove)
+          window.removeEventListener("mouseleave", onLeave)
+        }
       }
 
       gsap.utils.toArray(".magnet").forEach((el) => {
-        el.addEventListener("mousemove", (e) => {
+        const onMove = (e) => {
           const r = el.getBoundingClientRect()
           const x = e.clientX - r.left - r.width / 2
           const y = e.clientY - r.top - r.height / 2
           gsap.to(el, { x: x * 0.18, y: y * 0.18, duration: 0.3, ease: "power2.out" })
-        })
-        el.addEventListener("mouseleave", () => gsap.to(el, { x: 0, y: 0, duration: 0.4, ease: "power3.out" }))
-      })
-
-      gsap.utils.toArray("section h2").forEach((h) => {
-        gsap.from(h, {
-          y: 18, opacity: 0, duration: 0.6, ease: "power3.out",
-          scrollTrigger: { trigger: h, start: "top 88%" }
-        })
+        }
+        const onLeave = () => gsap.to(el, { x: 0, y: 0, duration: 0.4, ease: "power3.out" })
+        el.addEventListener("mousemove", onMove)
+        el.addEventListener("mouseleave", onLeave)
       })
 
     }, rootRef)
@@ -147,8 +139,8 @@ export default function App() {
         backgroundSize: "56px 56px",
         maskImage: "radial-gradient(800px 600px at 50% -10%, #000 60%, transparent 85%)"
       }} />
-      <div className="bg-glow--indigo pointer-events-none fixed -left-[180px] -top-[120px] h-[720px] w-[720px] rounded-full blur-[90px] opacity-[0.18]" style={{ background: "#5B5FE9" }} />
-      <div className="bg-glow--coral pointer-events-none fixed -right-[200px] top-[200px] h-[720px] w-[720px] rounded-full blur-[90px] opacity-[0.14]" style={{ background: "#FF6952" }} />
+      <div className="pointer-events-none fixed -left-[180px] -top-[120px] h-[720px] w-[720px] rounded-full blur-[90px] opacity-[0.18]" style={{ background: "#5B5FE9" }} />
+      <div className="pointer-events-none fixed -right-[200px] top-[200px] h-[720px] w-[720px] rounded-full blur-[90px] opacity-[0.14]" style={{ background: "#FF6952" }} />
 
       <nav className="sticky top-0 z-20 border-b backdrop-blur-[16px]" style={{ background: "color-mix(in srgb, var(--bg) 72%, transparent)", borderColor: "var(--border)" }}>
         <div className="mx-auto flex max-w-[1120px] items-center justify-between gap-4 px-5 py-[10px]">
@@ -185,76 +177,98 @@ export default function App() {
         </div>
       </nav>
 
+      {/* HERO: asymmetric split, 50/50, real visual, <20 words, no scroll cue */}
       <header className="mx-auto max-w-[1120px] px-5 pb-6 pt-12 md:pt-16">
-        <div className="mx-auto max-w-[720px] text-center">
-          <div className="hero-eyebrow inline-flex items-center gap-2 rounded-full border px-2.5 py-1.5 text-[11px] uppercase tracking-[0.08em]" style={{ background: "var(--panel)", borderColor: "var(--border)", color: "var(--text-dim)" }}>
-            <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "var(--accent)", boxShadow: "0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent)" }} />
-            Hyprland · NixOS · Rust · Freya
+        <div className="grid items-center gap-8 md:grid-cols-[1.05fr_0.95fr]">
+          <div className="text-left">
+            <div className="hero-eyebrow inline-flex items-center gap-2 rounded-full border px-2.5 py-1.5 text-[11px] uppercase tracking-[0.08em]" style={{ background: "var(--panel)", borderColor: "var(--border)", color: "var(--text-dim)" }}>
+              <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "var(--accent)", boxShadow: "0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent)" }} />
+              Hyprland / NixOS / Rust / Freya
+            </div>
+            <h1 className="hero-title mt-[18px] text-[42px] font-extrabold leading-[0.92] tracking-[-0.04em] md:text-[52px]">
+              The missing desktop shell<br /><span style={{ color: "var(--accent)" }}>for Hyprland</span>
+            </h1>
+            <p className="hero-lead mt-4 max-w-[480px] text-[17px] leading-relaxed" style={{ color: "var(--text-dim)" }}>
+              Cohesive settings, files, and bar for Hyprland. One Rust workspace replaces scattered scripts and menus.
+            </p>
+            <div className="hero-cta mt-6 flex flex-wrap gap-2.5">
+              <a href="#install" className="magnet inline-flex items-center gap-2 rounded-full px-[18px] py-[11px] text-sm font-semibold text-white" style={{ background: "var(--accent)" }}>
+                Add to Flake <ArrowRight size={16} />
+              </a>
+              <a href="#apps" className="magnet inline-flex items-center gap-2 rounded-full border px-[18px] py-[11px] text-sm font-semibold" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}>
+                Explore Architecture
+              </a>
+            </div>
           </div>
-          <h1 className="hero-title mt-[18px] text-[42px] font-extrabold leading-[0.92] tracking-[-0.04em] md:text-[58px]">
-            The missing desktop shell<br /><em className="not-italic" style={{ color: "var(--accent)" }}>for Hyprland</em>
-          </h1>
-          <p className="hero-lead mx-auto mt-4 max-w-[560px] text-[17px] leading-relaxed" style={{ color: "var(--text-dim)" }}>
-            Hyprland handles window management; finick provides the controls and utilities. Instead of stitching together independent Python scripts and rofi menus, you get a cohesive settings manager, file browser, and status bar built in Rust.
-          </p>
-          <div className="hero-cta mt-6 flex flex-wrap justify-center gap-2.5">
-            <a href="#install" className="magnet inline-flex items-center gap-2 rounded-full px-[18px] py-[11px] text-sm font-semibold text-white" style={{ background: "var(--accent)" }}>
-              Add to Flake <ArrowRight size={16} />
-            </a>
-            <a href="#apps" className="magnet inline-flex items-center gap-2 rounded-full border px-[18px] py-[11px] text-sm font-semibold" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}>
-              Explore Architecture
-            </a>
+          <div className="hero-visual relative overflow-hidden rounded-[20px] border" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
+            <img
+              src="https://picsum.photos/seed/finick-hero-desktop/800/560"
+              alt="Hyprland desktop with finick top bar and settings"
+              width={800} height={560}
+              className="aspect-[4/3] w-full object-cover"
+              loading="eager"
+            />
+            <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between border-t px-3 py-2.5 text-xs backdrop-blur" style={{ background: "color-mix(in srgb, var(--panel) 88%, transparent)", borderColor: "var(--border)", color: "var(--text-dim)" }}>
+              <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ background: "var(--accent)" }} /> finick overlay on Hyprland</span>
+              <span>800 x 560 preview</span>
+            </div>
           </div>
-          <div className="hero-meta mx-auto mt-6 flex max-w-[400px] justify-center gap-8 border-t pt-4" style={{ borderColor: "var(--border)" }}>
-            <div className="leading-none text-center"><strong className="block text-lg">3</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>desktop apps</span></div>
-            <div className="leading-none text-center"><strong className="block text-lg">2</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>daemons</span></div>
-            <div className="leading-none text-center"><strong className="block text-lg">6</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>theme palettes</span></div>
-          </div>
-
         </div>
       </header>
 
+      {/* STAT STRIP moved out of hero, per hero stack discipline */}
+      <div className="mx-auto max-w-[1120px] px-5">
+        <div className="flex justify-start gap-10 border-y py-4 md:justify-center" style={{ borderColor: "var(--border)" }}>
+          <div className="leading-none"><strong className="block text-lg">3</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>desktop apps</span></div>
+          <div className="leading-none"><strong className="block text-lg">2</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>daemons</span></div>
+          <div className="leading-none"><strong className="block text-lg">6</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>theme palettes</span></div>
+        </div>
+      </div>
+
       <section id="apps" className="mx-auto max-w-[1120px] px-5 py-9">
-        <div className="mb-5 grid items-end gap-6 md:grid-cols-[1.1fr_0.9fr]">
-          <div>
-            <div className="mb-2 text-[11px] uppercase tracking-[0.12em]" style={{ color: "var(--text-dim)" }}>Core Utilities</div>
-            <h2 className="text-[34px] font-bold leading-[0.95] tracking-[-0.03em]">Unified by Freya,<br /><span className="font-normal" style={{ color: "var(--text-dim)" }}>not shell scripts.</span></h2>
-          </div>
-          <p className="max-w-[420px] text-sm md:justify-self-end" style={{ color: "var(--text-dim)" }}>All applications share a single component library and communicate with local daemons over typed IPC. Changing your theme mode or accent propagates immediately across every window.</p>
+        <div className="mb-5 max-w-[720px]">
+          <h2 className="text-[34px] font-bold leading-[0.95] tracking-[-0.03em]">Unified by Freya,<br /><span className="font-normal" style={{ color: "var(--text-dim)" }}>not shell scripts.</span></h2>
+          <p className="mt-3 max-w-[560px] text-sm" style={{ color: "var(--text-dim)" }}>All applications share a single component library and communicate with local daemons over typed IPC. Changing your theme propagates immediately across every window.</p>
         </div>
 
         <div className="bento grid gap-3.5 md:grid-cols-3">
-          <article className="bento-card flex min-h-[220px] flex-col gap-2.5 rounded-[20px] border p-[18px] md:row-span-2" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
-            <div className="flex items-center justify-between">
-              <span className="float-icon grid h-9 w-9 place-items-center rounded-[10px] border" style={{ background: "color-mix(in srgb, #5B5FE9 16%, var(--panel))", borderColor: "color-mix(in srgb, #5B5FE9 18%, var(--border))", color: "#5B5FE9" }}><Settings2 size={16} /></span>
-              <span className="rounded-full border px-2 py-1 text-[11px]" style={{ background: "var(--panel-raised)", borderColor: "var(--border)", color: "var(--text-dim)" }}>App · Freya</span>
+          <article className="bento-card flex min-h-[220px] flex-col gap-2.5 overflow-hidden rounded-[20px] border md:row-span-2" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
+            <img src="https://picsum.photos/seed/finick-settings/640/360" alt="Settings app showing network and display controls" className="h-[160px] w-full object-cover" loading="lazy" />
+            <div className="flex flex-col gap-2.5 p-[18px] pt-3">
+              <div className="flex items-center justify-between">
+                <span className="float-icon grid h-9 w-9 place-items-center rounded-[10px] border" style={{ background: "color-mix(in srgb, #5B5FE9 16%, var(--panel))", borderColor: "color-mix(in srgb, #5B5FE9 18%, var(--border))", color: "#5B5FE9" }}><Settings2 size={16} /></span>
+                <span className="rounded-full border px-2 py-1 text-[11px]" style={{ background: "var(--panel-raised)", borderColor: "var(--border)", color: "var(--text-dim)" }}>App</span>
+              </div>
+              <h3 className="text-lg font-semibold tracking-[-0.02em]">Settings</h3>
+              <p className="text-[13px] leading-[1.55]" style={{ color: "var(--text-dim)" }}>18 configuration views covering network, displays, audio devices, and power profiles.</p>
+              <div className="flex flex-wrap gap-1.5">
+                {["Wi-Fi", "Bluetooth", "Sound", "Displays", "Storage", "Power"].map(s => (
+                  <span key={s} className="rounded-full border px-2 py-1 text-[11px]" style={{ background: "var(--panel-raised)", borderColor: "var(--border)", color: "var(--text-dim)" }}>{s}</span>
+                ))}
+              </div>
+              <div className="mt-auto flex items-center justify-between border-t pt-2.5 text-xs" style={{ borderColor: "var(--border)" }}><span style={{ color: "var(--text-dim)" }}>apps/settings</span><span className="font-semibold" style={{ color: "var(--text-dim)" }}>18 pages</span></div>
             </div>
-            <h3 className="text-lg font-semibold tracking-[-0.02em]">Settings</h3>
-            <p className="text-[13px] leading-[1.55]" style={{ color: "var(--text-dim)" }}>18 configuration views covering network, displays, audio devices, and power profiles, directly reading hardware status through system backends.</p>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {["Wi-Fi", "Bluetooth", "Sound", "Displays", "Storage", "Power", "Printers", "Privacy"].map(s => (
-                <span key={s} className="rounded-full border px-2 py-1 text-[11px]" style={{ background: "var(--panel-raised)", borderColor: "var(--border)", color: "var(--text-dim)" }}>{s}</span>
-              ))}
-            </div>
-            <div className="mt-auto flex items-center justify-between border-t pt-2.5 text-xs" style={{ borderColor: "var(--border)" }}><span style={{ color: "var(--text-dim)" }}>apps/settings</span><span className="font-semibold" style={{ color: "var(--text-dim)" }}>18 pages</span></div>
           </article>
 
           <article className="bento-card flex min-h-[220px] flex-col gap-2.5 rounded-[20px] border p-[18px]" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
             <div className="flex items-center justify-between">
               <span className="float-icon grid h-9 w-9 place-items-center rounded-[10px] border" style={{ background: "color-mix(in srgb, #2CA6A0 16%, var(--panel))", borderColor: "color-mix(in srgb, #2CA6A0 18%, var(--border))", color: "#2CA6A0" }}><Folder size={16} /></span>
-              <span className="rounded-full border px-2 py-1 text-[11px]" style={{ background: "var(--panel-raised)", borderColor: "var(--border)", color: "var(--text-dim)" }}>App · Freya</span>
+              <span className="rounded-full border px-2 py-1 text-[11px]" style={{ background: "var(--panel-raised)", borderColor: "var(--border)", color: "var(--text-dim)" }}>App</span>
             </div>
             <h3 className="text-lg font-semibold">Files</h3>
-            <p className="text-[13px]" style={{ color: "var(--text-dim)" }}>Directory bookmarks, instant search, and a metadata preview drawer; loads folders without GTK or Qt runtime dependencies.</p>
+            <p className="text-[13px]" style={{ color: "var(--text-dim)" }}>Directory bookmarks, instant search, and metadata preview without GTK or Qt.</p>
           </article>
 
-          <article className="bento-card flex min-h-[220px] flex-col gap-2.5 rounded-[20px] border p-[18px]" style={{ background: "var(--sidebar)", borderColor: "var(--border)" }}>
-            <div className="flex items-center justify-between">
-              <span className="float-icon grid h-9 w-9 place-items-center rounded-[10px] border" style={{ background: "color-mix(in srgb, #FF6952 16%, var(--panel))", borderColor: "color-mix(in srgb, #FF6952 18%, var(--border))", color: "#FF6952" }}><Layers size={16} /></span>
-              <span className="rounded-full border px-2 py-1 text-[11px]" style={{ background: "var(--panel)", borderColor: "var(--border)", color: "var(--text-dim)" }}>Shell · Overlay</span>
+          <article className="bento-card flex min-h-[220px] flex-col gap-2.5 overflow-hidden rounded-[20px] border" style={{ background: "var(--sidebar)", borderColor: "var(--border)" }}>
+            <img src="https://picsum.photos/seed/finick-topbar/640/300" alt="Top bar overlay on Hyprland desktop" className="h-[132px] w-full object-cover" loading="lazy" />
+            <div className="flex flex-col gap-2 p-[18px] pt-3">
+              <div className="flex items-center justify-between">
+                <span className="float-icon grid h-9 w-9 place-items-center rounded-[10px] border" style={{ background: "color-mix(in srgb, #FF6952 16%, var(--panel))", borderColor: "color-mix(in srgb, #FF6952 18%, var(--border))", color: "#FF6952" }}><Layers size={16} /></span>
+                <span className="rounded-full border px-2 py-1 text-[11px]" style={{ background: "var(--panel)", borderColor: "var(--border)", color: "var(--text-dim)" }}>Shell</span>
+              </div>
+              <h3 className="text-lg font-semibold">Top Bar</h3>
+              <p className="text-[13px]" style={{ color: "var(--text-dim)" }}>Wayland overlay anchored to the screen edge with expanding control panels.</p>
             </div>
-            <h3 className="text-lg font-semibold">Top Bar</h3>
-            <p className="text-[13px]" style={{ color: "var(--text-dim)" }}>A Wayland overlay surface anchored to the screen edge; quick toggles expand into dedicated control panels beneath the clock.</p>
           </article>
 
           <article className="bento-card flex min-h-[220px] flex-col gap-2.5 rounded-[20px] border p-[18px]" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
@@ -263,8 +277,8 @@ export default function App() {
               <span className="rounded-full border px-2 py-1 text-[11px]" style={{ background: "var(--panel-raised)", borderColor: "var(--border)", color: "var(--text-dim)" }}>Service</span>
             </div>
             <h3 className="text-lg font-semibold">Daemon</h3>
-            <p className="text-[13px]" style={{ color: "var(--text-dim)" }}>Synchronizes environment state and coordinates desktop notifications via ipsea over unix domain sockets.</p>
-            <code className="rounded-lg border p-2 text-xs" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>finickctl · ipsea</code>
+            <p className="text-[13px]" style={{ color: "var(--text-dim)" }}>Synchronizes environment state and notifications via ipsea over unix sockets.</p>
+            <code className="rounded-lg border p-2 text-xs" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>finickctl and ipsea</code>
           </article>
 
           <article className="bento-card flex min-h-[220px] flex-col gap-2.5 rounded-[20px] border p-[18px]" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
@@ -273,12 +287,12 @@ export default function App() {
               <span className="rounded-full border px-2 py-1 text-[11px]" style={{ background: "var(--panel-raised)", borderColor: "var(--border)", color: "var(--text-dim)" }}>Service</span>
             </div>
             <h3 className="text-lg font-semibold">Index</h3>
-            <p className="text-[13px]" style={{ color: "var(--text-dim)" }}>In-memory file indexing that supports instant type-ahead filtering without running heavy background crawlers.</p>
-            <code className="rounded-lg border p-2 text-xs" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>type-ahead search</code>
+            <p className="text-[13px]" style={{ color: "var(--text-dim)" }}>In memory file indexing for instant type ahead without background crawlers.</p>
+            <code className="rounded-lg border p-2 text-xs" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>type ahead search</code>
           </article>
 
           <article className="bento-card flex min-h-[220px] flex-col gap-2.5 rounded-[20px] border p-[18px]" style={{ background: `linear-gradient(180deg, color-mix(in srgb, var(--accent) 14%, var(--panel)), var(--panel))`, borderColor: "var(--border)" }}>
-            <h3 className="text-lg font-semibold"><span style={{ color: "var(--accent)" }}>libs/ui</span>: shared system</h3>
+            <h3 className="text-lg font-semibold"><span style={{ color: "var(--accent)" }}>libs/ui</span> shared system</h3>
             <p className="text-[13px]" style={{ color: "var(--text-dim)" }}>Shared design system: cards, switches, sliders, and navigation sidebars with six selectable accent colors.</p>
           </article>
         </div>
@@ -286,69 +300,63 @@ export default function App() {
 
       <section id="system" className="mx-auto max-w-[1120px] px-5">
         <div className="rounded-[20px] border p-5 md:p-[22px]" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
-          <div className="mb-5 grid items-end gap-6 md:grid-cols-[1.1fr_0.9fr]">
-            <div>
-              <div className="mb-2 text-[11px] uppercase tracking-[0.12em]" style={{ color: "var(--text-dim)" }}>How it's built</div>
-              <h2 className="text-[30px] font-bold leading-[0.95] tracking-[-0.03em]">A clean Cargo workspace.</h2>
-            </div>
-            <p className="max-w-[420px] text-sm md:justify-self-end" style={{ color: "var(--text-dim)" }}>Split into independent libraries, services, and apps. You can inspect or extend any part without navigating complex foreign-function layers.</p>
+          <div className="mb-5 max-w-[640px]">
+            <h2 className="text-[30px] font-bold leading-[0.95] tracking-[-0.03em]">A clean Cargo workspace.</h2>
+            <p className="mt-3 max-w-[560px] text-sm" style={{ color: "var(--text-dim)" }}>Split into independent libraries, services, and apps. Inspect or extend any part without foreign function layers.</p>
           </div>
 
           <div className="arch grid gap-3.5 md:grid-cols-3">
             <div className="arch-col">
-              <h4 className="mb-2.5 text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-dim)" }}>Libs</h4>
+              <h4 className="mb-2.5 text-xs font-semibold" style={{ color: "var(--text-dim)" }}>Libs</h4>
               <div className="flex flex-col gap-2.5">
                 <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">ui</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>Tiles, sidebar, switches: 20px radius, gap 14</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>libs/ui</code></div>
                 <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">ipc</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>Typed IPC: settings, notifications</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>libs/ipc</code></div>
-                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">system</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>SystemBackend · HyprlandBackend</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>libs/system</code></div>
+                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">system</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>SystemBackend and HyprlandBackend</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>libs/system</code></div>
               </div>
             </div>
             <div className="arch-col">
-              <h4 className="mb-2.5 text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-dim)" }}>Services</h4>
+              <h4 className="mb-2.5 text-xs font-semibold" style={{ color: "var(--text-dim)" }}>Services</h4>
               <div className="flex flex-col gap-2.5">
-                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">settings-daemon</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>State tick loop · notifications</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>services/settings-daemon</code></div>
-                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">index</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>ListDir / Search</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>services/index</code></div>
+                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">finickd</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>State tick loop and notifications</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>services/finickd</code></div>
+                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">index</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>ListDir and Search</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>services/index</code></div>
               </div>
             </div>
             <div className="arch-col">
-              <h4 className="mb-2.5 text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-dim)" }}>Apps &amp; Shell</h4>
+              <h4 className="mb-2.5 text-xs font-semibold" style={{ color: "var(--text-dim)" }}>Apps and Shell</h4>
               <div className="flex flex-col gap-2.5">
-                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">settings</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>Overview + 18 detail pages</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>apps/settings</code></div>
-                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">files</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>Places, grid/list, preview drawer</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>apps/files</code></div>
-                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">overlay</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>Top Bar + Control Panel</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>apps/overlay</code></div>
+                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">settings</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>Overview plus 18 detail pages</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>apps/settings</code></div>
+                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">files</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>Places, grid and list, preview drawer</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>apps/files</code></div>
+                <div className="rounded-2xl border p-3" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}><strong className="block text-[13px]">overlay</strong><span className="block text-xs" style={{ color: "var(--text-dim)" }}>Top Bar plus Control Panel</span><code className="text-[11px]" style={{ color: "var(--text-dim)" }}>apps/overlay</code></div>
               </div>
             </div>
           </div>
 
           <div className="mt-3.5 grid gap-3.5 md:grid-cols-3">
-            <div className="rounded-2xl border p-3" style={{ background: "var(--bg)", borderColor: "var(--border)" }}><strong className="block text-[13px]">Explicit layout</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>Built on Freya's flex engine so interface elements reflow predictably across display scales.</span></div>
-            <div className="rounded-2xl border p-3" style={{ background: "var(--bg)", borderColor: "var(--border)" }}><strong className="block text-[13px]">Declarative Nix</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>Exported as a Nix flake module, enabling complete desktop reproducibility across machines.</span></div>
-            <div className="rounded-2xl border p-3" style={{ background: "var(--bg)", borderColor: "var(--border)" }}><strong className="block text-[13px]">Direct host hooks</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>Queries existing Linux subsystems directly rather than running duplicate hardware abstractions.</span></div>
+            <div className="rounded-2xl border p-3" style={{ background: "var(--bg)", borderColor: "var(--border)" }}><strong className="block text-[13px]">Explicit layout</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>Built on Freya flex engine for predictable reflow.</span></div>
+            <div className="rounded-2xl border p-3" style={{ background: "var(--bg)", borderColor: "var(--border)" }}><strong className="block text-[13px]">Declarative Nix</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>Flake module for reproducible desktops.</span></div>
+            <div className="rounded-2xl border p-3" style={{ background: "var(--bg)", borderColor: "var(--border)" }}><strong className="block text-[13px]">Direct host hooks</strong><span className="text-xs" style={{ color: "var(--text-dim)" }}>Queries existing Linux subsystems directly.</span></div>
           </div>
         </div>
       </section>
 
       <section id="integrations" className="mx-auto max-w-[1120px] px-5 py-9">
-        <div className="mb-5 grid items-end gap-6 md:grid-cols-[1.1fr_0.9fr]">
-          <div>
-            <div className="mb-2 text-[11px] uppercase tracking-[0.12em]" style={{ color: "var(--text-dim)" }}>Under the hood</div>
-            <h2 className="text-[34px] font-bold leading-[0.95] tracking-[-0.03em]">Standard Linux plumbing.</h2>
-          </div>
-          <p className="max-w-[420px] text-sm md:justify-self-end" style={{ color: "var(--text-dim)" }}>Instead of maintaining private daemons, finick exposes clear controls over the services already active on your machine:</p>
+        <div className="mb-5 max-w-[720px]">
+          <h2 className="text-[34px] font-bold leading-[0.95] tracking-[-0.03em]">Standard Linux plumbing.</h2>
+          <p className="mt-3 max-w-[560px] text-sm" style={{ color: "var(--text-dim)" }}>Exposes clear controls over services already on your machine. No duplicate daemons.</p>
         </div>
 
         <div className="integrations grid gap-3.5 md:grid-cols-4">
           <div className="int-card rounded-[20px] border p-4" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
-            <h4 className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><Wifi size={14} style={{ color: "var(--accent)" }} /> Network &amp; Bluetooth</h4>
-            <p className="text-[13px] leading-relaxed" style={{ color: "var(--text-dim)" }}>Manages connections and pairing directly through NetworkManager and BlueZ.</p>
+            <h4 className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><Wifi size={14} style={{ color: "var(--accent)" }} /> Network and Bluetooth</h4>
+            <p className="text-[13px] leading-relaxed" style={{ color: "var(--text-dim)" }}>Manages connections and pairing through NetworkManager and BlueZ.</p>
           </div>
           <div className="int-card rounded-[20px] border p-4" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
-            <h4 className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><Monitor size={14} style={{ color: "var(--accent)" }} /> Audio &amp; Displays</h4>
-            <p className="text-[13px] leading-relaxed" style={{ color: "var(--text-dim)" }}>Adjusts WirePlumber sinks, monitor layouts via Hyprland IPC, and backlight levels.</p>
+            <h4 className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><Monitor size={14} style={{ color: "var(--accent)" }} /> Audio and Displays</h4>
+            <p className="text-[13px] leading-relaxed" style={{ color: "var(--text-dim)" }}>WirePlumber sinks, Hyprland IPC layouts, and backlight levels.</p>
           </div>
           <div className="int-card rounded-[20px] border p-4" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
             <h4 className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><Terminal size={14} style={{ color: "var(--accent)" }} /> Host Metrics</h4>
-            <p className="text-[13px] leading-relaxed" style={{ color: "var(--text-dim)" }}>Inspects UPower battery state, drive mount utilization, and systemd time synchronization.</p>
+            <p className="text-[13px] leading-relaxed" style={{ color: "var(--text-dim)" }}>UPower battery, drive usage, and systemd time sync.</p>
           </div>
           <div className="int-card rounded-[20px] border p-4" style={{ background: "var(--sidebar)", borderColor: "var(--border)" }}>
             <h4 className="mb-2 text-[13px] font-semibold">Implementation Status</h4>
@@ -365,9 +373,8 @@ export default function App() {
       <section id="install" className="mx-auto max-w-[1120px] px-5 pb-9">
         <div className="install grid gap-[18px] rounded-[20px] border p-[18px] md:grid-cols-[0.9fr_1.1fr]" style={{ background: "var(--panel)", borderColor: "var(--border)" }}>
           <div>
-            <div className="mb-2 text-[11px] uppercase tracking-[0.12em]" style={{ color: "var(--text-dim)" }}>Install</div>
             <h2 className="text-[30px] font-bold leading-[0.95] tracking-[-0.03em]">Add to your NixOS<br />configuration.</h2>
-            <p className="mt-2 text-[13px]" style={{ color: "var(--text-dim)" }}>Include the flake input, enable the module, and run your switch rebuild. The background daemon, overlay bar, and client applications deploy together.</p>
+            <p className="mt-2 text-[13px]" style={{ color: "var(--text-dim)" }}>Include the flake input, enable the module, and rebuild. Daemon, bar, and apps deploy together.</p>
             <div className="mt-3.5 flex flex-wrap gap-2.5">
               <a href="https://github.com/fargonesh/finick" target="_blank" className="inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-white" style={{ background: "var(--accent)" }}>View on GitHub <ArrowRight size={14} /></a>
               <button onClick={() => copy('inputs.finick.url = "github:fargonesh/finick";', "run")} className="inline-flex items-center gap-1.5 rounded-full border px-4 py-2.5 text-sm font-semibold" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}>
@@ -376,7 +383,7 @@ export default function App() {
             </div>
           </div>
           <div className="install-card overflow-hidden rounded-2xl border" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>
-            <div className="flex h-9 items-center gap-2 border-b px-3 text-xs" style={{ background: "var(--panel-raised)", borderColor: "var(--border)", color: "var(--text-dim)" }}><span className="h-2.5 w-2.5 rounded-full" style={{ background: "var(--accent)" }} /> flake.nix + configuration.nix</div>
+            <div className="flex h-9 items-center gap-2 border-b px-3 text-xs" style={{ background: "var(--panel-raised)", borderColor: "var(--border)", color: "var(--text-dim)" }}><span className="h-2.5 w-2.5 rounded-full" style={{ background: "var(--accent)" }} /> flake.nix plus configuration.nix</div>
             <pre className="overflow-auto p-3.5 text-[12.5px] leading-6" style={{ color: "var(--text-dim)" }}><code>{`{
   inputs.finick.url = "github:fargonesh/finick";
   outputs = { finick, nixpkgs, ... }: {
@@ -404,7 +411,7 @@ $ nixos-rebuild switch --flake .#yourHost`}</code></pre>
             <a href="https://github.com/fargonesh/finick" className="hover:text-[var(--text)]">GitHub</a>
             <a href="#apps" className="hover:text-[var(--text)]">Apps</a>
             <a href="#system" className="hover:text-[var(--text)]">Architecture</a>
-            <span>© 2026 fargone</span>
+            <span>2026 fargone</span>
           </div>
         </div>
       </footer>

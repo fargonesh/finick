@@ -12,7 +12,7 @@ This document tracks the implementation status of all settings pages and feature
 ---
 
 ## Architecture & Integration
-- [~] **Background Daemon**: `services/settings-daemon` exists as a skeleton/stub with a mock tick loop; not yet actively connected to the UI or system database.
+- [~] **Background Daemon**: `services/finickd` exists as a skeleton/stub with a mock tick loop; not yet actively connected to the UI or system database.
 - [x] **NixOS Module**: Declarative module available at `apps/settings/nix/settings-module.nix` exposing `programs.finick.settings` options.
 - [ ] **Settings Sync (`nixos-rebuild switch`)**: Declarative NixOS rebuild and automatic configuration generation not yet implemented.
 - [x] **Hyprland & NetworkManager Integration**: Native integration with `hyprctl` (monitors, devices, window gaps, borders) and `nmcli` (Wi-Fi radio, scan, connect, delete).

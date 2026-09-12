@@ -7,12 +7,8 @@ use {
         },
         start_server,
     },
-    std::{
-        sync::{mpsc::Sender, Arc, Mutex},
-        time::Duration,
-    },
+    std::sync::{mpsc::Sender, Arc, Mutex},
     system::{HyprlandBackend, SystemBackend},
-    tokio::time,
 };
 
 pub mod notifications;
@@ -1086,7 +1082,7 @@ pub fn handle_request(state: &Arc<Mutex<DaemonState>>, req: SettingsRequest, sen
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Starting Finick Settings Daemon...");
+    println!("Starting finickd...");
 
     let payload = config::load_settings().unwrap_or_else(|e| {
         eprintln!("Warning: Failed to load existing settings ({}). Initializing defaults.", e);
@@ -1096,18 +1092,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = HyprlandBackend;
     apply_all_settings(&backend, &payload);
     let state = Arc::new(Mutex::new(DaemonState { payload, backend, subscribers: Vec::new() }));
-
-    // Mock tracking loop for active window and screen time
-    tokio::spawn(async {
-        let mut interval = time::interval(Duration::from_secs(60));
-        loop {
-            interval.tick().await;
-            // In a real implementation, we would query Hyprland for the active window
-            // using `hyprctl activewindow -j` and log the time spent per application.
-            // We'd also manage the system's indexing processes for Spotlight-like search.
-            println!("Tracking screen time... (mock tick)");
-        }
-    });
 
     // 1. Notification broadcaster and IPC server
     let notif_broadcaster = ipsea::notifications::NotificationBroadcaster::new();
@@ -1221,7 +1205,7 @@ mod tests {
     use {
         super::*,
         ipsea::settings::{get_all_settings, get_setting, set_setting},
-        std::thread,
+        std::{thread, time::Duration},
     };
 
     #[test]
@@ -1284,7 +1268,7 @@ mod tests {
 
     #[test]
     fn test_ipc_server_end_to_end() {
-        let socket = format!("test-settings-daemon-{}", std::process::id());
+        let socket = format!("test-finickd-{}", std::process::id());
         let mut payload = SettingsPayload::new();
         payload.lock_nix("connectivity.wifi.enabled", "Locked by NixOS flake");
 

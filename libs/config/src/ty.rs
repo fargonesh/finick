@@ -18,11 +18,10 @@ pub fn accent_to_hex(s: &str) -> String {
 /// Finick application and service identities.
 #[derive(strum::Display, strum::EnumString, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum App {
-    Scan,
     Files,
     IndexService,
     Settings,
-    SettingsDaemon,
+    Finickd,
     TopBar,
     Other(String),
 }
@@ -31,11 +30,10 @@ impl App {
     /// Returns the string representation of the app identity.
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Scan => "Scan",
             Self::Files => "Files",
             Self::IndexService => "IndexService",
             Self::Settings => "Settings",
-            Self::SettingsDaemon => "SettingsDaemon",
+            Self::Finickd => "Finickd",
             Self::TopBar => "TopBar",
             Self::Other(name) => name.as_str(),
         }

@@ -48,7 +48,7 @@ in
       enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
-        description = "Run finick-settings-daemon as user service";
+        description = "Run finickd as user service";
       };
     };
   };
@@ -78,14 +78,14 @@ in
       Install.WantedBy = [ "graphical-session.target" "hyprland-session.target" ];
     };
 
-    systemd.user.services.finick-settings-daemon = lib.mkIf cfg.daemon.enable {
+    systemd.user.services.finickd = lib.mkIf cfg.daemon.enable {
       Unit = {
         Description = "Finick Settings Daemon";
         PartOf = [ "graphical-session.target" ];
         After = [ "graphical-session.target" ];
       };
       Service = {
-        ExecStart = "${cfg.package}/bin/settings-daemon";
+        ExecStart = "${cfg.package}/bin/finickd";
         Restart = "on-failure";
       };
       Install.WantedBy = [ "graphical-session.target" ];
