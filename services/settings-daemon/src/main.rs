@@ -578,24 +578,7 @@ pub fn set_setting_value(payload: &mut SettingsPayload, key: &SettingKey, value:
     }
 }
 
-pub fn accent_to_hex(s: &str) -> String {
-    let clean = s.trim().trim_start_matches('#');
-    match clean.to_lowercase().as_str() {
-        "indigo" => "5B5FE9".to_string(),
-        "coral" => "FF6952".to_string(),
-        "amber" => "E3A23D".to_string(),
-        "teal" => "2CA6A0".to_string(),
-        "rose" => "E85A88".to_string(),
-        "slate" => "7B7F87".to_string(),
-        other => {
-            if (other.len() == 6 || other.len() == 8) && other.chars().all(|c| c.is_ascii_hexdigit()) {
-                other.to_uppercase()
-            } else {
-                "5B5FE9".to_string()
-            }
-        }
-    }
-}
+pub fn accent_to_hex(s: &str) -> String { config::ty::accent_to_hex(s) }
 
 /// Routes setting changes to the operating system using `HyprlandBackend` and system tools.
 pub fn apply_setting(backend: &HyprlandBackend, payload: &SettingsPayload, key: &SettingKey) -> Result<(), String> {

@@ -1109,27 +1109,32 @@ where
     send_command(socket, req, handler)
 }
 
-/// Fetch a single setting entry from the daemon.
-pub fn get_setting(
-    socket: impl Into<PathBuf> + Display,
-    key: SettingKey,
-) -> std::io::Result<Option<SettingEntry>> {
+fn collect_responses(socket: impl Into<PathBuf> + Display, req: &SettingsRequest) -> std::io::Result<mpsc::Receiver<SettingsResponse>> {
     let (tx, rx) = mpsc::channel();
-    send_settings_request(
-        socket,
-        &SettingsRequest::Get { key },
-        Some(move |res| {
-            let _ = tx.send(res);
-        }),
-    )?;
+    send_settings_request(socket, req, Some(move |res| { let _ = tx.send(res); }))?;
+    Ok(rx)
+}
 
+fn expect_ok(rx: mpsc::Receiver<SettingsResponse>) -> std::io::Result<Result<(), DenialReason>> {
+    for res in rx {
+        match res {
+            SettingsResponse::Ok => return Ok(Ok(())),
+            SettingsResponse::Rejected { reason, .. } => return Ok(Err(reason)),
+            SettingsResponse::Error(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+            _ => {}
+        }
+    }
+    Ok(Ok(()))
+}
+
+/// Fetch a single setting entry from the daemon.
+pub fn get_setting(socket: impl Into<PathBuf> + Display, key: SettingKey) -> std::io::Result<Option<SettingEntry>> {
+    let rx = collect_responses(socket, &SettingsRequest::Get { key })?;
     for res in rx {
         match res {
             SettingsResponse::Setting(entry) => return Ok(Some(entry)),
             SettingsResponse::NotFound { .. } => return Ok(None),
-            SettingsResponse::Error(e) => {
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, e))
-            }
+            SettingsResponse::Error(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
             _ => {}
         }
     }
@@ -1138,51 +1143,22 @@ pub fn get_setting(
 
 /// Fetch all settings from the daemon, aggregating streamed responses.
 pub fn get_all_settings(socket: impl Into<PathBuf> + Display) -> std::io::Result<Vec<SettingEntry>> {
-    let (tx, rx) = mpsc::channel();
-    send_settings_request(
-        socket,
-        &SettingsRequest::GetAll,
-        Some(move |res| {
-            let _ = tx.send(res);
-        }),
-    )?;
-
-    let mut entries = Vec::new();
-    for res in rx {
-        match res {
-            SettingsResponse::Setting(entry) => entries.push(entry),
-            SettingsResponse::SettingsList(list) => entries.extend(list),
-            SettingsResponse::Error(e) => {
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, e))
-            }
-            _ => {}
-        }
-    }
-    Ok(entries)
+    collect_entries(socket, SettingsRequest::GetAll)
 }
 
 /// Fetch all settings belonging to a specific category.
-pub fn get_category_settings(
-    socket: impl Into<PathBuf> + Display,
-    category: SettingCategory,
-) -> std::io::Result<Vec<SettingEntry>> {
-    let (tx, rx) = mpsc::channel();
-    send_settings_request(
-        socket,
-        &SettingsRequest::GetCategory { category },
-        Some(move |res| {
-            let _ = tx.send(res);
-        }),
-    )?;
+pub fn get_category_settings(socket: impl Into<PathBuf> + Display, category: SettingCategory) -> std::io::Result<Vec<SettingEntry>> {
+    collect_entries(socket, SettingsRequest::GetCategory { category })
+}
 
+fn collect_entries(socket: impl Into<PathBuf> + Display, req: SettingsRequest) -> std::io::Result<Vec<SettingEntry>> {
+    let rx = collect_responses(socket, &req)?;
     let mut entries = Vec::new();
     for res in rx {
         match res {
             SettingsResponse::Setting(entry) => entries.push(entry),
             SettingsResponse::SettingsList(list) => entries.extend(list),
-            SettingsResponse::Error(e) => {
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, e))
-            }
+            SettingsResponse::Error(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
             _ => {}
         }
     }
@@ -1191,98 +1167,20 @@ pub fn get_category_settings(
 
 /// Set a setting value via the daemon. Returns `Ok(Ok(()))` on success,
 /// or `Ok(Err(DenialReason))` if rejected (e.g. locked by Nix).
-pub fn set_setting(
-    socket: impl Into<PathBuf> + Display,
-    key: SettingKey,
-    value: impl Into<SettingValue>,
-) -> std::io::Result<Result<(), DenialReason>> {
-    let (tx, rx) = mpsc::channel();
-    let req = SettingsRequest::Set {
-        key,
-        value: value.into(),
-        source: ChangeSource::User,
-    };
-
-    send_settings_request(
-        socket,
-        &req,
-        Some(move |res| {
-            let _ = tx.send(res);
-        }),
-    )?;
-
-    for res in rx {
-        match res {
-            SettingsResponse::Ok => return Ok(Ok(())),
-            SettingsResponse::Rejected { reason, .. } => return Ok(Err(reason)),
-            SettingsResponse::Error(e) => {
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, e))
-            }
-            _ => {}
-        }
-    }
-    Ok(Ok(()))
+pub fn set_setting(socket: impl Into<PathBuf> + Display, key: SettingKey, value: impl Into<SettingValue>) -> std::io::Result<Result<(), DenialReason>> {
+    let req = SettingsRequest::Set { key, value: value.into(), source: ChangeSource::User };
+    expect_ok(collect_responses(socket, &req)?)
 }
 
 /// Apply a setting to the underlying system via the daemon.
-pub fn apply_setting(
-    socket: impl Into<PathBuf> + Display,
-    key: SettingKey,
-) -> std::io::Result<Result<(), DenialReason>> {
-    let (tx, rx) = mpsc::channel();
-    send_settings_request(
-        socket,
-        &SettingsRequest::Apply { key },
-        Some(move |res| {
-            let _ = tx.send(res);
-        }),
-    )?;
-
-    for res in rx {
-        match res {
-            SettingsResponse::Ok => return Ok(Ok(())),
-            SettingsResponse::Rejected { reason, .. } => return Ok(Err(reason)),
-            SettingsResponse::Error(e) => {
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, e))
-            }
-            _ => {}
-        }
-    }
-    Ok(Ok(()))
+pub fn apply_setting(socket: impl Into<PathBuf> + Display, key: SettingKey) -> std::io::Result<Result<(), DenialReason>> {
+    expect_ok(collect_responses(socket, &SettingsRequest::Apply { key })?)
 }
 
 /// Set and immediately apply a setting. Returns `Ok(Ok(()))` or `Ok(Err(DenialReason))`.
-pub fn set_and_apply(
-    socket: impl Into<PathBuf> + Display,
-    key: SettingKey,
-    value: impl Into<SettingValue>,
-) -> std::io::Result<Result<(), DenialReason>> {
-    let (tx, rx) = mpsc::channel();
-    let req = SettingsRequest::SetAndApply {
-        key,
-        value: value.into(),
-        source: ChangeSource::User,
-    };
-
-    send_settings_request(
-        socket,
-        &req,
-        Some(move |res| {
-            let _ = tx.send(res);
-        }),
-    )?;
-
-    for res in rx {
-        match res {
-            SettingsResponse::Ok => return Ok(Ok(())),
-            SettingsResponse::Rejected { reason, .. } => return Ok(Err(reason)),
-            SettingsResponse::Error(e) => {
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, e))
-            }
-            _ => {}
-        }
-    }
-    Ok(Ok(()))
+pub fn set_and_apply(socket: impl Into<PathBuf> + Display, key: SettingKey, value: impl Into<SettingValue>) -> std::io::Result<Result<(), DenialReason>> {
+    let req = SettingsRequest::SetAndApply { key, value: value.into(), source: ChangeSource::User };
+    expect_ok(collect_responses(socket, &req)?)
 }
 
 /// Subscribe to live setting changes and alerts from the daemon.

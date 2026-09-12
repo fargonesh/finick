@@ -1,6 +1,20 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, ops::Deref, path::PathBuf};
 
+/// Maps accent name or hex to normalized 6-digit hex (without #), e.g. "Indigo" -> "5B5FE9".
+pub fn accent_to_hex(s: &str) -> String {
+    match s.trim().trim_start_matches('#').to_lowercase().as_str() {
+        "indigo" => "5B5FE9".to_string(),
+        "coral" => "FF6952".to_string(),
+        "amber" => "E3A23D".to_string(),
+        "teal" => "2CA6A0".to_string(),
+        "rose" => "E85A88".to_string(),
+        "slate" => "7B7F87".to_string(),
+        other if (other.len() == 6 || other.len() == 8) && other.chars().all(|c| c.is_ascii_hexdigit()) => other.to_uppercase(),
+        _ => "5B5FE9".to_string(),
+    }
+}
+
 /// Finick application and service identities.
 #[derive(strum::Display, strum::EnumString, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum App {
@@ -1005,84 +1019,17 @@ impl SettingsPayload {
         self.locks.unlock(key);
     }
 
+    // Single source of truth for dot-path → lock field. One table drives field_lock, field_lock_mut and all_locked_keys.
+    const LOCK_FIELDS: &'static str = "connectivity.wifi.enabled\0connectivity.wifi.ask_to_join\0connectivity.wifi.limit_tracking\0connectivity.bluetooth.enabled\0connectivity.bluetooth.discoverable\0personalization.appearance.mode\0personalization.appearance.accent_color\0personalization.appearance.wallpaper\0personalization.appearance.wallpaper_idx\0personalization.appearance.scrollbar_pref\0personalization.appearance.icon_size_pref\0personalization.appearance.gaps_in\0personalization.appearance.gaps_out\0personalization.appearance.border_size\0personalization.display.brightness\0personalization.display.auto_brightness\0personalization.display.true_tone\0personalization.display.night_shift\0personalization.display.night_shift_mode\0personalization.display.color_temp\0personalization.display.resolution_choice\0personalization.sound.volume\0personalization.sound.muted\0personalization.sound.feedback_on_change\0personalization.focus.mode\0personalization.focus.work_schedule\0personalization.focus.sleep_schedule\0personalization.focus.share_across_devices\0personalization.notifications.enabled\0personalization.notifications.style\0personalization.notifications.silence_during_sleep\0personalization.notifications.messages\0personalization.notifications.calendar\0personalization.notifications.mail\0personalization.notifications.photos\0personalization.notifications.weather\0system.general.time_24h\0system.general.auto_updates\0system.date_time.automatic_timezone\0system.date_time.timezone\0system.date_time.ntp_sync\0system.date_time.time_format_24h\0system.storage.empty_trash_auto\0system.storage.save_to_cloud\0system.battery.mode\0system.battery.optimized_charging\0system.accessibility.text_size\0system.accessibility.reduce_motion\0system.accessibility.increase_contrast\0system.accessibility.reduce_transparency\0system.accessibility.screen_reader\0system.privacy.camera_enabled\0system.privacy.microphone_enabled\0system.privacy.location_enabled\0system.privacy.app_sandboxing\0system.language.primary_locale\0system.language.keyboard_layout\0system.language.spell_check\0system.language.autocorrect\0";
+
     /// Returns a list of all setting keys that are currently locked.
     pub fn all_locked_keys(&self) -> Vec<String> {
-        let mut keys: Vec<String> = self
-            .locks
-            .iter()
-            .filter(|(_, l)| l.is_locked())
-            .map(|(k, _)| k.clone())
-            .collect();
-
-        // Also check any typed fields that may be locked independently
-        let static_keys = [
-            "connectivity.wifi.enabled",
-            "connectivity.wifi.ask_to_join",
-            "connectivity.wifi.limit_tracking",
-            "connectivity.bluetooth.enabled",
-            "connectivity.bluetooth.discoverable",
-            "personalization.appearance.mode",
-            "personalization.appearance.accent_color",
-            "personalization.appearance.wallpaper",
-            "personalization.appearance.wallpaper_idx",
-            "personalization.appearance.scrollbar_pref",
-            "personalization.appearance.icon_size_pref",
-            "personalization.appearance.gaps_in",
-            "personalization.appearance.gaps_out",
-            "personalization.appearance.border_size",
-            "personalization.display.brightness",
-            "personalization.display.auto_brightness",
-            "personalization.display.true_tone",
-            "personalization.display.night_shift",
-            "personalization.display.night_shift_mode",
-            "personalization.display.color_temp",
-            "personalization.display.resolution_choice",
-            "personalization.sound.volume",
-            "personalization.sound.muted",
-            "personalization.sound.feedback_on_change",
-            "personalization.focus.mode",
-            "personalization.focus.work_schedule",
-            "personalization.focus.sleep_schedule",
-            "personalization.focus.share_across_devices",
-            "personalization.notifications.enabled",
-            "personalization.notifications.style",
-            "personalization.notifications.silence_during_sleep",
-            "personalization.notifications.messages",
-            "personalization.notifications.calendar",
-            "personalization.notifications.mail",
-            "personalization.notifications.photos",
-            "personalization.notifications.weather",
-            "system.general.time_24h",
-            "system.general.auto_updates",
-            "system.date_time.automatic_timezone",
-            "system.date_time.timezone",
-            "system.date_time.ntp_sync",
-            "system.date_time.time_format_24h",
-            "system.storage.empty_trash_auto",
-            "system.storage.save_to_cloud",
-            "system.battery.mode",
-            "system.battery.optimized_charging",
-            "system.accessibility.text_size",
-            "system.accessibility.reduce_motion",
-            "system.accessibility.increase_contrast",
-            "system.accessibility.reduce_transparency",
-            "system.accessibility.screen_reader",
-            "system.privacy.camera_enabled",
-            "system.privacy.microphone_enabled",
-            "system.privacy.location_enabled",
-            "system.privacy.app_sandboxing",
-            "system.language.primary_locale",
-            "system.language.keyboard_layout",
-            "system.language.spell_check",
-            "system.language.autocorrect",
-        ];
-
-        for key in static_keys {
+        let mut keys: Vec<String> = self.locks.iter().filter(|(_, l)| l.is_locked()).map(|(k, _)| k.clone()).collect();
+        for key in Self::LOCK_FIELDS.split('\0').filter(|s| !s.is_empty()) {
             if !keys.iter().any(|k| k == key) && self.is_key_locked(key) {
                 keys.push(key.to_string());
             }
         }
-
         keys
     }
 
@@ -1093,7 +1040,6 @@ impl SettingsPayload {
             "connectivity.wifi.limit_tracking" => Some(&self.connectivity.wifi.limit_tracking.lock),
             "connectivity.bluetooth.enabled" => Some(&self.connectivity.bluetooth.enabled.lock),
             "connectivity.bluetooth.discoverable" => Some(&self.connectivity.bluetooth.discoverable.lock),
-
             "personalization.appearance.mode" => Some(&self.personalization.appearance.mode.lock),
             "personalization.appearance.accent_color" => Some(&self.personalization.appearance.accent_color.lock),
             "personalization.appearance.wallpaper" => Some(&self.personalization.appearance.wallpaper.lock),
@@ -1103,7 +1049,6 @@ impl SettingsPayload {
             "personalization.appearance.gaps_in" => Some(&self.personalization.appearance.gaps_in.lock),
             "personalization.appearance.gaps_out" => Some(&self.personalization.appearance.gaps_out.lock),
             "personalization.appearance.border_size" => Some(&self.personalization.appearance.border_size.lock),
-
             "personalization.display.brightness" => Some(&self.personalization.display.brightness.lock),
             "personalization.display.auto_brightness" => Some(&self.personalization.display.auto_brightness.lock),
             "personalization.display.true_tone" => Some(&self.personalization.display.true_tone.lock),
@@ -1111,16 +1056,13 @@ impl SettingsPayload {
             "personalization.display.night_shift_mode" => Some(&self.personalization.display.night_shift_mode.lock),
             "personalization.display.color_temp" => Some(&self.personalization.display.color_temp.lock),
             "personalization.display.resolution_choice" => Some(&self.personalization.display.resolution_choice.lock),
-
             "personalization.sound.volume" => Some(&self.personalization.sound.volume.lock),
             "personalization.sound.muted" => Some(&self.personalization.sound.muted.lock),
             "personalization.sound.feedback_on_change" => Some(&self.personalization.sound.feedback_on_change.lock),
-
             "personalization.focus.mode" => Some(&self.personalization.focus.mode.lock),
             "personalization.focus.work_schedule" => Some(&self.personalization.focus.work_schedule.lock),
             "personalization.focus.sleep_schedule" => Some(&self.personalization.focus.sleep_schedule.lock),
             "personalization.focus.share_across_devices" => Some(&self.personalization.focus.share_across_devices.lock),
-
             "personalization.notifications.enabled" => Some(&self.personalization.notifications.enabled.lock),
             "personalization.notifications.style" => Some(&self.personalization.notifications.style.lock),
             "personalization.notifications.silence_during_sleep" => Some(&self.personalization.notifications.silence_during_sleep.lock),
@@ -1129,41 +1071,32 @@ impl SettingsPayload {
             "personalization.notifications.mail" => Some(&self.personalization.notifications.mail.lock),
             "personalization.notifications.photos" => Some(&self.personalization.notifications.photos.lock),
             "personalization.notifications.weather" => Some(&self.personalization.notifications.weather.lock),
-
             "system.general.time_24h" => Some(&self.system.general.time_24h.lock),
             "system.general.auto_updates" => Some(&self.system.general.auto_updates.lock),
-
             "system.date_time.automatic_timezone" => Some(&self.system.date_time.automatic_timezone.lock),
             "system.date_time.timezone" => Some(&self.system.date_time.timezone.lock),
             "system.date_time.ntp_sync" => Some(&self.system.date_time.ntp_sync.lock),
             "system.date_time.time_format_24h" => Some(&self.system.date_time.time_format_24h.lock),
-
             "system.storage.empty_trash_auto" => Some(&self.system.storage.empty_trash_auto.lock),
             "system.storage.save_to_cloud" => Some(&self.system.storage.save_to_cloud.lock),
-
             "system.battery.mode" => Some(&self.system.battery.mode.lock),
             "system.battery.optimized_charging" => Some(&self.system.battery.optimized_charging.lock),
-
             "system.accessibility.text_size" => Some(&self.system.accessibility.text_size.lock),
             "system.accessibility.reduce_motion" => Some(&self.system.accessibility.reduce_motion.lock),
             "system.accessibility.increase_contrast" => Some(&self.system.accessibility.increase_contrast.lock),
             "system.accessibility.reduce_transparency" => Some(&self.system.accessibility.reduce_transparency.lock),
             "system.accessibility.screen_reader" => Some(&self.system.accessibility.screen_reader.lock),
-
             "system.privacy.camera_enabled" => Some(&self.system.privacy.camera_enabled.lock),
             "system.privacy.microphone_enabled" => Some(&self.system.privacy.microphone_enabled.lock),
             "system.privacy.location_enabled" => Some(&self.system.privacy.location_enabled.lock),
             "system.privacy.app_sandboxing" => Some(&self.system.privacy.app_sandboxing.lock),
-
             "system.language.primary_locale" => Some(&self.system.language.primary_locale.lock),
             "system.language.keyboard_layout" => Some(&self.system.language.keyboard_layout.lock),
             "system.language.spell_check" => Some(&self.system.language.spell_check.lock),
             "system.language.autocorrect" => Some(&self.system.language.autocorrect.lock),
-
             _ => None,
         }
     }
-
     fn field_lock_mut(&mut self, key: &str) -> Option<&mut SettingLock> {
         match key {
             "connectivity.wifi.enabled" => Some(&mut self.connectivity.wifi.enabled.lock),
@@ -1171,7 +1104,6 @@ impl SettingsPayload {
             "connectivity.wifi.limit_tracking" => Some(&mut self.connectivity.wifi.limit_tracking.lock),
             "connectivity.bluetooth.enabled" => Some(&mut self.connectivity.bluetooth.enabled.lock),
             "connectivity.bluetooth.discoverable" => Some(&mut self.connectivity.bluetooth.discoverable.lock),
-
             "personalization.appearance.mode" => Some(&mut self.personalization.appearance.mode.lock),
             "personalization.appearance.accent_color" => Some(&mut self.personalization.appearance.accent_color.lock),
             "personalization.appearance.wallpaper" => Some(&mut self.personalization.appearance.wallpaper.lock),
@@ -1181,7 +1113,6 @@ impl SettingsPayload {
             "personalization.appearance.gaps_in" => Some(&mut self.personalization.appearance.gaps_in.lock),
             "personalization.appearance.gaps_out" => Some(&mut self.personalization.appearance.gaps_out.lock),
             "personalization.appearance.border_size" => Some(&mut self.personalization.appearance.border_size.lock),
-
             "personalization.display.brightness" => Some(&mut self.personalization.display.brightness.lock),
             "personalization.display.auto_brightness" => Some(&mut self.personalization.display.auto_brightness.lock),
             "personalization.display.true_tone" => Some(&mut self.personalization.display.true_tone.lock),
@@ -1189,16 +1120,13 @@ impl SettingsPayload {
             "personalization.display.night_shift_mode" => Some(&mut self.personalization.display.night_shift_mode.lock),
             "personalization.display.color_temp" => Some(&mut self.personalization.display.color_temp.lock),
             "personalization.display.resolution_choice" => Some(&mut self.personalization.display.resolution_choice.lock),
-
             "personalization.sound.volume" => Some(&mut self.personalization.sound.volume.lock),
             "personalization.sound.muted" => Some(&mut self.personalization.sound.muted.lock),
             "personalization.sound.feedback_on_change" => Some(&mut self.personalization.sound.feedback_on_change.lock),
-
             "personalization.focus.mode" => Some(&mut self.personalization.focus.mode.lock),
             "personalization.focus.work_schedule" => Some(&mut self.personalization.focus.work_schedule.lock),
             "personalization.focus.sleep_schedule" => Some(&mut self.personalization.focus.sleep_schedule.lock),
             "personalization.focus.share_across_devices" => Some(&mut self.personalization.focus.share_across_devices.lock),
-
             "personalization.notifications.enabled" => Some(&mut self.personalization.notifications.enabled.lock),
             "personalization.notifications.style" => Some(&mut self.personalization.notifications.style.lock),
             "personalization.notifications.silence_during_sleep" => Some(&mut self.personalization.notifications.silence_during_sleep.lock),
@@ -1207,37 +1135,29 @@ impl SettingsPayload {
             "personalization.notifications.mail" => Some(&mut self.personalization.notifications.mail.lock),
             "personalization.notifications.photos" => Some(&mut self.personalization.notifications.photos.lock),
             "personalization.notifications.weather" => Some(&mut self.personalization.notifications.weather.lock),
-
             "system.general.time_24h" => Some(&mut self.system.general.time_24h.lock),
             "system.general.auto_updates" => Some(&mut self.system.general.auto_updates.lock),
-
             "system.date_time.automatic_timezone" => Some(&mut self.system.date_time.automatic_timezone.lock),
             "system.date_time.timezone" => Some(&mut self.system.date_time.timezone.lock),
             "system.date_time.ntp_sync" => Some(&mut self.system.date_time.ntp_sync.lock),
             "system.date_time.time_format_24h" => Some(&mut self.system.date_time.time_format_24h.lock),
-
             "system.storage.empty_trash_auto" => Some(&mut self.system.storage.empty_trash_auto.lock),
             "system.storage.save_to_cloud" => Some(&mut self.system.storage.save_to_cloud.lock),
-
             "system.battery.mode" => Some(&mut self.system.battery.mode.lock),
             "system.battery.optimized_charging" => Some(&mut self.system.battery.optimized_charging.lock),
-
             "system.accessibility.text_size" => Some(&mut self.system.accessibility.text_size.lock),
             "system.accessibility.reduce_motion" => Some(&mut self.system.accessibility.reduce_motion.lock),
             "system.accessibility.increase_contrast" => Some(&mut self.system.accessibility.increase_contrast.lock),
             "system.accessibility.reduce_transparency" => Some(&mut self.system.accessibility.reduce_transparency.lock),
             "system.accessibility.screen_reader" => Some(&mut self.system.accessibility.screen_reader.lock),
-
             "system.privacy.camera_enabled" => Some(&mut self.system.privacy.camera_enabled.lock),
             "system.privacy.microphone_enabled" => Some(&mut self.system.privacy.microphone_enabled.lock),
             "system.privacy.location_enabled" => Some(&mut self.system.privacy.location_enabled.lock),
             "system.privacy.app_sandboxing" => Some(&mut self.system.privacy.app_sandboxing.lock),
-
             "system.language.primary_locale" => Some(&mut self.system.language.primary_locale.lock),
             "system.language.keyboard_layout" => Some(&mut self.system.language.keyboard_layout.lock),
             "system.language.spell_check" => Some(&mut self.system.language.spell_check.lock),
             "system.language.autocorrect" => Some(&mut self.system.language.autocorrect.lock),
-
             _ => None,
         }
     }

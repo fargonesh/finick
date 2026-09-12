@@ -255,24 +255,29 @@ pub struct WifiNetworkDetail {
     pub is_saved: bool,
 }
 
-pub fn parse_nmcli_wifi_line(line: &str) -> Option<(bool, String, u8, String)> {
+fn split_escaped_colon(s: &str) -> Vec<String> {
     let mut fields = Vec::new();
-    let mut current = String::new();
-    let mut chars = line.chars();
+    let mut cur = String::new();
+    let mut chars = s.chars();
     while let Some(c) = chars.next() {
         if c == '\\' {
-            if let Some(next) = chars.next() {
-                current.push(next);
+            if let Some(n) = chars.next() {
+                cur.push(n);
             }
             continue;
         }
         if c == ':' {
-            fields.push(std::mem::take(&mut current));
+            fields.push(std::mem::take(&mut cur));
             continue;
         }
-        current.push(c);
+        cur.push(c);
     }
-    fields.push(current);
+    fields.push(cur);
+    fields
+}
+
+pub fn parse_nmcli_wifi_line(line: &str) -> Option<(bool, String, u8, String)> {
+    let fields = split_escaped_colon(line);
     if fields.len() < 4 {
         return None;
     }
@@ -282,9 +287,8 @@ pub fn parse_nmcli_wifi_line(line: &str) -> Option<(bool, String, u8, String)> {
         return None;
     }
     let signal = fields[2].trim().parse::<u8>().unwrap_or(0);
-    let security = fields[3].trim().to_string();
-    let security = if security.is_empty() { "Open".to_string() } else { security };
-    Some((active, ssid, signal, security))
+    let sec = fields[3].trim().to_string();
+    Some((active, ssid, signal, if sec.is_empty() { "Open".to_string() } else { sec }))
 }
 
 pub fn parse_ip_route_get(output: &str) -> Option<(String, String)> {
@@ -316,23 +320,7 @@ pub struct WiredInfo {
 }
 
 pub fn parse_nmcli_dev_line(line: &str) -> Option<(String, String, String)> {
-    let mut fields = Vec::new();
-    let mut current = String::new();
-    let mut chars = line.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            if let Some(next) = chars.next() {
-                current.push(next);
-            }
-            continue;
-        }
-        if c == ':' {
-            fields.push(std::mem::take(&mut current));
-            continue;
-        }
-        current.push(c);
-    }
-    fields.push(current);
+    let fields = split_escaped_colon(line);
     if fields.len() < 3 {
         return None;
     }
@@ -423,54 +411,50 @@ pub struct PersistentDisplayConfig {
 pub struct HyprlandBackend;
 
 impl HyprlandBackend {
-    pub fn hyprctl_set_config(lua_code: &str, legacy_keyword: &str, legacy_val: &str) -> Result<(), String> {
-        if let Ok(output) = Command::new("hyprctl").args(["eval", lua_code]).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if output.status.success() && stdout.starts_with("ok") {
-                return Ok(());
-            }
+    fn hyprctl_try_eval(lua: &str) -> bool {
+        if let Ok(o) = Command::new("hyprctl").args(["eval", lua]).output() {
+            let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            return o.status.success()
+                && (out.starts_with("ok") || (!out.contains("error") && !out.contains("fail") && err.is_empty()));
         }
-        let output = Command::new("hyprctl")
-            .args(["keyword", legacy_keyword, legacy_val])
+        false
+    }
+
+    fn hyprctl_keyword(keyword: &str, val: &str, ctx: &str) -> Result<(), String> {
+        let o = Command::new("hyprctl")
+            .args(["keyword", keyword, val])
             .output()
             .map_err(|e| format!("failed to spawn hyprctl: {e}"))?;
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stdout.contains("can't work") || stdout.contains("error") || !output.status.success() {
-            let detail = if !stderr.is_empty() { stderr } else { stdout };
-            return Err(format!("failed to configure hyprland: {detail}"));
+        let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+        if out.contains("can't work") || out.contains("error") || !o.status.success() {
+            let detail = if !err.is_empty() { err } else { out };
+            return Err(format!("failed to configure {ctx}: {detail}"));
         }
         Ok(())
     }
 
+    pub fn hyprctl_set_config(lua_code: &str, legacy_keyword: &str, legacy_val: &str) -> Result<(), String> {
+        if Self::hyprctl_try_eval(lua_code) {
+            return Ok(());
+        }
+        Self::hyprctl_keyword(legacy_keyword, legacy_val, "hyprland")
+    }
+
     pub fn apply_monitor_config(name: &str, mode: &str, position: &str, scale: &str, transform: u8) -> Result<(), String> {
         let scale_val: f64 = scale.parse().unwrap_or(1.0);
-        let eval_lua = format!(
+        let lua = format!(
             r#"hl.monitor({{ output = "{name}", mode = "{mode}", position = "{position}", scale = {scale_val}, transform = {transform} }})"#
         );
-        if let Ok(output) = Command::new("hyprctl").args(["eval", &eval_lua]).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            if output.status.success()
-                && (stdout.starts_with("ok") || (!stdout.contains("error") && !stdout.contains("fail") && stderr.is_empty()))
-            {
-                return Ok(());
-            }
+        if Self::hyprctl_try_eval(&lua) {
+            return Ok(());
         }
-
-        let arg = format!("{name},{mode},{position},{scale_val},transform,{transform}");
-        let output = Command::new("hyprctl")
-            .args(["keyword", "monitor", &arg])
-            .output()
-            .map_err(|e| format!("failed to spawn hyprctl: {e}"))?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stdout.contains("can't work") || stdout.contains("error") || !output.status.success() {
-            let detail = if !stderr.is_empty() { stderr } else { stdout };
-            return Err(format!("failed to configure monitor {name}: {detail}"));
-        }
-        Ok(())
+        Self::hyprctl_keyword(
+            "monitor",
+            &format!("{name},{mode},{position},{scale_val},transform,{transform}"),
+            &format!("monitor {name}"),
+        )
     }
 }
 

@@ -85,16 +85,15 @@ fn save_pinned(v: &[(String, String)]) {
     }
 }
 
-fn load_dir(path: String, mut items_state: State<Vec<Item>>) {
+fn fetch_via_index(req: index::ty::Request, fallback_dir: Option<String>, mut items_state: State<Vec<Item>>) {
     items_state.set(Vec::new());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     std::thread::spawn(move || {
         let (inner_tx, inner_rx) = std::sync::mpsc::channel();
         let tx_clone = inner_tx.clone();
-        let path_clone = path.clone();
         let res = ipsea::send_command(
             App::IndexService,
-            &index::ty::Request::ListDir { path: path_clone },
+            &req,
             Some(move |res: index::ty::SearchResult| {
                 let _ = tx_clone.send(Item {
                     ty: if res.is_dir { ItemType::Folder } else { ItemType::File },
@@ -106,29 +105,27 @@ fn load_dir(path: String, mut items_state: State<Vec<Item>>) {
         );
         drop(inner_tx);
         let mut result: Vec<Item> = inner_rx.into_iter().collect();
-        if (result.is_empty() || res.is_err())
-            && let Ok(entries) = std::fs::read_dir(&path)
-        {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let md = entry.metadata().ok();
-                let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
-                result.push(Item {
-                    ty: if is_dir { ItemType::Folder } else { ItemType::File },
-                    name: entry.file_name().to_string_lossy().to_string(),
-                    path: entry.path().to_string_lossy().to_string(),
-                    size,
-                });
+        if let Some(dir) = fallback_dir.as_deref() {
+            if (result.is_empty() || res.is_err())
+                && let Ok(entries) = std::fs::read_dir(dir)
+            {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let md = entry.metadata().ok();
+                    let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                    let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
+                    result.push(Item {
+                        ty: if is_dir { ItemType::Folder } else { ItemType::File },
+                        name: entry.file_name().to_string_lossy().to_string(),
+                        path: entry.path().to_string_lossy().to_string(),
+                        size,
+                    });
+                }
             }
         }
-        result.sort_by(|a, b| {
-            if a.ty == ItemType::Folder && b.ty == ItemType::File {
-                std::cmp::Ordering::Less
-            } else if a.ty == ItemType::File && b.ty == ItemType::Folder {
-                std::cmp::Ordering::Greater
-            } else {
-                a.name.cmp(&b.name)
-            }
+        result.sort_by(|a, b| match (&a.ty, &b.ty) {
+            (ItemType::Folder, ItemType::File) => std::cmp::Ordering::Less,
+            (ItemType::File, ItemType::Folder) => std::cmp::Ordering::Greater,
+            _ => a.name.cmp(&b.name),
         });
         let _ = tx.send(result);
     });
@@ -139,42 +136,13 @@ fn load_dir(path: String, mut items_state: State<Vec<Item>>) {
     });
 }
 
-fn perform_search(query: String, mut items_state: State<Vec<Item>>) {
-    items_state.set(Vec::new());
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    std::thread::spawn(move || {
-        let (inner_tx, inner_rx) = std::sync::mpsc::channel();
-        let tx_clone = inner_tx.clone();
-        let _ = ipsea::send_command(
-            App::IndexService,
-            &index::ty::Request::Search { query },
-            Some(move |res: index::ty::SearchResult| {
-                let _ = tx_clone.send(Item {
-                    ty: if res.is_dir { ItemType::Folder } else { ItemType::File },
-                    name: res.name,
-                    path: res.path,
-                    size: res.size.unwrap_or(0),
-                });
-            }),
-        );
-        drop(inner_tx);
-        let mut result: Vec<Item> = inner_rx.into_iter().collect();
-        result.sort_by(|a, b| {
-            if a.ty == ItemType::Folder && b.ty == ItemType::File {
-                std::cmp::Ordering::Less
-            } else if a.ty == ItemType::File && b.ty == ItemType::Folder {
-                std::cmp::Ordering::Greater
-            } else {
-                a.name.cmp(&b.name)
-            }
-        });
-        let _ = tx.send(result);
-    });
-    spawn(async move {
-        if let Some(items) = rx.recv().await {
-            items_state.set(items);
-        }
-    });
+fn load_dir(path: String, items_state: State<Vec<Item>>) {
+    let fallback = path.clone();
+    fetch_via_index(index::ty::Request::ListDir { path }, Some(fallback), items_state)
+}
+
+fn perform_search(query: String, items_state: State<Vec<Item>>) {
+    fetch_via_index(index::ty::Request::Search { query }, None, items_state)
 }
 
 fn format_size(size: u64) -> String {

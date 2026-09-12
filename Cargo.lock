@@ -7471,6 +7471,8 @@ version = "0.1.0"
 dependencies = [
  "freya",
  "freya-components",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

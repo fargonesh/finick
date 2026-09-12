@@ -23,6 +23,27 @@ pub use crate as ipsea;
 
 const MAX_FRAME_SIZE: usize = 8 * 1024 * 1024;
 
+fn write_frame<W: Write>(writer: &mut W, bytes: &[u8]) -> std::io::Result<()> {
+    if bytes.len() > MAX_FRAME_SIZE {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("frame too large: {}", bytes.len())));
+    }
+    writer.write_all(&(bytes.len() as u32).to_le_bytes())?;
+    writer.write_all(bytes)?;
+    writer.flush()
+}
+
+fn read_frame<R: Read>(reader: &mut R) -> std::io::Result<Vec<u8>> {
+    let mut len_buf = [0u8; 4];
+    reader.read_exact(&mut len_buf)?;
+    let len = u32::from_le_bytes(len_buf) as usize;
+    if len > MAX_FRAME_SIZE {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("frame too large: {}", len)));
+    }
+    let mut buf = vec![0u8; len];
+    reader.read_exact(&mut buf)?;
+    Ok(buf)
+}
+
 fn serialize_to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
     #[cfg(feature = "bincode")]
     {
@@ -59,25 +80,16 @@ where
     Req: for<'de> Deserialize<'de> + Send + 'static + std::fmt::Debug,
     Res: Serialize + Send + 'static + std::fmt::Debug,
 {
-    let mut len_buf = [0u8; 4];
-    if stream.read_exact(&mut len_buf).is_err() {
-        error!("Failed to read request length");
-        return None;
-    }
-
-    trace!("Length bytes: {:?}", len_buf);
-    let req_len = u32::from_le_bytes(len_buf) as usize;
-
-    if req_len > MAX_FRAME_SIZE {
-        error!("Request too large: {} bytes", req_len);
-        return None;
-    }
-
-    let mut buf = vec![0u8; req_len];
-    if stream.read_exact(&mut buf).is_err() {
-        error!("Failed to read request data");
-        return None;
-    }
+    let buf = match read_frame(&mut stream) {
+        Ok(b) => {
+            trace!("Request bytes: {}", b.len());
+            b
+        }
+        Err(e) => {
+            error!("Failed to read request: {}", e);
+            return None;
+        }
+    };
 
     if let Ok(req) = deserialize_from_slice::<Req>(&buf) {
         info!("Received request: {:?}", req);
@@ -88,21 +100,8 @@ where
                 trace!("Sending response: {:?}", response);
                 match serialize_to_vec(&StreamResponse::Data(response)) {
                     Ok(resp_buf) => {
-                        if resp_buf.len() > MAX_FRAME_SIZE {
-                            error!("Response too large: {} bytes", resp_buf.len());
-                            break;
-                        }
-                        let len_bytes = (resp_buf.len() as u32).to_le_bytes();
-                        if stream.write_all(&len_bytes).is_err() {
-                            error!("Failed to send response length");
-                            break;
-                        }
-                        if stream.write_all(&resp_buf).is_err() {
-                            error!("Failed to send response data");
-                            break;
-                        }
-                        if stream.flush().is_err() {
-                            error!("Failed to flush stream");
+                        if let Err(e) = write_frame(&mut stream, &resp_buf) {
+                            error!("Failed to send response: {}", e);
                             break;
                         }
                     }
@@ -112,21 +111,9 @@ where
                     }
                 }
             }
-
-            // Send EndOfStream message
-            match serialize_to_vec(&StreamResponse::<Res>::EndOfStream) {
-                Ok(end_buf) => {
-                    let len_bytes = (end_buf.len() as u32).to_le_bytes();
-                    if stream.write_all(&len_bytes).is_err() {
-                        error!("Failed to send EndOfStream length");
-                    }
-                    if stream.write_all(&end_buf).is_err() {
-                        error!("Failed to send EndOfStream data");
-                    }
-                    let _ = stream.flush();
-                    info!("Stream ended successfully");
-                }
-                Err(e) => error!("Failed to serialize EndOfStream: {}", e),
+            if let Ok(end_buf) = serialize_to_vec(&StreamResponse::<Res>::EndOfStream) {
+                let _ = write_frame(&mut stream, &end_buf);
+                info!("Stream ended successfully");
             }
         });
 
@@ -254,42 +241,20 @@ where
 
     info!("Connecting to server at {:?}", socket_path);
     let mut stream = UnixStream::connect(&socket_path)?;
-
-    // Send request with length prefix
     let data = serialize_to_vec(command).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    if data.len() > MAX_FRAME_SIZE {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("Request too large: {} bytes", data.len()),
-        ));
-    }
-    let len_bytes = (data.len() as u32).to_le_bytes();
-    stream.write_all(&len_bytes)?;
-    stream.write_all(&data)?;
-    stream.flush()?;
+    write_frame(&mut stream, &data)?;
     info!("Command sent");
 
     let mut reader = BufReader::new(stream);
 
     loop {
-        // Read the length of the incoming response
-        let mut len_buf = [0u8; 4];
-        if reader.read_exact(&mut len_buf).is_err() {
-            error!("Failed to read response length");
-            break;
-        }
-        let response_len = u32::from_le_bytes(len_buf) as usize;
-        if response_len > MAX_FRAME_SIZE {
-            error!("Response too large: {} bytes", response_len);
-            break;
-        }
-
-        // Read the full response
-        let mut buf = vec![0u8; response_len];
-        if reader.read_exact(&mut buf).is_err() {
-            error!("Failed to read response data");
-            break;
-        }
+        let buf = match read_frame(&mut reader) {
+            Ok(b) => b,
+            Err(e) => {
+                error!("Failed to read response: {}", e);
+                break;
+            }
+        };
 
         // Deserialize response
         match deserialize_from_slice::<StreamResponse<Res>>(&buf) {
