@@ -99,5 +99,42 @@ in
       };
       Install.WantedBy = [ "graphical-session.target" ];
     };
+
+    wayland.windowManager.hyprland.settings.windowrulev2 = [
+      "float, class:^(overlay)$"
+      "pin, class:^(overlay)$"
+      "noanim, class:^(overlay)$"
+      "noshadow, class:^(overlay)$"
+      "noborder, class:^(overlay)$"
+      "float, class:^(overlay-panel)$"
+      "pin, class:^(overlay-panel)$"
+      "rounding 20, class:^(overlay-panel)$"
+      "noanim, class:^(overlay-panel)$"
+      "noshadow, class:^(overlay-panel)$"
+      "noborder, class:^(overlay-panel)$"
+      "float, class:^(overlay-modal)$"
+      "pin, class:^(overlay-modal)$"
+      "noanim, class:^(overlay-modal)$"
+      "noshadow, class:^(overlay-modal)$"
+      "noborder, class:^(overlay-modal)$"
+      "float, class:^(overlay-clipboard)$"
+      "pin, class:^(overlay-clipboard)$"
+      "rounding 20, class:^(overlay-clipboard)$"
+      "noanim, class:^(overlay-clipboard)$"
+      "noshadow, class:^(overlay-clipboard)$"
+      "noborder, class:^(overlay-clipboard)$"
+      "float, class:^(overlay-screenshot)$"
+      "pin, class:^(overlay-screenshot)$"
+      "rounding 20, class:^(overlay-screenshot)$"
+      "noanim, class:^(overlay-screenshot)$"
+      "noshadow, class:^(overlay-screenshot)$"
+      "noborder, class:^(overlay-screenshot)$"
+      "float, class:^(overlay-notifications)$"
+      "pin, class:^(overlay-notifications)$"
+      "rounding 20, class:^(overlay-notifications)$"
+      "noanim, class:^(overlay-notifications)$"
+      "noshadow, class:^(overlay-notifications)$"
+      "noborder, class:^(overlay-notifications)$"
+    ];
   };
 }

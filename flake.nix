@@ -46,6 +46,7 @@
             vulkan-loader
             libglvnd
             sqlite
+            wl-clipboard
           ];
         };
 

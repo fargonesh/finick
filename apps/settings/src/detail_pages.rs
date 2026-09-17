@@ -2052,10 +2052,10 @@ impl Component for SoundDetailPage {
                                 }),
                         )
                         .child({
-                            let opts: Vec<DropdownOption> = if sinks.is_empty() {
-                                vec![DropdownOption { label: sink_name.clone(), value: sink_name.clone() }]
+                            let opts: Vec<ui::DropdownOption> = if sinks.is_empty() {
+                                vec![ui::DropdownOption { label: sink_name.clone(), value: sink_name.clone() }]
                             } else {
-                                sinks.iter().map(|d| DropdownOption { label: d.name.clone(), value: d.id.clone() }).collect()
+                                sinks.iter().map(|d| ui::DropdownOption { label: d.name.clone(), value: d.id.clone() }).collect()
                             };
                             let cur_sink = if sink_name.is_empty() {
                                 sinks.first().map(|s| s.name.clone()).unwrap_or_else(|| "Studio Speakers".to_string())
@@ -2082,10 +2082,10 @@ impl Component for SoundDetailPage {
                                             .child(InputLevelMeter),
                                     )
                                     .child({
-                                        let opts2: Vec<DropdownOption> = if sources.is_empty() {
-                                            vec![DropdownOption { label: source_name.clone(), value: source_name.clone() }]
+                                        let opts2: Vec<ui::DropdownOption> = if sources.is_empty() {
+                                            vec![ui::DropdownOption { label: source_name.clone(), value: source_name.clone() }]
                                         } else {
-                                            sources.iter().map(|d| DropdownOption { label: d.name.clone(), value: d.id.clone() }).collect()
+                                            sources.iter().map(|d| ui::DropdownOption { label: d.name.clone(), value: d.id.clone() }).collect()
                                         };
                                         let cur_source = if source_name.is_empty() {
                                             sources.first().map(|s| s.name.clone()).unwrap_or_else(|| "Internal Microphone".to_string())
@@ -2112,9 +2112,9 @@ impl Component for SoundDetailPage {
                                         dropdown_select(
                                             alert_cur,
                                             vec![
-                                                DropdownOption { label: "Tri-tone".to_string(), value: "Tri-tone".to_string() },
-                                                DropdownOption { label: "Ping".to_string(), value: "Ping".to_string() },
-                                                DropdownOption { label: "Chime".to_string(), value: "Chime".to_string() },
+                                                ui::DropdownOption { label: "Tri-tone".to_string(), value: "Tri-tone".to_string() },
+                                                ui::DropdownOption { label: "Ping".to_string(), value: "Ping".to_string() },
+                                                ui::DropdownOption { label: "Chime".to_string(), value: "Chime".to_string() },
                                             ],
                                             EventHandler::new({
                                                 let mut alert = alert_sound;
@@ -3257,7 +3257,33 @@ impl Component for DesktopDetailPage {
                             })
                         }),
                 )
+                
                 .child(
+                    tile()
+                        .child(tile_head(None, "Topbar UI", None::<String>))
+                        
+                        .child(setting_row("Topbar Text Size", None::<String>, false, {
+                            let store = store;
+                            
+                            slider_row(None, *store.topbar_text_size.read(), move |v| {
+                                store.set(SettingKey::Custom("topbar.text_size".to_string()), v);
+                            })
+                        }))
+                        .child(setting_row("Topbar Text Color", None::<String>, true, {
+                            let store = store;
+                            
+                            let current = store.topbar_text_color.read().clone();
+                            
+                            
+                            let opts: Vec<ui::DropdownOption> = vec!["Default", "Accent", "Muted"].into_iter().map(|s| ui::DropdownOption { label: s.to_string(), value: s.to_string() }).collect();
+                            dropdown_select(current, opts, EventHandler::new(move |v: String| {
+                                store.set(SettingKey::Custom("topbar.text_color".to_string()), v);
+                            }))
+                        }))
+    
+                )
+    
+.child(
                     tile()
                         .child(tile_head(None, "Control Panel", None::<String>))
                         .child(tile_sub("Choose which controls appear in the top-bar panel"))

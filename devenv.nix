@@ -67,6 +67,7 @@
     pkgs.tailscale       # tailscale (VPN management)
     pkgs.swaybg          # swaybg (multi-monitor desktop wallpaper & solid color background)
     pkgs.hyprpaper       # hyprpaper (hyprland wallpaper backend)
+    pkgs.wl-clipboard    # wl-copy, wl-paste (wayland clipboard cli & watcher)
   ];
 
   env = {

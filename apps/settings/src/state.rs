@@ -47,6 +47,8 @@ pub struct SettingsStore {
     pub dock_autohide: State<bool>,
     pub window_layout: State<usize>,
     pub workspace_gap: State<f64>,
+    pub topbar_text_size: State<f64>,
+    pub topbar_text_color: State<String>,
 
     // System & General
     pub time_24h: State<bool>,
@@ -463,6 +465,18 @@ impl SettingsStore {
                             s.set(i as usize);
                         }
                     }
+                    "topbar.text_size" => {
+                        if let Some(f) = val.as_f64() {
+                            let mut s = self.topbar_text_size;
+                            s.set(f);
+                        }
+                    }
+                    "topbar.text_color" => {
+                        if let Some(s_val) = val.as_str() {
+                            let mut s = self.topbar_text_color;
+                            s.set(s_val.to_string());
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -525,6 +539,8 @@ pub fn use_init_settings_store() -> SettingsStore {
     let dock_autohide = use_state(|| true);
     let window_layout = use_state(|| 0usize);
     let workspace_gap = use_state(|| 12.0);
+    let topbar_text_size = use_state(|| 14.0);
+    let topbar_text_color = use_state(|| "Default".to_string());
 
     let time_24h = use_state(|| true);
     let auto_updates = use_state(|| true);
@@ -624,6 +640,8 @@ pub fn use_init_settings_store() -> SettingsStore {
         location_access,
         firewall_enabled,
         lock_states,
+        topbar_text_size,
+        topbar_text_color,
     };
 
     provide_context(store);

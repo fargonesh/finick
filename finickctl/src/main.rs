@@ -19,6 +19,8 @@ enum Program {
     border,
     settings,
     notify,
+    modal,
+    launcher,
 }
 
 fn accent_to_hex(s: &str) -> String { config::ty::accent_to_hex(s) }
@@ -89,11 +91,8 @@ fn main() {
                 let _ = std::process::Command::new("hyprctl")
                     .args(["keyword", "general:border_size", &size.to_string()])
                     .status();
-                let _ = ipsea::settings::set_and_apply(
-                    "finickd",
-                    ipsea::settings::SettingKey::WindowBorderSize,
-                    size as i64,
-                );
+                let _ =
+                    ipsea::settings::set_and_apply("finickd", ipsea::settings::SettingKey::WindowBorderSize, size as i64);
                 println!("Applied border size: {size}");
             } else {
                 let hex = accent_to_hex(&val);
@@ -162,6 +161,56 @@ fn main() {
             match status {
                 Ok(s) if s.success() => println!("Sent notification via DBus"),
                 _ => eprintln!("Failed to run busctl. Is the daemon running?"),
+            }
+        }
+        Program::modal => {
+            let val = args.data.unwrap_or_else(|| {
+                eprintln!("No modal request provided. e.g. 'pam:Prompt string'");
+                std::process::exit(1);
+            });
+            let req = if let Some(prompt) = val.strip_prefix("pam:") {
+                ipsea::modals::ModalRequest::PamAuth { prompt: prompt.to_string() }
+            } else if let Some(wifi) = val.strip_prefix("wifi:") {
+                let parts: Vec<&str> = wifi.splitn(2, ',').collect();
+                ipsea::modals::ModalRequest::WifiPassword {
+                    ssid: parts[0].to_string(),
+                    security: parts.get(1).unwrap_or(&"WPA2").to_string(),
+                }
+            } else if let Some(bt) = val.strip_prefix("bt:") {
+                let parts: Vec<&str> = bt.splitn(2, ',').collect();
+                ipsea::modals::ModalRequest::BluetoothPair {
+                    mac: parts[0].to_string(),
+                    name: parts.get(1).unwrap_or(&"Unknown").to_string(),
+                }
+            } else {
+                eprintln!("Unknown modal type: {}", val);
+                std::process::exit(1);
+            };
+
+            match ipsea::modals::send_modal_request(req) {
+                Ok(resp) => {
+                    if args.json {
+                        println!("{}", serde_json::to_string(&resp).unwrap());
+                    } else {
+                        println!("{:?}", resp);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to send modal request: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Program::launcher => {
+            let try_direct = std::process::Command::new("launcher").spawn();
+            if try_direct.is_ok() {
+                println!("Launcher started");
+            } else if std::process::Command::new("hyprctl").args(["dispatch", "exec", "--", "launcher"]).spawn().is_ok() {
+                println!("Launcher dispatched via hyprctl");
+            } else {
+                eprintln!("Failed to start launcher. Ensure `launcher` is in PATH.");
+                eprintln!("Hyprland shortcut hint: bind = SUPER, SPACE, exec, launcher  # or finickctl launcher");
+                std::process::exit(1);
             }
         }
     }

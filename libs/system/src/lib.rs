@@ -5,6 +5,18 @@ use {
         process::Command,
     },
 };
+pub mod clipboard;
+pub use clipboard::*;
+pub mod capture;
+pub use capture::*;
+pub mod shortcuts;
+pub use shortcuts::*;
+pub mod desktop_apps;
+pub use desktop_apps::*;
+pub mod auth;
+pub use auth::{current_username, verify_password};
+pub mod lock;
+pub use lock::trigger_lock;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayInfo {
@@ -395,8 +407,18 @@ pub trait SystemBackend {
     fn log_out(&self) -> bool;
     fn reboot(&self) -> bool;
     fn power_off(&self) -> bool;
+    fn sleep(&self) -> bool {
+        Command::new("systemctl").arg("suspend").output().map(|o| o.status.success()).unwrap_or(false)
+    }
     fn set_wallpaper(&self, target: &str) -> Result<(), String>;
     fn get_current_wallpaper(&self) -> Option<String>;
+    fn get_keyboard_shortcuts(&self) -> Vec<KeyboardShortcut> { shortcuts::parse_hyprland_shortcuts() }
+    fn add_custom_shortcut(&self, shortcut: &KeyboardShortcut) -> Result<(), String> { shortcuts::add_shortcut(shortcut) }
+    fn remove_custom_shortcut(&self, id: &str) -> Result<(), String> { shortcuts::remove_shortcut(id) }
+    fn get_default_applications(&self) -> Vec<DefaultAppCategoryInfo> { desktop_apps::get_default_apps() }
+    fn set_default_application(&self, category_id: &str, desktop_id: &str) -> Result<(), String> {
+        desktop_apps::set_default_app(category_id, desktop_id)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1331,6 +1353,12 @@ impl SystemBackend for HyprlandBackend {
         Command::new("systemctl").arg("poweroff").output().map(|o| o.status.success()).unwrap_or(false)
     }
 
+    fn sleep(&self) -> bool {
+        Command::new("systemctl").arg("suspend").output().map(|o| o.status.success()).unwrap_or_else(|_| {
+            Command::new("loginctl").arg("suspend").output().map(|o| o.status.success()).unwrap_or(false)
+        })
+    }
+
     fn set_wallpaper(&self, target: &str) -> Result<(), String> {
         let trimmed = target.trim();
         let normalized = if trimmed.starts_with("preset:") {
@@ -1915,4 +1943,41 @@ mod tests {
         assert!(content.contains("texture(tex, v_texcoord)"));
         apply_night_shift(false, 50.0);
     }
+}
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceInfo {
+    pub id: i32,
+    pub name: String,
+    pub monitor: String,
+    pub windows: i32,
+}
+
+pub fn get_active_workspaces() -> std::collections::HashMap<String, i32> {
+    if let Ok(output) = std::process::Command::new("hyprctl").args(["monitors", "-j"]).output() {
+        let out = String::from_utf8_lossy(&output.stdout);
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out) {
+            if let Some(arr) = v.as_array() {
+                let mut map = std::collections::HashMap::new();
+                for mon in arr {
+                    if let (Some(name), Some(ws)) = (mon["name"].as_str(), mon["activeWorkspace"]["id"].as_i64()) {
+                        map.insert(name.to_string(), ws as i32);
+                    }
+                }
+                return map;
+            }
+        }
+    }
+    std::collections::HashMap::new()
+}
+
+pub fn get_workspaces() -> Vec<WorkspaceInfo> {
+    if let Ok(output) = std::process::Command::new("hyprctl").args(["workspaces", "-j"]).output() {
+        let out = String::from_utf8_lossy(&output.stdout);
+        if let Ok(mut workspaces) = serde_json::from_str::<Vec<WorkspaceInfo>>(&out) {
+            workspaces.sort_by_key(|w| w.id);
+            return workspaces;
+        }
+    }
+    Vec::new()
 }

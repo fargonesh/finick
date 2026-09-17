@@ -79,6 +79,8 @@ pub fn load_initial_batch(
     brightness: State<f64>,
     dnd: State<bool>,
     connected: State<bool>,
+    mut topbar_settings: State<TopbarSettings>,
+    mut theme_state: State<ui::AppTheme>,
 ) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Option<Vec<SettingEntry>>>();
     std::thread::spawn(move || match get_all_settings(socket()) {
@@ -96,6 +98,40 @@ pub fn load_initial_batch(
                 Some(entries) => {
                     for entry in &entries {
                         apply_entry(entry, wifi, bt, volume, muted, brightness, dnd);
+                        if let SettingKey::Custom(ref k) = entry.key {
+                            let mut needs = false;
+                            let mut ts = topbar_settings.read().clone();
+                            match k.as_str() {
+                                "topbar.show_wifi" => if let Some(b) = entry.value.as_bool() { ts.show_wifi = b; needs = true; },
+                                "topbar.show_bluetooth" => if let Some(b) = entry.value.as_bool() { ts.show_bluetooth = b; needs = true; },
+                                "topbar.show_sound" => if let Some(b) = entry.value.as_bool() { ts.show_sound = b; needs = true; },
+                                "topbar.show_battery" => if let Some(b) = entry.value.as_bool() { ts.show_battery = b; needs = true; },
+                                "topbar.text_size" => if let Some(f) = entry.value.as_f64() { ts.text_size = f; needs = true; },
+                                "topbar.text_color" => if let Some(s) = entry.value.as_str() { ts.text_color = s.to_string(); needs = true; },
+                                "topbar.theme" => if let Some(s) = entry.value.as_str() { ts.theme = s.to_string(); needs = true; },
+                                "topbar.icon_size" => if let Some(f) = entry.value.as_f64() { ts.icon_size = f; needs = true; } else if let Some(i) = entry.value.as_i64() { ts.icon_size = i as f64; needs = true; },
+                                "topbar.icon_stroke" => if let Some(f) = entry.value.as_f64() { ts.icon_stroke = f; needs = true; } else if let Some(i) = entry.value.as_i64() { ts.icon_stroke = i as f64; needs = true; },
+                                _ => {}
+                            }
+                            if needs { topbar_settings.set(ts); }
+                        }
+                        if entry.key == SettingKey::AccentColor {
+                            if let Some(s) = entry.value.as_str() {
+                                if let Some(acc) = ui::ACCENTS.iter().find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s)) {
+                                    let new_t = theme_state.read().with_accent(*acc);
+                                    theme_state.set(new_t);
+                                    ui::set_theme(&new_t);
+                                }
+                            }
+                        }
+                        if entry.key == SettingKey::ThemeMode {
+                            if let Some(s) = entry.value.as_str() {
+                                let mode = match s { "light" => ui::ThemeMode::Light, "auto" => ui::ThemeMode::Auto, _ => ui::ThemeMode::Dark };
+                                let new_t = theme_state.read().with_mode(mode);
+                                theme_state.set(new_t);
+                                ui::set_theme(&new_t);
+                            }
+                        }
                     }
                     let mut c = connected;
                     c.set_if_modified(true);
@@ -117,6 +153,9 @@ pub struct TopbarSettings {
     pub show_battery: bool,
     pub text_size: f64,
     pub text_color: String,
+    pub theme: String,
+    pub icon_size: f64,
+    pub icon_stroke: f64,
 }
 
 impl Default for TopbarSettings {
@@ -128,6 +167,9 @@ impl Default for TopbarSettings {
             show_battery: true,
             text_size: 13.0,
             text_color: "Default".to_string(),
+            theme: "system".to_string(),
+            icon_size: 14.0,
+            icon_stroke: 1.6,
         }
     }
 }
@@ -141,6 +183,7 @@ pub fn subscribe_live(
     dnd: State<bool>,
     connected: State<bool>,
     mut topbar_settings: State<TopbarSettings>,
+    theme_state: State<ui::AppTheme>,
 ) {
     let rx = match ipsea::settings::subscribe_channel(socket(), SubscriptionFilter::all()) {
         Ok(rx) => rx,
@@ -192,23 +235,46 @@ pub fn subscribe_live(
                     }
                     SettingKey::Custom(ref k) => {
                         let mut ts = topbar_settings.read().clone();
+                        let mut changed = false;
                         match k.as_str() {
-                            "topbar.show_wifi" => if let Some(b) = value.as_bool() { ts.show_wifi = b; },
-                            "topbar.show_bluetooth" => if let Some(b) = value.as_bool() { ts.show_bluetooth = b; },
-                            "topbar.show_sound" => if let Some(b) = value.as_bool() { ts.show_sound = b; },
-                            "topbar.show_battery" => if let Some(b) = value.as_bool() { ts.show_battery = b; },
-                            "topbar.text_size" => if let Some(f) = value.as_f64() { ts.text_size = f; },
-                            "topbar.text_color" => if let Some(s) = value.as_str() { ts.text_color = s.to_string(); },
+                            "topbar.show_wifi" => if let Some(b) = value.as_bool() { ts.show_wifi = b; changed = true; },
+                            "topbar.show_bluetooth" => if let Some(b) = value.as_bool() { ts.show_bluetooth = b; changed = true; },
+                            "topbar.show_sound" => if let Some(b) = value.as_bool() { ts.show_sound = b; changed = true; },
+                            "topbar.show_battery" => if let Some(b) = value.as_bool() { ts.show_battery = b; changed = true; },
+                            "topbar.text_size" => if let Some(f) = value.as_f64() { ts.text_size = f; changed = true; },
+                            "topbar.text_color" => if let Some(s) = value.as_str() { ts.text_color = s.to_string(); changed = true; },
+                            "topbar.theme" => if let Some(s) = value.as_str() { ts.theme = s.to_string(); changed = true; },
+                            "topbar.icon_size" => if let Some(f) = value.as_f64() { ts.icon_size = f; changed = true; } else if let Some(i) = value.as_i64() { ts.icon_size = i as f64; changed = true; },
+                            "topbar.icon_stroke" => if let Some(f) = value.as_f64() { ts.icon_stroke = f; changed = true; } else if let Some(i) = value.as_i64() { ts.icon_stroke = i as f64; changed = true; },
                             _ => {}
                         }
-                        topbar_settings.set(ts);
+                        if changed { topbar_settings.set(ts); }
+                    }
+                    SettingKey::AccentColor => {
+                        if let Some(s) = value.as_str() {
+                            if let Some(acc) = ui::ACCENTS.iter().find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s)) {
+                                let mut th = theme_state;
+                                let new_t = th.read().with_accent(*acc);
+                                th.set(new_t);
+                                ui::set_theme(&new_t);
+                            }
+                        }
+                    }
+                    SettingKey::ThemeMode => {
+                        if let Some(s) = value.as_str() {
+                            let mode = match s { "light" => ui::ThemeMode::Light, "auto" => ui::ThemeMode::Auto, _ => ui::ThemeMode::Dark };
+                            let mut th = theme_state;
+                            let new_t = th.read().with_mode(mode);
+                            th.set(new_t);
+                            ui::set_theme(&new_t);
+                        }
                     }
                     SettingKey::PowerProfile => {}
                     _ => {}
                 },
                 SettingsEvent::LockChanged { .. } => {}
                 SettingsEvent::Reloaded => {
-                    load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected);
+                    load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
                 }
                 SettingsEvent::Alert(_) => {}
             }
@@ -239,6 +305,7 @@ pub fn power_action(action: &'static str) {
         let ok = match action {
             "logout" => HyprlandBackend.log_out(),
             "reboot" => HyprlandBackend.reboot(),
+            "sleep" | "suspend" => HyprlandBackend.sleep(),
             _ => HyprlandBackend.power_off(),
         };
         if !ok {

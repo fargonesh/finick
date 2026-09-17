@@ -36,6 +36,8 @@ pub enum Route {
     Language,
     Printers,
     Accounts,
+    Shortcuts,
+    DefaultApps,
 }
 
 #[derive(Clone, Copy)]
@@ -185,6 +187,20 @@ pub const ALL_NAV_ROUTES: &[RouteInfo] = &[
         keywords: "users human user accounts uid shell login",
     },
     // Bottom
+    RouteInfo {
+        route: Route::Shortcuts,
+        title: "Keyboard",
+        icon_svg: KEYBOARD,
+        group: Some("System"),
+        keywords: "keyboard shortcuts keybindings hotkeys hyprland",
+    },
+    RouteInfo {
+        route: Route::DefaultApps,
+        title: "Default Apps",
+        icon_svg: APPS,
+        group: Some("System"),
+        keywords: "default applications mime browser terminal file manager editor",
+    },
     RouteInfo {
         route: Route::About,
         title: "About",
@@ -470,6 +486,8 @@ fn app() -> impl IntoElement {
                                     Route::DateTime => pages::DateTime.into_element(),
                                     Route::Privacy => pages::Privacy.into_element(),
                                     Route::Language => pages::Language.into_element(),
+                                    Route::Shortcuts => pages::Shortcuts.into_element(),
+                                    Route::DefaultApps => pages::DefaultApps.into_element(),
                                     Route::Printers => pages::Printers.into_element(),
                                     Route::Accounts => {
                                         // Real human users from /etc/passwd and avatar customization
@@ -481,7 +499,8 @@ fn app() -> impl IntoElement {
                                             .and_then(|o| String::from_utf8(o.stdout).ok())
                                             .map(|s| s.trim().to_string())
                                             .unwrap_or_else(|| "1000".to_string());
-                                        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/run/current-system/sw/bin/bash".to_string());
+                                        let shell = std::env::var("SHELL")
+                                            .unwrap_or_else(|_| "/run/current-system/sw/bin/bash".to_string());
                                         let user_display = format!("{username} (UID {uid})");
                                         let shell_display = format!("Shell: {shell}");
 
