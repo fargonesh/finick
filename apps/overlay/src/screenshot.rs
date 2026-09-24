@@ -23,12 +23,12 @@ impl Component for ScreenshotUtility {
                 rect()
                     .width(Size::fill())
                     .height(Size::fill())
-                    .padding(16.)
+                    .padding(12.)
                     .corner_radius(20.)
                     .background(t.panel)
                     .border(Border::new().width(1.).fill(t.border))
                     .vertical()
-                    .spacing(12.)
+                    .spacing(8.)
                     .content(Content::Flex)
                     .child(
                         rect()
@@ -51,19 +51,19 @@ impl Component for ScreenshotUtility {
                                     .child(label().font_size(12.).color(t.text_dim).text("✕")),
                             ),
                     )
-                    .child(label().font_size(12.).color(t.text_dim).text("Capture a screenshot and copy to clipboard"))
+                    .child(label().font_size(12.).color(t.text_dim).text("Capture and copy to clipboard"))
                     .child(
                         rect()
                             .width(Size::fill())
                             .horizontal()
-                            .spacing(10.)
+                            .spacing(8.)
                             .content(Content::Flex)
                             .child({
                                 let mut st = status;
                                 let mut cp = copying;
                                 rect()
                                     .width(Size::flex(1.))
-                                    .height(Size::px(64.))
+                                    .height(Size::px(56.))
                                     .corner_radius(12.)
                                     .background(t.panel_raised)
                                     .border(Border::new().width(1.).fill(t.border))
@@ -98,7 +98,7 @@ impl Component for ScreenshotUtility {
                                 let mut cp = copying;
                                 rect()
                                     .width(Size::flex(1.))
-                                    .height(Size::px(64.))
+                                    .height(Size::px(56.))
                                     .corner_radius(12.)
                                     .background(t.panel_raised)
                                     .border(Border::new().width(1.).fill(t.border))
@@ -134,7 +134,7 @@ impl Component for ScreenshotUtility {
                                 let mon = selected_mon.read().clone();
                                 rect()
                                     .width(Size::flex(1.))
-                                    .height(Size::px(64.))
+                                    .height(Size::px(56.))
                                     .corner_radius(12.)
                                     .background(t.panel_raised)
                                     .border(Border::new().width(1.).fill(t.border))
@@ -148,8 +148,9 @@ impl Component for ScreenshotUtility {
                                         let mut st2 = st;
                                         let mut cp2 = cp;
                                         spawn(async move {
+                                            let accent = get_theme().accent_name.to_string();
                                             let r = tokio::task::spawn_blocking(move || {
-                                                let opts = CaptureOptions::default();
+                                                let opts = CaptureOptions { accent_hex: Some(accent), ..Default::default() };
                                                 take_screenshot(&CaptureTarget::Monitor(m), &opts)
                                             }).await.unwrap_or(Err("task failed".to_string()));
                                             let msg = match r {
@@ -174,7 +175,8 @@ impl Component for ScreenshotUtility {
                         })))
                     })
                     .maybe_child(status.read().clone().map(|m| {
-                        rect().width(Size::fill()).padding((8.,10.)).corner_radius(8.).background(t.bg).border(Border::new().width(1.).fill(t.border)).child(label().font_size(11.).color(t.text_dim).text(m))
+                        let short = if m.chars().count() > 60 { format!("{}…", m.chars().take(59).collect::<String>()) } else { m };
+                        rect().width(Size::fill()).padding((6.,8.)).corner_radius(8.).background(t.bg).border(Border::new().width(1.).fill(t.border)).child(label().font_size(11.).color(t.text_dim).text(short))
                     }))
                     .child(
                         rect()
@@ -226,9 +228,9 @@ pub fn screenshot_window_config() -> WindowConfig {
     WindowConfig::new(screenshot_app)
         .with_title("screenshot")
         .with_app_id("overlay-screenshot")
-        .with_size(500., 300.)
-        .with_min_size(500., 280.)
-        .with_max_size(500., 480.)
+        .with_size(500., 264.)
+        .with_min_size(500., 240.)
+        .with_max_size(500., 400.)
         .with_decorations(false)
         .with_transparency(true)
         .with_resizable(false)
@@ -246,7 +248,7 @@ pub fn screenshot_window_config() -> WindowConfig {
 pub fn open_screenshot_utility() {
     let mon = crate::get_monitor_states().into_iter().find(|m| m.x == 0).unwrap_or(crate::MonitorState { name: "default".to_string(), x: 0, y: 0, width: 1920.0, height: 1080.0 });
     let w = 500;
-    let h = 300;
+    let h = 264;
     let px = mon.x + mon.width as i32 - w - 12;
     let py = mon.y + 44;
     let lua_rule = format!(

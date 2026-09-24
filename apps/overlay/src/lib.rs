@@ -508,11 +508,23 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
     let notifs_list = notifications.read().clone();
     let notif_count = notifs_list.len();
 
-    let active_ws_id = active_workspaces.read().get(&mon_name).copied().unwrap_or(0);
+    let active_ws_id = active_workspaces.read().get(&mon_name).copied().unwrap_or(1);
+    let tb_snapshot = topbar_settings.read().clone();
+    let is_light_theme = t.mode == ui::ThemeMode::Light;
+    let tb_text_kind = tb_snapshot.effective_text_color(is_light_theme).to_string();
+    let tb_text_size = tb_snapshot.text_size.clamp(10.0, 18.0) as f32;
+    let resolve_base = |kind: &str| match kind {
+        "Accent" => t.accent,
+        "Muted" => t.text_dim,
+        _ => t.text,
+    };
 
     let ws_data = workspaces.read().clone();
-    let mut visible_ws: Vec<system::WorkspaceInfo> =
-        ws_data.into_iter().filter(|w| w.windows > 0 || w.id == active_ws_id).collect();
+    let mut visible_ws: Vec<system::WorkspaceInfo> = ws_data
+        .into_iter()
+        .filter(|w| w.monitor.is_empty() || w.monitor == mon_name)
+        .filter(|w| w.windows > 0 || w.id == active_ws_id)
+        .collect();
     if visible_ws.is_empty() {
         visible_ws.push(system::WorkspaceInfo {
             id: active_ws_id,
@@ -523,8 +535,9 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
     }
     visible_ws.sort_by_key(|w| w.id);
     visible_ws.dedup_by_key(|w| w.id);
+    visible_ws.truncate(10);
     let workspaces_ui = rect()
-        .height(Size::px(24.))
+        .height(Size::px(28.))
         .horizontal()
         .cross_align(Alignment::Center)
         .content(Content::Flex)
@@ -534,34 +547,38 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
             let name = ws.name.clone();
             let is_active = w_id == active_ws_id;
             let bg = if is_active { t.accent } else { Color::TRANSPARENT };
+            let label_color = if is_active { Color::WHITE } else { resolve_base(&tb_text_kind) };
             rect()
-                .width(Size::px(24.))
-                .height(Size::px(24.))
-                .corner_radius(6.)
+                .width(Size::px(28.))
+                .height(Size::px(28.))
+                .corner_radius(8.)
                 .background(bg)
+                .border(Border::new().width(1.).fill(if is_active { t.accent } else { Color::TRANSPARENT }))
                 .center()
                 .cursor(CursorIcon::Pointer)
                 .on_press(move |_| {
-                    let _ =
-                        std::process::Command::new("hyprctl").args(["dispatch", "workspace", &w_id.to_string()]).output();
+                    let id_str = w_id.to_string();
+                    std::thread::spawn(move || {
+                        let _ = std::process::Command::new("hyprctl").args(["dispatch", "workspace", &id_str]).output();
+                    });
                 })
                 .child(
                     label()
-                        .font_size(topbar_settings.read().text_size as f32)
+                        .font_size(tb_text_size)
                         .font_weight(if is_active { FontWeight::BOLD } else { FontWeight::SEMI_BOLD })
-                        .color(if is_active {
-                            t.bg
-                        } else {
-                            match topbar_settings.read().text_color.as_str() {
-                                "Accent" => t.accent,
-                                "Muted" => t.text_dim,
-                                _ => t.text,
-                            }
-                        })
+                        .color(label_color)
                         .text(name),
                 )
         }));
 
+    let show_net = (wired_on && tb_snapshot.show_wired) || (!wired_on && tb_snapshot.show_wifi);
+    let show_bt_icon = tb_snapshot.show_bluetooth;
+    let show_sound_icon = tb_snapshot.show_sound;
+    let show_batt = has_battery && tb_snapshot.show_battery;
+    let show_notif_icon = tb_snapshot.show_notifications;
+    let tb_icon_size = tb_snapshot.icon_size.clamp(12., 20.) as f32;
+    let tb_icon_stroke = tb_snapshot.icon_stroke.clamp(1.0, 3.0) as f32;
+    let tb_base = resolve_base(&tb_text_kind);
     let status = rect()
         .height(Size::px(36.))
         .width(Size::fill())
@@ -583,14 +600,9 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                     let mut h = cb_hover;
                     let mut h2 = cb_hover;
                     let is_h = *cb_hover.read();
-                    let tb = topbar_settings.read().clone();
-                    let sz = tb.icon_size.clamp(12., 20.) as f32;
-                    let sw = tb.icon_stroke.clamp(1.0, 3.0) as f32;
-                    let base = match tb.text_color.as_str() {
-                        "Accent" => t.accent,
-                        "Muted" => t.text_dim,
-                        _ => t.text,
-                    };
+                    let sz = tb_icon_size;
+                    let sw = tb_icon_stroke;
+                    let base = tb_base;
                     rect()
                         .width(Size::px(28.))
                         .height(Size::px(28.))
@@ -612,14 +624,9 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                     let mut h = ss_hover;
                     let mut h2 = ss_hover;
                     let is_h = *ss_hover.read();
-                    let tb = topbar_settings.read().clone();
-                    let sz = tb.icon_size.clamp(12., 20.) as f32;
-                    let sw = tb.icon_stroke.clamp(1.0, 3.0) as f32;
-                    let base = match tb.text_color.as_str() {
-                        "Accent" => t.accent,
-                        "Muted" => t.text_dim,
-                        _ => t.text,
-                    };
+                    let sz = tb_icon_size;
+                    let sw = tb_icon_stroke;
+                    let base = tb_base;
                     rect()
                         .width(Size::px(28.))
                         .height(Size::px(28.))
@@ -656,54 +663,36 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                             let t = toggle_panel.clone();
                             move |_| t()
                         })
-                        .child({
-                            let tb = topbar_settings.read().clone();
-                            let base = match tb.text_color.as_str() {
-                                "Accent" => t.accent,
-                                "Muted" => t.text_dim,
-                                _ => t.text,
-                            };
-                            let sz = tb.icon_size.clamp(12., 20.) as f32;
-                            let sw = tb.icon_stroke.clamp(1.0, 3.0) as f32;
-                            icon_stroked(
-                                if wired_on { WIRED } else { WIFI },
-                                sz,
-                                sw,
-                                if wifi_on || wired_on { base } else { t.text_dim },
+                        .maybe(show_net, |el| {
+                            let sz = tb_icon_size;
+                            let sw = tb_icon_stroke;
+                            let base = tb_base;
+                            el.child(
+                                icon_stroked(
+                                    if wired_on { WIRED } else { WIFI },
+                                    sz,
+                                    sw,
+                                    if wifi_on || wired_on { base } else { t.text_dim },
+                                )
+                                .into_element(),
                             )
-                            .into_element()
                         })
-                        .child({
-                            let tb = topbar_settings.read().clone();
-                            let base = match tb.text_color.as_str() {
-                                "Accent" => t.accent,
-                                "Muted" => t.text_dim,
-                                _ => t.text,
-                            };
-                            let sz = tb.icon_size.clamp(12., 20.) as f32;
-                            let sw = tb.icon_stroke.clamp(1.0, 3.0) as f32;
-                            icon_stroked(BLUETOOTH, sz, sw, if bt_on { base } else { t.text_dim }).into_element()
+                        .maybe(show_bt_icon, |el| {
+                            let sz = tb_icon_size;
+                            let sw = tb_icon_stroke;
+                            let base = tb_base;
+                            el.child(icon_stroked(BLUETOOTH, sz, sw, if bt_on { base } else { t.text_dim }).into_element())
                         })
-                        .child({
-                            let tb = topbar_settings.read().clone();
-                            let base = match tb.text_color.as_str() {
-                                "Accent" => t.accent,
-                                "Muted" => t.text_dim,
-                                _ => t.text,
-                            };
-                            let sz = tb.icon_size.clamp(12., 20.) as f32;
-                            let sw = tb.icon_stroke.clamp(1.0, 3.0) as f32;
-                            icon_stroked(SOUND, sz, sw, if is_muted { t.text_dim } else { base }).into_element()
+                        .maybe(show_sound_icon, |el| {
+                            let sz = tb_icon_size;
+                            let sw = tb_icon_stroke;
+                            let base = tb_base;
+                            el.child(icon_stroked(SOUND, sz, sw, if is_muted { t.text_dim } else { base }).into_element())
                         })
-                        .maybe(has_battery && topbar_settings.read().show_battery, |el| {
-                            let tb = topbar_settings.read().clone();
-                            let base = match tb.text_color.as_str() {
-                                "Accent" => t.accent,
-                                "Muted" => t.text_dim,
-                                _ => t.text,
-                            };
-                            let sz = (tb.icon_size.clamp(12., 20.) - 1.) as f32;
-                            let sw = tb.icon_stroke.clamp(1.0, 3.0) as f32;
+                        .maybe(show_batt, |el| {
+                            let base = tb_base;
+                            let sz = (tb_icon_size - 1.) as f32;
+                            let sw = tb_icon_stroke;
                             el.child(
                                 rect()
                                     .horizontal()
@@ -720,64 +709,69 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                             )
                         })
                 })
-                .child({
-                    let mut h = notif_hover;
-                    let mut h2 = notif_hover;
-                    let is_h = *notif_hover.read();
-                    let tb = topbar_settings.read().clone();
-                    let sz = tb.icon_size.clamp(12., 20.) as f32;
-                    let sw = tb.icon_stroke.clamp(1.0, 3.0) as f32;
-                    let base = match tb.text_color.as_str() {
-                        "Accent" => t.accent,
-                        "Muted" => t.text_dim,
-                        _ => t.text,
-                    };
-                    let count = notif_count;
-                    let has_notif = count > 0;
-                    rect()
-                        .width(Size::px(28.))
-                        .height(Size::px(28.))
-                        .corner_radius(8.)
-                        .background(if is_h {
-                            t.panel_raised
-                        } else if has_notif {
-                            t.panel
-                        } else {
-                            Color::TRANSPARENT
-                        })
-                        .border(Border::new().width(1.).fill(if is_h || has_notif { t.border } else { Color::TRANSPARENT }))
-                        .center()
-                        .cursor(CursorIcon::Pointer)
-                        .on_pointer_enter(move |_| h.set(true))
-                        .on_pointer_leave(move |_| h2.set(false))
-                        .on_press({
-                            let tn = toggle_notifications.clone();
-                            move |_| tn()
-                        })
-                        .child(
-                            rect()
-                                .horizontal()
-                                .cross_align(Alignment::Center)
-                                .spacing(2.)
-                                .content(Content::Flex)
-                                .child(icon_stroked(NOTIFICATIONS, sz - 1., sw, if has_notif { t.accent } else { base }))
-                                .maybe(has_notif, |el| {
-                                    el.child(
-                                        rect()
-                                            .padding((1., 4.))
-                                            .corner_radius(999.)
-                                            .background(t.accent_red)
-                                            .center()
-                                            .child(
-                                                label()
-                                                    .font_size(9.)
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .color(Color::WHITE)
-                                                    .text(if count > 99 { "99+".to_string() } else { count.to_string() }),
-                                            ),
-                                    )
-                                }),
-                        )
+                .maybe(show_notif_icon, |el| {
+                    el.child({
+                        let mut h = notif_hover;
+                        let mut h2 = notif_hover;
+                        let is_h = *notif_hover.read();
+                        let sz = tb_icon_size;
+                        let sw = tb_icon_stroke;
+                        let base = tb_base;
+                        let count = notif_count;
+                        let has_notif = count > 0;
+                        rect()
+                            .width(Size::px(28.))
+                            .height(Size::px(28.))
+                            .corner_radius(8.)
+                            .background(if is_h {
+                                t.panel_raised
+                            } else if has_notif {
+                                t.panel
+                            } else {
+                                Color::TRANSPARENT
+                            })
+                            .border(Border::new().width(1.).fill(if is_h || has_notif {
+                                t.border
+                            } else {
+                                Color::TRANSPARENT
+                            }))
+                            .center()
+                            .cursor(CursorIcon::Pointer)
+                            .on_pointer_enter(move |_| h.set(true))
+                            .on_pointer_leave(move |_| h2.set(false))
+                            .on_press({
+                                let tn = toggle_notifications.clone();
+                                move |_| tn()
+                            })
+                            .child(
+                                rect()
+                                    .horizontal()
+                                    .cross_align(Alignment::Center)
+                                    .spacing(2.)
+                                    .content(Content::Flex)
+                                    .child(icon_stroked(NOTIFICATIONS, sz - 1., sw, if has_notif { t.accent } else { base }))
+                                    .maybe(has_notif, |el| {
+                                        el.child(
+                                            rect()
+                                                .padding((1., 4.))
+                                                .corner_radius(999.)
+                                                .background(t.accent_red)
+                                                .center()
+                                                .child(
+                                                    label()
+                                                        .font_size(9.)
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .color(Color::WHITE)
+                                                        .text(if count > 99 {
+                                                            "99+".to_string()
+                                                        } else {
+                                                            count.to_string()
+                                                        }),
+                                                ),
+                                        )
+                                    }),
+                            )
+                    })
                 })
                 .child(
                     rect()
@@ -789,13 +783,9 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                         })
                         .child(
                             label()
-                                .font_size(topbar_settings.read().text_size as f32)
+                                .font_size(tb_text_size)
                                 .font_weight(FontWeight::SEMI_BOLD)
-                                .color(match topbar_settings.read().text_color.as_str() {
-                                    "Accent" => t.accent,
-                                    "Muted" => t.text_dim,
-                                    _ => t.text,
-                                })
+                                .color(tb_base)
                                 .text(clock_str),
                         ),
                 ),
@@ -994,6 +984,36 @@ pub fn clear_hyprland_reserved_space_for_monitor(name: &str) {
     let _ = std::process::Command::new("hyprctl")
         .args(["keyword", "monitor", &format!("{},addreserved,0,0,0,0", name)])
         .output();
+}
+
+/// Binds SUPER+L to the finick locker if no binding already uses it.
+/// Runs in a background thread so a missing hyprctl never blocks startup.
+pub fn ensure_super_l_lock_binding() {
+    std::thread::spawn(|| {
+        let already_bound = std::process::Command::new("hyprctl")
+            .args(["binds", "-j"])
+            .output()
+            .ok()
+            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+            .and_then(|v| v.as_array().cloned())
+            .map(|binds| {
+                binds.iter().any(|b| {
+                    let key = b["key"].as_str().unwrap_or("").to_lowercase();
+                    let modmask = b["modmask"].as_i64().unwrap_or(0);
+                    (key == "l") && (modmask & 64 != 0)
+                })
+            })
+            .unwrap_or(false);
+        if !already_bound {
+            let locker_cmd =
+                system::locker_binary().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "locker".to_string());
+            let bind = format!("SUPER, L, exec, {locker_cmd}");
+            let out = std::process::Command::new("hyprctl").args(["keyword", "bind", &bind]).output();
+            if let Err(e) = out {
+                eprintln!("[finick] failed to bind SUPER+L to locker: {e}");
+            }
+        }
+    });
 }
 
 pub fn register_hyprland_rules() {
@@ -1376,6 +1396,8 @@ pub fn run() {
     }
 
     apply_hyprland_base_rules();
+    crate::clipboard_manager::start_clipboard_service();
+    ensure_super_l_lock_binding();
     let initial_monitors = get_monitor_states();
     for mon in &initial_monitors {
         apply_hyprland_monitor_rules(mon);
@@ -1430,7 +1452,7 @@ pub fn run() {
                                     if let Ok(mut g) = ctx.0.lock() { *g = None; }
                                 }
                                 if let Some(modal_ctx) = ctx.global_contexts.try_get_context::<modal::ModalState>() {
-                                    *modal_ctx.req.lock().unwrap() = None;
+                                    if let Ok(mut g) = modal_ctx.req.lock() { *g = None; }
                                 }
                             }).await;
                         });
@@ -1585,7 +1607,7 @@ pub fn run() {
                             }).await;
                             let mon = get_monitor_states().into_iter().find(|m| m.x == 0).unwrap_or(MonitorState { name: "default".to_string(), x: 0, y: 0, width: 1920.0, height: 1080.0 });
                             let w = 500;
-                            let hgt = 300;
+                            let hgt = 264;
                             let px = mon.x + mon.width as i32 - w - 12;
                             let py = mon.y + 44;
                             let mon_name = mon.name.clone();
@@ -1645,7 +1667,7 @@ pub fn run() {
                                         .with_background(Color::TRANSPARENT)
                                 );
                                 if let Some(modal_ctx) = ctx.global_contexts.try_get_context::<modal::ModalState>() {
-                                    *modal_ctx.req.lock().unwrap() = Some((req_clone.clone(), tx.clone(), window_id));
+                                    if let Ok(mut g) = modal_ctx.req.lock() { *g = Some((req_clone.clone(), tx.clone(), window_id)); }
                                 }
                             }).await;
                             tokio::spawn(async move {

@@ -99,21 +99,10 @@ pub fn load_initial_batch(
                     for entry in &entries {
                         apply_entry(entry, wifi, bt, volume, muted, brightness, dnd);
                         if let SettingKey::Custom(ref k) = entry.key {
-                            let mut needs = false;
                             let mut ts = topbar_settings.read().clone();
-                            match k.as_str() {
-                                "topbar.show_wifi" => if let Some(b) = entry.value.as_bool() { ts.show_wifi = b; needs = true; },
-                                "topbar.show_bluetooth" => if let Some(b) = entry.value.as_bool() { ts.show_bluetooth = b; needs = true; },
-                                "topbar.show_sound" => if let Some(b) = entry.value.as_bool() { ts.show_sound = b; needs = true; },
-                                "topbar.show_battery" => if let Some(b) = entry.value.as_bool() { ts.show_battery = b; needs = true; },
-                                "topbar.text_size" => if let Some(f) = entry.value.as_f64() { ts.text_size = f; needs = true; },
-                                "topbar.text_color" => if let Some(s) = entry.value.as_str() { ts.text_color = s.to_string(); needs = true; },
-                                "topbar.theme" => if let Some(s) = entry.value.as_str() { ts.theme = s.to_string(); needs = true; },
-                                "topbar.icon_size" => if let Some(f) = entry.value.as_f64() { ts.icon_size = f; needs = true; } else if let Some(i) = entry.value.as_i64() { ts.icon_size = i as f64; needs = true; },
-                                "topbar.icon_stroke" => if let Some(f) = entry.value.as_f64() { ts.icon_stroke = f; needs = true; } else if let Some(i) = entry.value.as_i64() { ts.icon_stroke = i as f64; needs = true; },
-                                _ => {}
+                            if apply_topbar_custom(&mut ts, k.as_str(), &entry.value) {
+                                topbar_settings.set(ts);
                             }
-                            if needs { topbar_settings.set(ts); }
                         }
                         if entry.key == SettingKey::AccentColor {
                             if let Some(s) = entry.value.as_str() {
@@ -151,8 +140,12 @@ pub struct TopbarSettings {
     pub show_bluetooth: bool,
     pub show_sound: bool,
     pub show_battery: bool,
+    pub show_wired: bool,
+    pub show_notifications: bool,
     pub text_size: f64,
     pub text_color: String,
+    pub text_color_light: String,
+    pub text_color_dark: String,
     pub theme: String,
     pub icon_size: f64,
     pub icon_stroke: f64,
@@ -165,13 +158,56 @@ impl Default for TopbarSettings {
             show_bluetooth: true,
             show_sound: true,
             show_battery: true,
+            show_wired: true,
+            show_notifications: true,
             text_size: 13.0,
             text_color: "Default".to_string(),
+            text_color_light: String::new(),
+            text_color_dark: String::new(),
             theme: "system".to_string(),
             icon_size: 14.0,
             icon_stroke: 1.6,
         }
     }
+}
+
+impl TopbarSettings {
+    pub fn effective_text_color(&self, is_light: bool) -> &str {
+        let override_c = if is_light { &self.text_color_light } else { &self.text_color_dark };
+        if !override_c.is_empty() && *override_c != "Inherit" {
+            override_c.as_str()
+        } else {
+            self.text_color.as_str()
+        }
+    }
+}
+
+fn apply_topbar_custom(ts: &mut TopbarSettings, k: &str, value: &SettingValue) -> bool {
+    match k {
+        "topbar.show_wifi" => if let Some(b) = value.as_bool() { ts.show_wifi = b; return true; },
+        "topbar.show_bluetooth" => if let Some(b) = value.as_bool() { ts.show_bluetooth = b; return true; },
+        "topbar.show_sound" => if let Some(b) = value.as_bool() { ts.show_sound = b; return true; },
+        "topbar.show_battery" => if let Some(b) = value.as_bool() { ts.show_battery = b; return true; },
+        "topbar.show_wired" => if let Some(b) = value.as_bool() { ts.show_wired = b; return true; },
+        "topbar.show_brightness" => return true,
+        "topbar.show_notifications" => if let Some(b) = value.as_bool() { ts.show_notifications = b; return true; },
+        "topbar.show_focus" => return true,
+        "topbar.text_size" => if let Some(f) = value.as_f64() { ts.text_size = f.clamp(10.0, 18.0); return true; },
+        "topbar.text_color" => if let Some(s) = value.as_str() { ts.text_color = s.to_string(); return true; },
+        "topbar.text_color_light" => if let Some(s) = value.as_str() { ts.text_color_light = s.to_string(); return true; },
+        "topbar.text_color_dark" => if let Some(s) = value.as_str() { ts.text_color_dark = s.to_string(); return true; },
+        "topbar.theme" => if let Some(s) = value.as_str() { ts.theme = s.to_string(); return true; },
+        "topbar.icon_size" => {
+            if let Some(f) = value.as_f64() { ts.icon_size = f.clamp(12.0, 20.0); return true; }
+            else if let Some(i) = value.as_i64() { ts.icon_size = (i as f64).clamp(12.0, 20.0); return true; }
+        }
+        "topbar.icon_stroke" => {
+            if let Some(f) = value.as_f64() { ts.icon_stroke = f.clamp(1.0, 3.0); return true; }
+            else if let Some(i) = value.as_i64() { ts.icon_stroke = (i as f64).clamp(1.0, 3.0); return true; }
+        }
+        _ => {}
+    }
+    false
 }
 
 pub fn subscribe_live(
@@ -235,20 +271,9 @@ pub fn subscribe_live(
                     }
                     SettingKey::Custom(ref k) => {
                         let mut ts = topbar_settings.read().clone();
-                        let mut changed = false;
-                        match k.as_str() {
-                            "topbar.show_wifi" => if let Some(b) = value.as_bool() { ts.show_wifi = b; changed = true; },
-                            "topbar.show_bluetooth" => if let Some(b) = value.as_bool() { ts.show_bluetooth = b; changed = true; },
-                            "topbar.show_sound" => if let Some(b) = value.as_bool() { ts.show_sound = b; changed = true; },
-                            "topbar.show_battery" => if let Some(b) = value.as_bool() { ts.show_battery = b; changed = true; },
-                            "topbar.text_size" => if let Some(f) = value.as_f64() { ts.text_size = f; changed = true; },
-                            "topbar.text_color" => if let Some(s) = value.as_str() { ts.text_color = s.to_string(); changed = true; },
-                            "topbar.theme" => if let Some(s) = value.as_str() { ts.theme = s.to_string(); changed = true; },
-                            "topbar.icon_size" => if let Some(f) = value.as_f64() { ts.icon_size = f; changed = true; } else if let Some(i) = value.as_i64() { ts.icon_size = i as f64; changed = true; },
-                            "topbar.icon_stroke" => if let Some(f) = value.as_f64() { ts.icon_stroke = f; changed = true; } else if let Some(i) = value.as_i64() { ts.icon_stroke = i as f64; changed = true; },
-                            _ => {}
+                        if apply_topbar_custom(&mut ts, k.as_str(), &value) {
+                            topbar_settings.set(ts);
                         }
-                        if changed { topbar_settings.set(ts); }
                     }
                     SettingKey::AccentColor => {
                         if let Some(s) = value.as_str() {

@@ -16,20 +16,19 @@ impl Component for ModalApp {
     fn render(&self) -> impl IntoElement {
         let _st = use_init_app_theme(get_theme());
         let t = use_app_theme();
-        
+        let password = use_state(String::new);
+        let is_working = use_state(|| false);
+
         let ctx_opt = GlobalContexts::get().try_get_context::<ModalState>();
         let Some(ctx) = ctx_opt else {
             return rect().into_element();
         };
 
-        let req_lock = ctx.req.lock().unwrap();
-        let Some((req, tx, wid)) = req_lock.clone() else {
+        let req_snapshot: Option<(ModalRequest, std::sync::mpsc::Sender<ModalResponse>, winit::window::WindowId)> =
+            ctx.req.lock().ok().and_then(|g| g.clone());
+        let Some((req, tx, wid)) = req_snapshot else {
             return rect().into_element();
         };
-        drop(req_lock); // drop lock before rendering
-
-        let password = use_state(String::new);
-        let is_working = use_state(|| false);
         
         match req {
             ModalRequest::WifiPassword { ssid, security } => {
@@ -61,7 +60,7 @@ impl Component for ModalApp {
                                             let tx = tx.clone();
                                             move |_| {
                                                 let _ = tx.send(ModalResponse::Canceled);
-                                                *ctx.req.lock().unwrap() = None;
+                                                if let Ok(mut g) = ctx.req.lock() { *g = None; }
                                                 Platform::get().close_window(wid);
                                             }
                                         }).child("Cancel")
@@ -82,7 +81,7 @@ impl Component for ModalApp {
                                                 std::thread::spawn(move || {
                                                     let _ = HyprlandBackend.connect_wifi_with_password(&s_str, Some(&p_str), false);
                                                     let _ = tx2.send(ModalResponse::Success { data: None });
-                                                    *ctx2.req.lock().unwrap() = None;
+                                                    if let Ok(mut g) = ctx2.req.lock() { *g = None; }
                                                     Platform::get().close_window(wid);
                                                 });
                                             }
@@ -120,7 +119,7 @@ impl Component for ModalApp {
                                             let tx = tx.clone();
                                             move |_| {
                                                 let _ = tx.send(ModalResponse::Canceled);
-                                                *ctx.req.lock().unwrap() = None;
+                                                if let Ok(mut g) = ctx.req.lock() { *g = None; }
                                                 Platform::get().close_window(wid);
                                             }
                                         }).child("Cancel")
@@ -141,7 +140,7 @@ impl Component for ModalApp {
                                                 std::thread::spawn(move || {
                                                     let _ = HyprlandBackend.pair_bluetooth_device(&m_str, if p_str.is_empty() { None } else { Some(&p_str) });
                                                     let _ = tx2.send(ModalResponse::Success { data: None });
-                                                    *ctx2.req.lock().unwrap() = None;
+                                                    if let Ok(mut g) = ctx2.req.lock() { *g = None; }
                                                     Platform::get().close_window(wid);
                                                 });
                                             }
@@ -178,7 +177,7 @@ impl Component for ModalApp {
                                             let tx = tx.clone();
                                             move |_| {
                                                 let _ = tx.send(ModalResponse::Canceled);
-                                                *ctx.req.lock().unwrap() = None;
+                                                if let Ok(mut g) = ctx.req.lock() { *g = None; }
                                                 Platform::get().close_window(wid);
                                             }
                                         }).child("Cancel")
@@ -196,7 +195,7 @@ impl Component for ModalApp {
                                                 let ctx2 = ctx.clone();
                                                 std::thread::spawn(move || {
                                                     let _ = tx2.send(ModalResponse::Success { data: Some(p_str) });
-                                                    *ctx2.req.lock().unwrap() = None;
+                                                    if let Ok(mut g) = ctx2.req.lock() { *g = None; }
                                                     Platform::get().close_window(wid);
                                                 });
                                             }

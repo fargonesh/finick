@@ -48,7 +48,18 @@ pub struct SettingsStore {
     pub window_layout: State<usize>,
     pub workspace_gap: State<f64>,
     pub topbar_text_size: State<f64>,
+    pub topbar_theme: State<String>,
     pub topbar_text_color: State<String>,
+    pub topbar_text_color_light: State<String>,
+    pub topbar_text_color_dark: State<String>,
+    pub topbar_icon_size: State<f64>,
+    pub topbar_icon_stroke: State<f64>,
+    pub topbar_show_wifi: State<bool>,
+    pub topbar_show_bluetooth: State<bool>,
+    pub topbar_show_wired: State<bool>,
+    pub topbar_show_sound: State<bool>,
+    pub topbar_show_battery: State<bool>,
+    pub topbar_show_notifications: State<bool>,
 
     // System & General
     pub time_24h: State<bool>,
@@ -465,10 +476,19 @@ impl SettingsStore {
                             s.set(i as usize);
                         }
                     }
+                    "topbar.theme" => {
+                        if let Some(s_val) = val.as_str() {
+                            let mut s = self.topbar_theme;
+                            s.set(s_val.to_string());
+                        }
+                    }
                     "topbar.text_size" => {
                         if let Some(f) = val.as_f64() {
                             let mut s = self.topbar_text_size;
-                            s.set(f);
+                            s.set(f.clamp(10.0, 18.0));
+                        } else if let Some(i) = val.as_i64() {
+                            let mut s = self.topbar_text_size;
+                            s.set((i as f64).clamp(10.0, 18.0));
                         }
                     }
                     "topbar.text_color" => {
@@ -477,6 +497,43 @@ impl SettingsStore {
                             s.set(s_val.to_string());
                         }
                     }
+                    "topbar.text_color_light" => {
+                        if let Some(s_val) = val.as_str() {
+                            let mut s = self.topbar_text_color_light;
+                            s.set(s_val.to_string());
+                        }
+                    }
+                    "topbar.text_color_dark" => {
+                        if let Some(s_val) = val.as_str() {
+                            let mut s = self.topbar_text_color_dark;
+                            s.set(s_val.to_string());
+                        }
+                    }
+                    "topbar.icon_size" => {
+                        if let Some(f) = val.as_f64() {
+                            let mut s = self.topbar_icon_size;
+                            s.set(f.clamp(12.0, 20.0));
+                        } else if let Some(i) = val.as_i64() {
+                            let mut s = self.topbar_icon_size;
+                            s.set((i as f64).clamp(12.0, 20.0));
+                        }
+                    }
+                    "topbar.icon_stroke" => {
+                        if let Some(f) = val.as_f64() {
+                            let mut s = self.topbar_icon_stroke;
+                            s.set(f.clamp(1.0, 3.0));
+                        } else if let Some(i) = val.as_i64() {
+                            let mut s = self.topbar_icon_stroke;
+                            s.set((i as f64).clamp(1.0, 3.0));
+                        }
+                    }
+                    "topbar.show_wifi" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_wifi; s.set(b); },
+                    "topbar.show_bluetooth" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_bluetooth; s.set(b); },
+                    "topbar.show_wired" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_wired; s.set(b); },
+                    "topbar.show_sound" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_sound; s.set(b); },
+                    "topbar.show_battery" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_battery; s.set(b); },
+                    "topbar.show_notifications" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_notifications; s.set(b); },
+                    "topbar.show_brightness" | "topbar.show_focus" => {}
                     _ => {}
                 }
             }
@@ -540,7 +597,18 @@ pub fn use_init_settings_store() -> SettingsStore {
     let window_layout = use_state(|| 0usize);
     let workspace_gap = use_state(|| 12.0);
     let topbar_text_size = use_state(|| 14.0);
+    let topbar_theme = use_state(|| "system".to_string());
     let topbar_text_color = use_state(|| "Default".to_string());
+    let topbar_text_color_light = use_state(|| "Inherit".to_string());
+    let topbar_text_color_dark = use_state(|| "Inherit".to_string());
+    let topbar_icon_size = use_state(|| 14.0);
+    let topbar_icon_stroke = use_state(|| 1.6);
+    let topbar_show_wifi = use_state(|| true);
+    let topbar_show_bluetooth = use_state(|| true);
+    let topbar_show_wired = use_state(|| true);
+    let topbar_show_sound = use_state(|| true);
+    let topbar_show_battery = use_state(|| true);
+    let topbar_show_notifications = use_state(|| true);
 
     let time_24h = use_state(|| true);
     let auto_updates = use_state(|| true);
@@ -641,7 +709,18 @@ pub fn use_init_settings_store() -> SettingsStore {
         firewall_enabled,
         lock_states,
         topbar_text_size,
+        topbar_theme,
         topbar_text_color,
+        topbar_text_color_light,
+        topbar_text_color_dark,
+        topbar_icon_size,
+        topbar_icon_stroke,
+        topbar_show_wifi,
+        topbar_show_bluetooth,
+        topbar_show_wired,
+        topbar_show_sound,
+        topbar_show_battery,
+        topbar_show_notifications,
     };
 
     provide_context(store);

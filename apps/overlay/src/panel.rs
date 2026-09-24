@@ -205,8 +205,7 @@ pub fn control_panel_app() -> Element {
     let wired_info = wired.read().clone();
     let bat_pct = *battery_pct.read();
     let bat_status = battery_status.read().clone();
-    let power_snapshot = HyprlandBackend.get_power_info();
-    let has_battery = power_snapshot.capacity != "Unknown" && power_snapshot.status != "Unknown";
+    let has_battery = !bat_status.is_empty() && bat_status != "Unknown" && bat_pct > 0;
     let (current_wifi, available_networks) = wifi_details.read().clone();
     let bt_list = bt_devices.read().clone();
 
@@ -319,11 +318,12 @@ pub fn control_panel_app() -> Element {
             if rows.is_empty() && current_wifi.ssid.is_none() {
                 rows.push(tile_sub("No networks found").into_element());
             }
+            let list_h = (rows.len().min(5) as f32 * 30.0 + 8.0).clamp(40.0, 120.0);
             card = card.child(
                 ScrollView::new()
                     .width(Size::fill())
-                    .height(Size::px(150.))
-                    .show_scrollbar(true)
+                    .height(Size::px(list_h))
+                    .show_scrollbar(rows.len() > 4)
                     .child(
                         rect().width(Size::fill()).vertical().spacing(2.).content(Content::Flex).children(rows)
                     )
@@ -405,11 +405,12 @@ pub fn control_panel_app() -> Element {
             if bt_list.is_empty() {
                 rows.push(tile_sub("No devices found — scanning...").into_element());
             }
+            let list_h = (rows.len().min(5) as f32 * 32.0 + 8.0).clamp(40.0, 120.0);
             card = card.child(
                 ScrollView::new()
                     .width(Size::fill())
-                    .height(Size::px(150.))
-                    .show_scrollbar(true)
+                    .height(Size::px(list_h))
+                    .show_scrollbar(rows.len() > 4)
                     .child(rect().width(Size::fill()).vertical().spacing(2.).content(Content::Flex).children(rows))
             );
         }
@@ -484,24 +485,14 @@ pub fn control_panel_app() -> Element {
                     .child(
                         label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(format!("{bat_pct}%")),
                     )
-                    .child(label().font_size(12.).color(t.text_dim).text(bat_status))
-                    .maybe_child(
-                        power_snapshot
-                            .health_percent
-                            .map(|h| label().font_size(11.).color(t.text_dim).text(format!("Health {h}%"))),
-                    )
-                    .maybe_child(
-                        power_snapshot
-                            .cycle_count
-                            .map(|c| label().font_size(11.).color(t.text_dim).text(format!("{c} cycles"))),
-                    ),
+                    .child(label().font_size(12.).color(t.text_dim).text(if bat_status.is_empty() { "Unknown".to_string() } else { bat_status })),
             ),
     );
     let power_btn = |label_text: &'static str, svg: &'static str, bg: Color, fg: Color, action: fn()| {
         let txt = label_text.to_string();
         rect()
             .width(Size::flex(1.))
-            .height(Size::px(68.))
+            .height(Size::px(60.))
             .corner_radius(14.)
             .background(bg)
             .border(Border::new().width(1.).fill(if bg == t.accent_red { t.accent_red } else { t.border }))
@@ -523,6 +514,7 @@ pub fn control_panel_app() -> Element {
         .horizontal()
         .spacing(10.)
         .content(Content::Flex)
+        .child(power_btn("Lock", LOCK, t.panel_raised, t.text, || system::trigger_lock()))
         .child(power_btn("Log out", ARROW_RIGHT, t.panel_raised, t.text, || power_action("logout")))
         .child(power_btn("Restart", REFRESH_CW, t.panel_raised, t.text, || power_action("reboot")))
         .child(power_btn("Shut down", POWER_ICON, t.accent_red, Color::WHITE, || power_action("shutdown")));

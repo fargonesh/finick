@@ -3261,66 +3261,121 @@ impl Component for DesktopDetailPage {
                 .child(
                     tile()
                         .child(tile_head(None, "Topbar UI", None::<String>))
-                        
-                        .child(setting_row("Topbar Text Size", None::<String>, false, {
+                        .child(field_label("Appearance"))
+                        .child({
                             let store = store;
-                            
+                            let current = store.topbar_theme.read().clone();
+                            let label = match current.as_str() {
+                                "light" => "Light",
+                                "dark" => "Dark",
+                                _ => "System",
+                            }
+                            .to_string();
+                            let opts: Vec<ui::DropdownOption> = vec![
+                                ui::DropdownOption { label: "System".to_string(), value: "system".to_string() },
+                                ui::DropdownOption { label: "Light".to_string(), value: "light".to_string() },
+                                ui::DropdownOption { label: "Dark".to_string(), value: "dark".to_string() },
+                            ];
+                            dropdown_select(label, opts, EventHandler::new(move |v: String| {
+                                let normalized = match v.to_lowercase().as_str() {
+                                    "light" => "light",
+                                    "dark" => "dark",
+                                    _ => "system",
+                                };
+                                store.set(SettingKey::Custom("topbar.theme".to_string()), normalized);
+                            }))
+                        })
+                        .child(rect().margin((10., 0., 0., 0.)).child(field_label(format!("Text size · {} px", *store.topbar_text_size.read() as i32))))
+                        .child({
+                            let store = store;
                             slider_row(None, *store.topbar_text_size.read(), move |v| {
+                                let v = v.clamp(10.0, 18.0);
+                                let mut s = store.topbar_text_size;
+                                s.set(v);
                                 store.set(SettingKey::Custom("topbar.text_size".to_string()), v);
                             })
-                        }))
-                        .child(setting_row("Topbar Text Color", None::<String>, true, {
+                        })
+                        .child(rect().margin((10., 0., 0., 0.)).child(field_label("Text colour")))
+                        .child({
                             let store = store;
-                            
                             let current = store.topbar_text_color.read().clone();
-                            
-                            
                             let opts: Vec<ui::DropdownOption> = vec!["Default", "Accent", "Muted"].into_iter().map(|s| ui::DropdownOption { label: s.to_string(), value: s.to_string() }).collect();
                             dropdown_select(current, opts, EventHandler::new(move |v: String| {
                                 store.set(SettingKey::Custom("topbar.text_color".to_string()), v);
                             }))
-                        }))
-    
-                )
-    
-.child(
-                    tile()
-                        .child(tile_head(None, "Control Panel", None::<String>))
-                        .child(tile_sub("Choose which controls appear in the top-bar panel"))
-                        .child(setting_row("Show Wi-Fi", None::<String>, false, {
+                        })
+                        .child(rect().margin((10., 0., 0., 0.)).child(field_label("Light theme text")))
+                        .child({
                             let store = store;
-                            let cur = *store.wifi_power.read();
+                            let current = store.topbar_text_color_light.read().clone();
+                            let opts: Vec<ui::DropdownOption> = vec!["Inherit", "Default", "Accent", "Muted"].into_iter().map(|s| ui::DropdownOption { label: s.to_string(), value: s.to_string() }).collect();
+                            dropdown_select(current, opts, EventHandler::new(move |v: String| {
+                                store.set(SettingKey::Custom("topbar.text_color_light".to_string()), v);
+                            }))
+                        })
+                        .child(rect().margin((10., 0., 0., 0.)).child(field_label("Dark theme text")))
+                        .child({
+                            let store = store;
+                            let current = store.topbar_text_color_dark.read().clone();
+                            let opts: Vec<ui::DropdownOption> = vec!["Inherit", "Default", "Accent", "Muted"].into_iter().map(|s| ui::DropdownOption { label: s.to_string(), value: s.to_string() }).collect();
+                            dropdown_select(current, opts, EventHandler::new(move |v: String| {
+                                store.set(SettingKey::Custom("topbar.text_color_dark".to_string()), v);
+                            }))
+                        })
+                        .child(rect().margin((10., 0., 0., 0.)).child(field_label(format!("Icon size · {} px", *store.topbar_icon_size.read() as i32))))
+                        .child({
+                            let store = store;
+                            slider_row(None, *store.topbar_icon_size.read(), move |v| {
+                                let v = v.clamp(12.0, 20.0);
+                                let mut s = store.topbar_icon_size;
+                                s.set(v);
+                                store.set(SettingKey::Custom("topbar.icon_size".to_string()), v);
+                            })
+                        })
+                        .child(rect().margin((10., 0., 0., 0.)).child(field_label(format!("Icon weight · {:.1}", *store.topbar_icon_stroke.read()))))
+                        .child({
+                            let store = store;
+                            slider_row(None, *store.topbar_icon_stroke.read(), move |v| {
+                                let v = v.clamp(1.0, 3.0);
+                                let mut s = store.topbar_icon_stroke;
+                                s.set(v);
+                                store.set(SettingKey::Custom("topbar.icon_stroke".to_string()), v);
+                            })
+                        }),
+                )
+                .child(
+                    tile()
+                        .child(tile_head(None, "Topbar icons", None::<String>))
+                        .child(tile_sub("Choose which icons appear in the top bar"))
+                        .child(setting_row("Wi-Fi", None::<String>, false, {
+                            let store = store;
+                            let cur = *store.topbar_show_wifi.read();
                             pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_wifi".to_string()), v))
                         }))
-                        .child(setting_row("Show Bluetooth", None::<String>, true, {
+                        .child(setting_row("Wired", None::<String>, true, {
                             let store = store;
-                            let cur = *store.bt_power.read();
+                            let cur = *store.topbar_show_wired.read();
+                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_wired".to_string()), v))
+                        }))
+                        .child(setting_row("Bluetooth", None::<String>, true, {
+                            let store = store;
+                            let cur = *store.topbar_show_bluetooth.read();
                             pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_bluetooth".to_string()), v))
                         }))
-                        .child(setting_row("Show Wired", None::<String>, true, {
+                        .child(setting_row("Sound", None::<String>, true, {
                             let store = store;
-                            pill_switch(true, move |v| store.set(SettingKey::Custom("topbar.show_wired".to_string()), v))
+                            let cur = *store.topbar_show_sound.read();
+                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_sound".to_string()), v))
                         }))
-                        .child(setting_row("Show Sound", None::<String>, true, {
+                        .child(setting_row("Battery", None::<String>, true, {
                             let store = store;
-                            pill_switch(!*store.is_mute.read(), move |v| store.set(SettingKey::Custom("topbar.show_sound".to_string()), v))
+                            let cur = *store.topbar_show_battery.read();
+                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_battery".to_string()), v))
                         }))
-                        .child(setting_row("Show Brightness", None::<String>, true, {
+                        .child(setting_row("Notifications", None::<String>, true, {
                             let store = store;
-                            pill_switch(true, move |v| store.set(SettingKey::Custom("topbar.show_brightness".to_string()), v))
-                        }))
-                        .child(setting_row("Show Battery", None::<String>, true, {
-                            let store = store;
-                            pill_switch(*store.battery_pct.read() > 0, move |v| store.set(SettingKey::Custom("topbar.show_battery".to_string()), v))
-                        }))
-                        .child(setting_row("Show Notifications", None::<String>, true, {
-                            let store = store;
-                            pill_switch(*store.allow_notif.read(), move |v| store.set(SettingKey::Custom("topbar.show_notifications".to_string()), v))
-                        }))
-                        .child(setting_row("Show Focus / DND", None::<String>, true, {
-                            let store = store;
-                            let on = *store.focus_mode.read() != "off";
-                            pill_switch(on, move |v| store.set(SettingKey::Custom("topbar.show_focus".to_string()), v))
+                            let cur = *store.topbar_show_notifications.read();
+                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_notifications".to_string()), v))
                         })),
                 ),
         )

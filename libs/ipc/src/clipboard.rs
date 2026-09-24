@@ -72,19 +72,20 @@ impl ClipboardBroadcaster {
     }
 
     pub fn add_subscriber(&self, sender: Sender<ClipboardResponse>) {
-        let mut subs = self.subscribers.lock().unwrap();
-        subs.push(sender);
+        if let Ok(mut subs) = self.subscribers.lock() {
+            subs.push(sender);
+        }
     }
 
     pub fn broadcast(&self, event: ClipboardEvent) {
-        let mut subs = self.subscribers.lock().unwrap();
-        let resp = ClipboardResponse::Event(event);
-        subs.retain(|sender| sender.send(resp.clone()).is_ok());
+        if let Ok(mut subs) = self.subscribers.lock() {
+            let resp = ClipboardResponse::Event(event);
+            subs.retain(|sender| sender.send(resp.clone()).is_ok());
+        }
     }
 
     pub fn subscriber_count(&self) -> usize {
-        let subs = self.subscribers.lock().unwrap();
-        subs.len()
+        self.subscribers.lock().map(|s| s.len()).unwrap_or(0)
     }
 }
 
@@ -122,7 +123,7 @@ pub fn get_history(socket: impl Into<PathBuf> + Display) -> std::io::Result<Vec<
         }),
     )?;
 
-    Ok(rx.recv().unwrap_or_default())
+    Ok(rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or_default())
 }
 
 /// Add text entry synchronously.

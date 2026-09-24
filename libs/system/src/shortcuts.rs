@@ -159,7 +159,7 @@ fn categorize_shortcut(command: &str) -> (&'static str, String) {
         }
     } else if cmd.contains("grimblast") {
         ("Applications & Tools", "Screenshot Selection".to_string())
-    } else if cmd.contains("hyprlock") {
+    } else if cmd.contains("hyprlock") || cmd.contains("locker") {
         ("Applications & Tools", "Lock Screen".to_string())
     } else if cmd.contains("ghostty") || cmd.contains("terminal") || cmd.contains("kitty") {
         ("Applications & Tools", "Open Terminal".to_string())

@@ -114,7 +114,7 @@
               fi
               exec "$DEVENV_BIN" --quiet shell -- bash -c 'cd "$1"; shift; exec cargo run ${cargoArgs} --manifest-path "'"$REPO"'/Cargo.toml" -- "$@"' bash "$ORIG_DIR" "$@"
             '')
-            [ "overlay" "topbar" "settings" "files" "finickd" "index" "finickctl" ]) ++ [ desktopEntries ];
+            [ "overlay" "topbar" "settings" "files" "finickd" "index" "finickctl" "locker" ]) ++ [ desktopEntries ];
           meta.mainProgram = "overlay";
         };
       in

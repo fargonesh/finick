@@ -148,13 +148,15 @@ pub fn icon(svg_str: &'static str, size: f32, color: Color) -> impl IntoElement 
 }
 
 pub fn icon_stroked(svg_str: &'static str, size: f32, stroke: f32, color: Color) -> impl IntoElement {
-    let st = format!("{stroke:.1}");
-    let patched = svg_str.replacen("stroke-width=\"1.6\"", &format!("stroke-width=\"{st}\""), 1)
-        .replacen("stroke-width=\"1.8\"", &format!("stroke-width=\"{st}\""), 1)
-        .replacen("stroke-width=\"2\"", &format!("stroke-width=\"{st}\""), 1);
+    let st = format!("{:.1}", stroke.clamp(1.0, 3.0));
+    let mut patched = svg_str.replace("stroke-width=\"1.6\"", &format!("stroke-width=\"{st}\""));
+    patched = patched.replace("stroke-width=\"1.8\"", &format!("stroke-width=\"{st}\""));
+    for ver in ["stroke-width=\"2\"", "stroke-width=\"2.0\""] {
+        patched = patched.replace(ver, &format!("stroke-width=\"{st}\""));
+    }
     let leaked: &'static str = Box::leak(patched.into_boxed_str());
     SvgViewer::new(leaked.as_bytes())
-        .width(Size::px(size))
-        .height(Size::px(size))
+        .width(Size::px(size.clamp(8.0, 32.0)))
+        .height(Size::px(size.clamp(8.0, 32.0)))
         .color(color)
 }

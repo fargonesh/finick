@@ -16,7 +16,7 @@ pub use desktop_apps::*;
 pub mod auth;
 pub use auth::{current_username, verify_password};
 pub mod lock;
-pub use lock::trigger_lock;
+pub use lock::{locker_binary, trigger_lock};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayInfo {

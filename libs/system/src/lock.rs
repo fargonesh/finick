@@ -1,17 +1,65 @@
 use std::process::Command;
 
-pub fn trigger_lock() {
-    let exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("locker")))
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "locker".to_string());
-    if std::path::Path::new(&exe).exists() {
-        let _ = Command::new(&exe).spawn();
-        return;
+/// Resolves the locker binary: explicit env override, sibling of the
+/// current executable, well-known install locations, then PATH.
+pub fn locker_binary() -> Option<std::path::PathBuf> {
+    if let Some(dir) = std::env::var_os("FINICK_LOCKER_BIN").map(std::path::PathBuf::from) {
+        let cand = if dir.is_file() { dir } else { dir.join("locker") };
+        if cand.is_file() {
+            return Some(cand);
+        }
     }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for name in ["locker", "finick-locker"] {
+                let cand = dir.join(name);
+                if cand.is_file() {
+                    return Some(cand);
+                }
+            }
+        }
+    }
+    for base in [
+        "/run/current-system/sw/bin/locker",
+        "/usr/local/bin/locker",
+        "/usr/bin/locker",
+    ] {
+        let cand = std::path::PathBuf::from(base);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+        for cand in [home.join(".cargo/bin/locker"), home.join(".local/bin/locker")] {
+            if cand.is_file() {
+                return Some(cand);
+            }
+        }
+    }
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).map(|d| d.join("locker")).find(|p| p.is_file())
+    })
+}
+
+pub fn trigger_lock() {
+    if let Some(exe) = locker_binary() {
+        match Command::new(&exe).spawn() {
+            Ok(_) => return,
+            Err(e) => eprintln!("[finick] failed to spawn locker at {}: {e}", exe.display()),
+        }
+        let exe_str = exe.to_string_lossy().to_string();
+        match Command::new("hyprctl").args(["dispatch", "exec", "--", &exe_str]).spawn() {
+            Ok(_) => return,
+            Err(e) => eprintln!("[finick] hyprctl dispatch exec locker failed: {e}"),
+        }
+    } else {
+        eprintln!("[finick] locker binary not found (set FINICK_LOCKER_BIN to override)");
+    }
+    // Last resort: rely on PATH inside hyprland / the shell.
     let _ = Command::new("hyprctl").args(["dispatch", "exec", "--", "locker"]).spawn();
-    let _ = Command::new("locker").spawn();
+    if let Err(e) = Command::new("locker").spawn() {
+        eprintln!("[finick] fallback locker spawn failed: {e}");
+    }
 }
 
 pub fn watch_lid_close<F: Fn() + Send + 'static>(on_close: F) {

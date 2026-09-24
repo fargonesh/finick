@@ -1,9 +1,21 @@
 use freya::prelude::*;
-use ipsea::clipboard::{CLIPBOARD_SOCKET_NAME, ClipboardItem, ClipboardEvent};
+use ipsea::clipboard::{CLIPBOARD_SOCKET_NAME, ClipboardBroadcaster, ClipboardEvent, ClipboardItem, ClipboardRequest, ClipboardResponse};
+use std::sync::{Arc, Mutex};
 use ui::*;
 
 fn trunc(s: &str, n: usize) -> String {
-    if s.chars().count() <= n { s.to_string() } else { let mut t: String = s.chars().take(n-1).collect(); t.push('…'); t }
+    let n = n.max(8);
+    let flat = s.replace(|c: char| c.is_control() && c != '\n' && c != '\t', " ");
+    let first_line = flat.lines().next().unwrap_or("").to_string();
+    let mut it = first_line.chars();
+    let mut out: String = it.by_ref().take(n).collect();
+    if it.next().is_some() || flat.lines().count() > 1 {
+        while out.chars().count() >= n {
+            out.pop();
+        }
+        out.push('…');
+    }
+    if out.is_empty() { "(empty)".to_string() } else { out }
 }
 
 #[derive(PartialEq)]
@@ -58,7 +70,8 @@ impl Component for ClipboardManager {
         });
         let query = filter.read().to_lowercase();
         let list = items.read().clone();
-        let filtered: Vec<ClipboardItem> = list.into_iter().filter(|i| query.is_empty() || i.text.to_lowercase().contains(&query)).collect();
+        let mut filtered: Vec<ClipboardItem> = list.into_iter().filter(|i| query.is_empty() || i.text.to_lowercase().contains(&query)).collect();
+        filtered.truncate(100);
         rect()
             .width(Size::fill())
             .height(Size::fill())
@@ -110,7 +123,7 @@ impl Component for ClipboardManager {
                                     ),
                             ),
                     )
-                    .child(Input::new(filter).width(Size::fill()).placeholder("Search clipboard…"))
+                    .child(Input::new(filter.into_writable()).width(Size::fill()).placeholder("Search clipboard…"))
                     .child(
                         rect()
                             .width(Size::fill())
@@ -157,6 +170,144 @@ impl Component for ClipboardManager {
             )
             .into_element()
     }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+#[derive(Default)]
+struct ClipboardStore {
+    items: Vec<ClipboardItem>,
+    next_id: u64,
+}
+
+impl ClipboardStore {
+    fn add(&mut self, text: String) -> Option<ClipboardItem> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let mut owned = trimmed.to_string();
+        if owned.chars().count() > 100_000 {
+            owned = owned.chars().take(100_000).collect();
+        }
+        if self.items.first().is_some_and(|f| f.text == owned) {
+            return None;
+        }
+        self.items.retain(|x| x.text != owned);
+        self.next_id += 1;
+        let item = ClipboardItem { id: self.next_id, text: owned, timestamp: now_secs(), pinned: false };
+        self.items.insert(0, item.clone());
+        self.items.truncate(100);
+        Some(item)
+    }
+}
+
+/// Starts the clipboard history IPC server (in-memory store) plus a
+/// Wayland clipboard watcher. Called once from the overlay entry point;
+/// without this no daemon answers clipboard requests and every action
+/// silently fails or hangs on stale sockets.
+pub fn start_clipboard_service() {
+    let store = Arc::new(Mutex::new(ClipboardStore::default()));
+    let broadcaster = ClipboardBroadcaster::new();
+
+    let handler_store = store.clone();
+    let handler_broadcaster = broadcaster.clone();
+    let handler = move |req: ClipboardRequest, sender: std::sync::mpsc::Sender<ClipboardResponse>| {
+        let reply = match req {
+            ClipboardRequest::GetHistory => {
+                let items = handler_store.lock().map(|s| s.items.clone()).unwrap_or_default();
+                ClipboardResponse::History(items)
+            }
+            ClipboardRequest::Add { text } => match handler_store.lock().ok().and_then(|mut s| s.add(text)) {
+                Some(item) => {
+                    handler_broadcaster.broadcast(ClipboardEvent::Added(item.clone()));
+                    ClipboardResponse::Item(item)
+                }
+                None => ClipboardResponse::Ok,
+            },
+            ClipboardRequest::Select { id } => {
+                let item = handler_store.lock().ok().and_then(|mut s| {
+                    let pos = s.items.iter().position(|x| x.id == id)?;
+                    let mut item = s.items.remove(pos);
+                    item.timestamp = now_secs();
+                    s.items.insert(0, item.clone());
+                    Some(item)
+                });
+                match item {
+                    Some(item) => {
+                        let _ = system::copy_text(&item.text);
+                        handler_broadcaster.broadcast(ClipboardEvent::Selected(item));
+                        ClipboardResponse::Ok
+                    }
+                    None => ClipboardResponse::Error(format!("clipboard item {id} not found")),
+                }
+            }
+            ClipboardRequest::Delete { id } => {
+                if let Ok(mut s) = handler_store.lock() {
+                    s.items.retain(|x| x.id != id);
+                }
+                handler_broadcaster.broadcast(ClipboardEvent::Deleted(id));
+                ClipboardResponse::Ok
+            }
+            ClipboardRequest::TogglePin { id } => {
+                let pinned = handler_store
+                    .lock()
+                    .ok()
+                    .map(|mut s| {
+                        let mut pinned = false;
+                        for x in s.items.iter_mut() {
+                            if x.id == id {
+                                x.pinned = !x.pinned;
+                                pinned = x.pinned;
+                            }
+                        }
+                        pinned
+                    })
+                    .unwrap_or(false);
+                handler_broadcaster.broadcast(ClipboardEvent::Pinned { id, pinned });
+                ClipboardResponse::Ok
+            }
+            ClipboardRequest::Clear => {
+                if let Ok(mut s) = handler_store.lock() {
+                    s.items.retain(|x| x.pinned);
+                }
+                handler_broadcaster.broadcast(ClipboardEvent::Cleared);
+                ClipboardResponse::Ok
+            }
+            ClipboardRequest::ClearAll => {
+                if let Ok(mut s) = handler_store.lock() {
+                    s.items.clear();
+                }
+                handler_broadcaster.broadcast(ClipboardEvent::Cleared);
+                ClipboardResponse::Ok
+            }
+            ClipboardRequest::Subscribe => return,
+        };
+        let _ = sender.send(reply);
+    };
+
+    let server_broadcaster = broadcaster.clone();
+    std::thread::spawn(move || {
+        let _ = ipsea::clipboard::start_clipboard_server(CLIPBOARD_SOCKET_NAME, server_broadcaster, handler);
+    });
+
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let text = match system::paste_text() {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            if text.trim().is_empty() {
+                continue;
+            }
+            if let Some(item) = store.lock().ok().and_then(|mut s| s.add(text)) {
+                broadcaster.broadcast(ClipboardEvent::Added(item));
+            }
+        }
+    });
 }
 
 pub fn clipboard_app() -> Element {
