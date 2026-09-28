@@ -1974,6 +1974,7 @@ dependencies = [
  "ipc",
  "serde_json",
  "strum",
+ "system",
 ]
 
 [[package]]
@@ -6825,6 +6826,22 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "store"
+version = "0.1.0"
+dependencies = [
+ "config",
+ "freya",
+ "freya-devtools",
+ "freya-performance-plugin",
+ "ipc",
+ "serde",
+ "serde_json",
+ "system",
+ "tokio",
+ "ui",
+]
 
 [[package]]
 name = "str_indices"

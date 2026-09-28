@@ -987,33 +987,60 @@ pub fn clear_hyprland_reserved_space_for_monitor(name: &str) {
 }
 
 /// Binds SUPER+L to the finick locker if no binding already uses it.
-/// Runs in a background thread so a missing hyprctl never blocks startup.
+/// Retries until Hyprland is reachable (systemd services often start before
+/// `HYPRLAND_INSTANCE_SIGNATURE` is usable) so the bind is not silently lost.
 pub fn ensure_super_l_lock_binding() {
     std::thread::spawn(|| {
-        let already_bound = std::process::Command::new("hyprctl")
-            .args(["binds", "-j"])
-            .output()
-            .ok()
-            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
-            .and_then(|v| v.as_array().cloned())
-            .map(|binds| {
-                binds.iter().any(|b| {
-                    let key = b["key"].as_str().unwrap_or("").to_lowercase();
-                    let modmask = b["modmask"].as_i64().unwrap_or(0);
-                    (key == "l") && (modmask & 64 != 0)
-                })
-            })
-            .unwrap_or(false);
-        if !already_bound {
-            let locker_cmd =
-                system::locker_binary().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "locker".to_string());
-            let bind = format!("SUPER, L, exec, {locker_cmd}");
-            let out = std::process::Command::new("hyprctl").args(["keyword", "bind", &bind]).output();
-            if let Err(e) = out {
-                eprintln!("[finick] failed to bind SUPER+L to locker: {e}");
+        for _ in 0..60 {
+            match try_ensure_super_l_once() {
+                Ok(true) => return,
+                Ok(false) => {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+                Err(e) => {
+                    eprintln!("[finick] SUPER+L bind attempt failed: {e}");
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
             }
         }
+        eprintln!("[finick] giving up binding SUPER+L: hyprland unreachable");
     });
+}
+
+fn try_ensure_super_l_once() -> Result<bool, String> {
+    let out = std::process::Command::new("hyprctl")
+        .args(["binds", "-j"])
+        .output()
+        .map_err(|e| format!("hyprctl binds failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("hyprctl binds failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    let binds: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("hyprctl binds parse failed: {e}"))?;
+    let already_bound = binds.as_array().is_some_and(|binds| {
+        binds.iter().any(|b| {
+            let key = b["key"].as_str().unwrap_or_default();
+            let modmask = b["modmask"].as_i64().unwrap_or(0);
+            key.eq_ignore_ascii_case("l") && (modmask & 64 != 0)
+        })
+    });
+    if already_bound {
+        return Ok(true);
+    }
+    let locker_cmd =
+        system::locker_binary().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "locker".to_string());
+    // Hyprland >=0.55 uses the Lua parser: `keyword bind` is rejected with
+    // "keyword can't work with non-legacy parsers. Use eval."
+    let escaped = locker_cmd.replace('\\', "\\\\").replace('"', "\\\"");
+    let lua = format!(r#"hl.bind("SUPER + L", hl.dsp.exec_cmd("{escaped}"))"#);
+    let out = std::process::Command::new("hyprctl")
+        .args(["eval", &lua])
+        .output()
+        .map_err(|e| format!("hyprctl eval bind failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("hyprctl eval bind failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(true)
 }
 
 pub fn register_hyprland_rules() {

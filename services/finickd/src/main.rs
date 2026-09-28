@@ -12,6 +12,7 @@ use {
 };
 
 pub mod notifications;
+pub mod store_worker;
 
 /// All standard setting keys managed and exposed by the Finick Settings Daemon.
 pub const ALL_SETTING_KEYS: &[SettingKey] = &[
@@ -1182,6 +1183,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         start_server(socket_name, move |req: SettingsRequest, sender: Sender<SettingsResponse>| {
             handle_request(&state_clone, req, sender);
         })
+    });
+
+    // Locker supervisor: if the session is locked but no locker process is
+    // alive (e.g. someone killed it from a stray terminal), bring it back
+    // and keep the shell overlay hidden until unlock.
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        if !system::locker_locked() {
+            continue;
+        }
+        if !system::locker_process_alive() {
+            eprintln!("[finickd] locker died while locked, respawning");
+            if let Some(exe) = system::locker_binary() {
+                let _ = std::process::Command::new(&exe).spawn();
+            } else {
+                let _ = std::process::Command::new("locker").spawn();
+            }
+        }
+        let _ = std::process::Command::new("systemctl").args(["--user", "stop", "finick-overlay"]).output();
     });
 
     tokio::select! {

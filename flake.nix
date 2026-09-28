@@ -82,6 +82,18 @@
             StartupWMClass=files
             MimeType=inode/directory;application/x-gnome-saved-search;
             EOF
+            cat > $out/share/applications/finick-store.desktop <<'EOF'
+            [Desktop Entry]
+            Name=Finick Apps
+            Comment=Install apps from Flathub and nixpkgs
+            Exec=store
+            Icon=software-center
+            Terminal=false
+            Type=Application
+            Categories=System;PackageManager;
+            Keywords=Apps;Store;Flatpak;Flathub;Nix;
+            StartupWMClass=store
+            EOF
             desktop-file-validate $out/share/applications/*.desktop
           '';
         };
@@ -114,7 +126,7 @@
               fi
               exec "$DEVENV_BIN" --quiet shell -- bash -c 'cd "$1"; shift; exec cargo run ${cargoArgs} --manifest-path "'"$REPO"'/Cargo.toml" -- "$@"' bash "$ORIG_DIR" "$@"
             '')
-            [ "overlay" "topbar" "settings" "files" "finickd" "index" "finickctl" "locker" ]) ++ [ desktopEntries ];
+            [ "overlay" "topbar" "settings" "files" "finickd" "index" "finickctl" "locker" "store" ]) ++ [ desktopEntries ];
           meta.mainProgram = "overlay";
         };
       in
@@ -133,6 +145,7 @@
           finickd = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/finickd"; };
           index = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/index"; };
           finickctl = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/finickctl"; };
+          store = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/store"; };
         };
 
         checks = { inherit finick; };

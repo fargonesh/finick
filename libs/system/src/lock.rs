@@ -37,7 +37,9 @@ pub fn locker_binary() -> Option<std::path::PathBuf> {
         }
     }
     std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths).map(|d| d.join("locker")).find(|p| p.is_file())
+        std::env::split_paths(&paths)
+            .flat_map(|d| [d.join("locker"), d.join("finick-locker")])
+            .find(|p| p.is_file())
     })
 }
 
@@ -60,6 +62,29 @@ pub fn trigger_lock() {
     if let Err(e) = Command::new("locker").spawn() {
         eprintln!("[finick] fallback locker spawn failed: {e}");
     }
+}
+
+/// Presence of this file means the session is locked.
+pub fn locker_lockfile() -> std::path::PathBuf {
+    let base = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+    base.join("finick-locker.lock")
+}
+
+pub fn locker_locked() -> bool {
+    locker_lockfile().is_file()
+}
+
+/// True when the pid recorded in the lockfile still belongs to a locker process.
+pub fn locker_process_alive() -> bool {
+    if let Ok(old) = std::fs::read_to_string(locker_lockfile()) {
+        if let Ok(pid) = old.trim().parse::<i32>() {
+            let cmdline = std::fs::read_to_string(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+            if cmdline.contains("locker") {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn watch_lid_close<F: Fn() + Send + 'static>(on_close: F) {

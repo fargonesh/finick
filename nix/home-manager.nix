@@ -51,10 +51,31 @@ in
         description = "Run finickd as user service";
       };
     };
+
+    store = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Install Finick Apps store";
+      };
+      extraPackages = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [ "firefox" "vlc" ];
+        description = "Extra nixpkgs attrs managed alongside Finick Apps generated apps.nix";
+      };
+      flatpaks = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [ "com.spotify.Client" ];
+        description = "Flatpak app IDs tracked as desired state by Finick Apps";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
-    home.packages = lib.optionals (cfg.settings.enable || cfg.files.enable || cfg.overlay.enable || cfg.topbar.enable) [ cfg.package ];
+    home.packages = lib.optionals (cfg.settings.enable || cfg.files.enable || cfg.overlay.enable || cfg.topbar.enable || cfg.store.enable) [ cfg.package ]
+      ++ map (attr: lib.getAttrFromPath (lib.splitString "." attr) pkgs) cfg.store.extraPackages;
 
     xdg.enable = true;
     xdg.mimeApps.enable = lib.mkDefault true;
@@ -100,7 +121,16 @@ in
       Install.WantedBy = [ "graphical-session.target" ];
     };
 
+    wayland.windowManager.hyprland.settings.bind = [
+      "SUPER, L, exec, ${cfg.package}/bin/locker"
+    ];
+
     wayland.windowManager.hyprland.settings.windowrulev2 = [
+      "float, class:^(locker)$"
+      "pin, class:^(locker)$"
+      "noanim, class:^(locker)$"
+      "noshadow, class:^(locker)$"
+      "noborder, class:^(locker)$"
       "float, class:^(overlay)$"
       "pin, class:^(overlay)$"
       "noanim, class:^(overlay)$"

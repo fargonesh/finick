@@ -115,6 +115,8 @@ fn locker_app() -> Element {
                 let user2 = user_c.clone();
                 let ok = tokio::task::spawn_blocking(move || system::verify_password(&user2, &p2)).await.unwrap_or(false);
                 if ok {
+                    release_single_instance();
+                    start_shell_overlay();
                     std::process::exit(0);
                 } else {
                     err_c.set(Some("Incorrect password — try again".to_string()));
@@ -314,7 +316,15 @@ fn locker_app() -> Element {
                                 .horizontal()
                                 .spacing(10.)
                                 .child(icon(LOCK, 15., Color::from_rgb(150, 151, 158)))
-                                .child(Input::new(pwd_writable).width(Size::fill()).placeholder("Password").on_submit({
+                                .child(Input::new(pwd_writable).width(Size::fill()).placeholder("Password").mode(InputMode::new_password()).auto_focus(true).theme_colors(InputColorsThemePartial {
+                                    background: Some(Color::from_argb(255, 14, 15, 19).into()),
+                                    focus_background: Some(Color::from_argb(255, 14, 15, 19).into()),
+                                    border_fill: Some(Color::TRANSPARENT.into()),
+                                    focus_border_fill: Some(Color::TRANSPARENT.into()),
+                                    color: Some(Color::WHITE.into()),
+                                    placeholder_color: Some(Color::from_rgb(150, 151, 158).into()),
+                                    ..Default::default()
+                                }).on_submit({
                                     let mut h = do_unlock.clone();
                                     move |_| h(())
                                 })),
@@ -373,32 +383,147 @@ fn locker_app() -> Element {
                                 ),
                         ),
                 )
-                .child(
-                    label()
-                        .font_size(11.)
-                        .color(Color::from_argb(160, 235, 235, 240))
-                        .text("Enter unlocks  •  Esc clears  •  Lid close locks"),
-                ),
         )
         .into_element()
 }
 
+#[derive(Clone)]
+struct LockerMonitor {
+    name: String,
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+}
+
+fn locker_monitors() -> Vec<LockerMonitor> {
+    let mut mons: Vec<LockerMonitor> = HyprlandBackend
+        .get_displays()
+        .into_iter()
+        .map(|d| {
+            let (raw_w, raw_h) = system::parse_display_dimensions(&d.resolution);
+            let (w, h) = if d.transform == 1 || d.transform == 3 { (raw_h, raw_w) } else { (raw_w, raw_h) };
+            let scale: f64 = d.scale.parse().unwrap_or(1.0);
+            let scale = if scale <= 0.0 { 1.0 } else { scale };
+            LockerMonitor {
+                name: d.name,
+                x: d.x as i64,
+                y: d.y as i64,
+                w: (w as f64 / scale).round() as i64,
+                h: (h as f64 / scale).round() as i64,
+            }
+        })
+        .collect();
+    if mons.is_empty() {
+        mons.push(LockerMonitor { name: "default".to_string(), x: 0, y: 0, w: 1920, h: 1080 });
+    }
+    mons
+}
+
+fn claim_single_instance() -> bool {
+    if system::locker_process_alive() {
+        return false;
+    }
+    let _ = std::fs::write(system::locker_lockfile(), std::process::id().to_string());
+    true
+}
+
+fn release_single_instance() {
+    let _ = std::fs::remove_file(system::locker_lockfile());
+}
+
+fn stop_shell_overlay() {
+    let _ = std::process::Command::new("systemctl").args(["--user", "stop", "finick-overlay"]).output();
+}
+
+fn start_shell_overlay() {
+    let _ = std::process::Command::new("systemctl").args(["--user", "start", "finick-overlay"]).output();
+}
+
+fn locker_audit_lua(mons: &[LockerMonitor]) -> String {
+    let mut chunks: Vec<String> = mons
+        .iter()
+        .map(|m| {
+            format!(
+                r#"
+            for _, w in ipairs(hl.get_windows()) do
+                if w.title == 'locker-{name}' then
+                    local addr = 'address:' .. tostring(w.address)
+                    if not w.floating or not w.pinned or math.floor(w.at.x) ~= {x} or math.floor(w.at.y) ~= {y} or math.floor(w.size.x) ~= {w} or math.floor(w.size.y) ~= {h} then
+                        hl.dispatch(hl.dsp.window.float({{ window = addr }}))
+                        hl.dispatch(hl.dsp.window.pin({{ window = addr }}))
+                        hl.dispatch(hl.dsp.window.resize({{ window = addr, x = {w}, y = {h}, relative = false }}))
+                        hl.dispatch(hl.dsp.window.move({{ window = addr, x = {x}, y = {y} }}))
+                    end
+                    hl.dispatch(hl.dsp.window.bring_to_top({{ window = addr }}))
+                end
+            end"#,
+                name = m.name,
+                w = m.w,
+                h = m.h,
+                x = m.x,
+                y = m.y
+            )
+        })
+        .collect();
+    if let Some(first) = mons.first() {
+        chunks.push(format!(
+            r#"
+            local aw = hl.get_active_window()
+            if aw == nil or aw.class ~= 'locker' then
+                for _, w in ipairs(hl.get_windows()) do
+                    if w.title == 'locker-{name}' then
+                        hl.dispatch(hl.dsp.focus({{ window = 'address:' .. tostring(w.address) }}))
+                    end
+                end
+            end"#,
+            name = first.name
+        ));
+    }
+    chunks.join("\n")
+}
+
+fn place_locker_windows(mons: Vec<LockerMonitor>) {
+    std::thread::spawn(move || {
+        let lua = locker_audit_lua(&mons);
+        for wait in [800u64, 1500, 2500] {
+            std::thread::sleep(std::time::Duration::from_millis(wait));
+            let _ = std::process::Command::new("hyprctl").args(["eval", &lua]).output();
+        }
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let _ = std::process::Command::new("hyprctl").args(["eval", &lua]).output();
+        }
+    });
+}
+
 fn main() {
-    let username = system::current_username();
+    let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
+    let _guard = _rt.as_ref().map(|rt| rt.enter());
+
+    if !claim_single_instance() {
+        return;
+    }
+    stop_shell_overlay();
+
+    let mons = locker_monitors();
+    place_locker_windows(mons.clone());
     let _ = std::thread::spawn(|| watch_lid_and_lock());
-    launch(
-        LaunchConfig::new().with_window(
+    let mut launch_config = LaunchConfig::new().with_exit_on_close(false);
+    for m in &mons {
+        let title: &'static str = Box::leak(format!("locker-{}", m.name).into_boxed_str());
+        launch_config = launch_config.with_window(
             WindowConfig::new(locker_app)
-                .with_title("locker")
+                .with_title(title)
                 .with_app_id("locker")
-                .with_size(1920., 1080.)
+                .with_size(m.w as f64, m.h as f64)
                 .with_decorations(false)
                 .with_transparency(false)
                 .with_background(Color::from_rgb(12, 12, 16))
-                .with_window_attributes(|a, _el| a.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)))),
-        ),
-    );
-    let _ = username;
+                .with_on_close(|_ctx, _wid| CloseDecision::KeepOpen),
+        );
+    }
+    launch(launch_config);
 }
 
 fn watch_lid_and_lock() {

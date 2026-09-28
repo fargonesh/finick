@@ -21,6 +21,7 @@ enum Program {
     notify,
     modal,
     launcher,
+    apps,
 }
 
 fn accent_to_hex(s: &str) -> String { config::ty::accent_to_hex(s) }
@@ -211,6 +212,99 @@ fn main() {
                 eprintln!("Failed to start launcher. Ensure `launcher` is in PATH.");
                 eprintln!("Hyprland shortcut hint: bind = SUPER, SPACE, exec, launcher  # or finickctl launcher");
                 std::process::exit(1);
+            }
+        }
+        Program::apps => {
+            let cmd = args.data.unwrap_or_else(|| {
+                eprintln!(
+                    "Usage: finickctl -p apps '<search QUERY | install-nix ATTR | remove-nix ATTR | install-flatpak ID | \
+                     remove-flatpak ID | link | apply | list>'"
+                );
+                std::process::exit(1);
+            });
+            let (op, rest) = cmd.split_once(' ').map(|(a, b)| (a, b.trim())).unwrap_or((cmd.as_str(), ""));
+            match op {
+                "search" => {
+                    for e in system::store::search_all(rest) {
+                        if args.json {
+                            println!("{}", serde_json::to_string(&e).unwrap());
+                        } else {
+                            let src = match e.source {
+                                system::store::StoreSource::Flathub => "flathub",
+                                system::store::StoreSource::Nixpkgs => "nix",
+                                system::store::StoreSource::System => "sys",
+                            };
+                            println!("[{src}] {} — {} ({})", e.name, e.summary, e.id);
+                        }
+                    }
+                }
+                "list" => {
+                    for e in system::store::list_installed() {
+                        if args.json {
+                            println!("{}", serde_json::to_string(&e).unwrap());
+                        } else {
+                            println!("{} ({})", e.name, e.id);
+                        }
+                    }
+                }
+                "install-nix" => match system::store::install_nix_reproducible(rest) {
+                    Ok(m) => println!("{m}"),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                },
+                "remove-nix" => match system::store::remove_nix_reproducible(rest) {
+                    Ok(m) => println!("{m}"),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                },
+                "install-flatpak" => match system::store_flatpak::install(rest) {
+                    Ok(m) => {
+                        let _ = system::store_hm::add_flatpak(rest);
+                        println!("{m}");
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                },
+                "remove-flatpak" => match system::store_flatpak::remove(rest) {
+                    Ok(m) => {
+                        let _ = system::store_hm::remove_flatpak(rest);
+                        println!("{m}");
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                },
+                "link" => {
+                    let Some(f) = system::store_hm::resolve_home_manager_file() else {
+                        eprintln!("home-manager file not found");
+                        std::process::exit(1);
+                    };
+                    match system::store_hm::ensure_imported(&f) {
+                        Ok(()) => println!("Linked {} in {f}", system::store_hm::generated_file().display()),
+                        Err(e) => {
+                            eprintln!("{e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                "apply" => match system::store_hm::apply_home_manager() {
+                    Ok(log) => println!("Applied. {log}"),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                },
+                _ => {
+                    eprintln!("Unknown apps op: {op}");
+                    std::process::exit(1);
+                }
             }
         }
     }
