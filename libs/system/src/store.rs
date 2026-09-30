@@ -194,8 +194,8 @@ pub fn remove_nix_reproducible(attr: &str) -> Result<String, String> {
 
 // --- Daemon jobs (progress IPC) -------------------------------------------
 // Transport is the generic ipsea socket pair; types live here so daemon,
-// store app and finickctl share one definition. `Log` lines stream when
-// workers emit them; today jobs report start/finish (line streaming later).
+// store app and finickctl share one definition. Workers stream
+// Started/Log/Finished for live notice lines.
 
 /// Socket name for the store job server (served by finickd).
 pub const STORE_SOCKET_NAME: &str = "finick-store";
@@ -254,24 +254,64 @@ pub fn job_source(job: &StoreJob) -> Option<StoreSource> {
 /// Execute a job in-process, reporting progress. Used by the daemon worker
 /// and as the local fallback when the daemon is unreachable.
 pub fn run_job(job: StoreJob, progress: &mut dyn FnMut(StoreProgress)) -> Result<String, String> {
-    progress(StoreProgress::Started(describe(&job)));
-    match job {
-        StoreJob::InstallNix(attr) => install_nix_reproducible(&attr),
-        StoreJob::RemoveNix(attr) => remove_nix_reproducible(&attr),
+    let label = describe(&job);
+    progress(StoreProgress::Started(label.clone()));
+    progress(StoreProgress::Log(format!("starting {label}")));
+    let result = match job {
+        StoreJob::InstallNix(attr) => {
+            progress(StoreProgress::Log(format!("declaring {attr} in apps.nix")));
+            install_nix_reproducible(&attr)
+        }
+        StoreJob::RemoveNix(attr) => {
+            progress(StoreProgress::Log(format!("removing {attr} from apps.nix")));
+            remove_nix_reproducible(&attr)
+        }
         StoreJob::InstallFlatpak(id) => {
-            let msg = flatpak::install(&id)?;
-            let _ = hm::add_flatpak(&id);
-            Ok(msg)
+            progress(StoreProgress::Log(format!("installing flatpak {id}")));
+            match flatpak::install(&id) {
+                Ok(msg) => {
+                    let _ = hm::add_flatpak(&id);
+                    progress(StoreProgress::Log(format!("declared {id} in apps.nix")));
+                    Ok(msg)
+                }
+                Err(e) => Err(e),
+            }
         }
         StoreJob::RemoveFlatpak(id) => {
-            let msg = flatpak::remove(&id)?;
-            let _ = hm::remove_flatpak(&id);
-            Ok(msg)
+            progress(StoreProgress::Log(format!("removing flatpak {id}")));
+            match flatpak::remove(&id) {
+                Ok(msg) => {
+                    let _ = hm::remove_flatpak(&id);
+                    progress(StoreProgress::Log(format!("pruned {id} from apps.nix")));
+                    Ok(msg)
+                }
+                Err(e) => Err(e),
+            }
         }
-        StoreJob::UpdateFlatpak(id) => flatpak::update_single(&id),
-        StoreJob::UpdateFlatpaks => flatpak::update_all(),
-        StoreJob::ApplyHomeManager => hm::apply_home_manager(),
+        StoreJob::UpdateFlatpak(id) => {
+            progress(StoreProgress::Log(format!("updating flatpak {id}")));
+            flatpak::update_single(&id)
+        }
+        StoreJob::UpdateFlatpaks => {
+            progress(StoreProgress::Log("updating all flatpaks".to_string()));
+            flatpak::update_all()
+        }
+        StoreJob::ApplyHomeManager => {
+            progress(StoreProgress::Log("applying home-manager switch".to_string()));
+            hm::apply_home_manager()
+        }
+    };
+    match &result {
+        Ok(msg) => {
+            let short: String = msg.chars().take(180).collect();
+            progress(StoreProgress::Log(format!("finished {label}: {short}")));
+        }
+        Err(e) => {
+            let short: String = e.chars().take(180).collect();
+            progress(StoreProgress::Log(format!("failed {label}: {short}")));
+        }
     }
+    result
 }
 
 /// Run a job against the daemon socket, falling back to in-process execution
@@ -352,16 +392,13 @@ mod tests {
 
     #[test]
     fn test_ipc_fallback_when_daemon_missing() {
-        // Nothing listens here: must fall back locally and still report Started.
-        // Use a cheap local path — ApplyHomeManager would shell out, so only
-        // assert the fallback triggers without hanging: point at UpdateFlatpaks
-        // is also a shellout... instead verify a dead socket yields local run
-        // of a job whose failure is fast and safe: RemoveFlatpak of garbage.
         let mut events = Vec::new();
         let res = run_job_on_socket("test-finick-store-definitely-absent", StoreJob::RemoveFlatpak("no.such.App".into()), &mut |ev| {
             events.push(ev)
         });
         assert!(res.is_err());
-        assert_eq!(events, vec![StoreProgress::Started("remove flatpak no.such.App".to_string())]);
+        assert!(!events.is_empty());
+        assert_eq!(events[0], StoreProgress::Started("remove flatpak no.such.App".to_string()));
+        assert!(events.iter().any(|e| matches!(e, StoreProgress::Log(_))));
     }
 }

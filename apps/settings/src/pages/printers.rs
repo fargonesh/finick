@@ -1,6 +1,4 @@
-use freya::prelude::*;
-use std::process::Command;
-use ui::*;
+use {freya::prelude::*, std::process::Command, ui::*};
 
 /// Representation of a connected or configured printer.
 #[derive(Clone, Debug, PartialEq)]
@@ -135,18 +133,20 @@ pub fn fetch_printers_info() -> PrintersInfo {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if let Some(rest) = line.strip_prefix("device for ")
-                && let Some((pname, uri)) = rest.split_once(':') {
-                    let sys_name = pname.trim();
-                    let uri_val = uri.trim();
-                    if let Some(p) = found_printers.iter_mut().find(|p| p.system_name == sys_name) {
-                        p.uri = uri_val.to_string();
-                        if uri_val.starts_with("usb:") {
-                            p.location = "Direct USB Connection".to_string();
-                        } else if uri_val.starts_with("ipp:") || uri_val.starts_with("dnssd:") || uri_val.starts_with("socket:") {
-                            p.location = "Local Network (IPP / AirPrint)".to_string();
-                        }
+                && let Some((pname, uri)) = rest.split_once(':')
+            {
+                let sys_name = pname.trim();
+                let uri_val = uri.trim();
+                if let Some(p) = found_printers.iter_mut().find(|p| p.system_name == sys_name) {
+                    p.uri = uri_val.to_string();
+                    if uri_val.starts_with("usb:") {
+                        p.location = "Direct USB Connection".to_string();
+                    } else if uri_val.starts_with("ipp:") || uri_val.starts_with("dnssd:") || uri_val.starts_with("socket:")
+                    {
+                        p.location = "Local Network (IPP / AirPrint)".to_string();
                     }
                 }
+            }
         }
     }
 
@@ -223,19 +223,13 @@ pub fn fetch_printers_info() -> PrintersInfo {
 }
 
 /// Set default printer using `lpoptions -d`
-pub fn set_default_printer(printer_name: &str) {
-    let _ = Command::new("lpoptions").args(["-d", printer_name]).output();
-}
+pub fn set_default_printer(printer_name: &str) { let _ = Command::new("lpoptions").args(["-d", printer_name]).output(); }
 
 /// Pause printer queue via `cupsdisable`
-pub fn pause_printer(printer_name: &str) {
-    let _ = Command::new("cupsdisable").arg(printer_name).output();
-}
+pub fn pause_printer(printer_name: &str) { let _ = Command::new("cupsdisable").arg(printer_name).output(); }
 
 /// Resume printer queue via `cupsenable`
-pub fn resume_printer(printer_name: &str) {
-    let _ = Command::new("cupsenable").arg(printer_name).output();
-}
+pub fn resume_printer(printer_name: &str) { let _ = Command::new("cupsenable").arg(printer_name).output(); }
 
 /// Print test page via `lpr`
 pub fn print_test_page(printer_name: &str) {
@@ -243,9 +237,7 @@ pub fn print_test_page(printer_name: &str) {
 }
 
 /// Cancel a specific print job via `cancel`
-pub fn cancel_print_job(job_id: &str) {
-    let _ = Command::new("cancel").arg(job_id).output();
-}
+pub fn cancel_print_job(job_id: &str) { let _ = Command::new("cancel").arg(job_id).output(); }
 
 #[derive(PartialEq)]
 pub struct Printers;
@@ -282,81 +274,44 @@ impl Component for Printers {
         let cups_on = info.cups_active;
         let discovery_on = info.network_discovery;
 
-        rect()
-            .width(Size::fill())
-            .height(Size::fill())
-            .child(
+        FadeSlideIn::new().child(
+            rect().width(Size::fill()).height(Size::fill()).child(
                 ScrollView::new()
                     .width(Size::fill())
                     .height(Size::fill())
-                    .child(page_header(
-                        "Printers & Scanners",
+                    .child(page_head(
+                        GENERAL,
+                        "Printers and scanners",
                         "Manage connected printers, print queues, and scanning devices.",
                     ))
-
-                    // --- Service Status & Quick Overview Card ---
                     .child(
-                        rect()
-                            .width(Size::fill())
-                            .margin((0., 0., 16., 0.))
-                            .padding(16.)
-                            .corner_radius(12.)
-                            .background(t.bg_card)
-                            .border(Border::new().width(1.).fill(t.border_card))
-                            .overflow(Overflow::Clip)
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .main_align(Alignment::SpaceBetween)
-                                    .cross_align(Alignment::Center)
-                                    .width(Size::fill())
-                                    .margin((0., 0., 12., 0.))
-                                    .content(Content::Flex)
-                                    .child(
-                                        rect()
-                                            .width(Size::flex(1.))
-                                            .child(
-                                                label()
-                                                    .font_size(16.)
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .color(t.text_primary)
-                                                    .text("CUPS Printing Daemon")
-                                            )
-                                            .child(
-                                                label()
-                                                    .font_size(13.)
-                                                    .color(t.text_secondary)
-                                                    .margin((4., 0., 0., 0.))
-                                                    .text(if cups_on {
-                                                        "System print spooler service is active and listening for print jobs."
-                                                    } else {
-                                                        "CUPS service is stopped. Print jobs cannot be processed."
-                                                    })
-                                            )
-                                    )
-                                    .child(
-                                        Switch::new()
-                                            .toggled(cups_on)
-                                            .on_toggle({
-                                                let mut ps = printers_state;
-                                                let mut l = loaded;
-                                                let mut ld = is_loading;
-                                                move |_| {
-                                                    let next_val = !cups_on;
-                                                    let mut curr = ps.read().clone();
-                                                    curr.cups_active = next_val;
-                                                    ps.set(curr);
-                                                    ld.set(true);
-                                                    std::thread::spawn(move || {
-                                                        let arg = if next_val { "start" } else { "stop" };
-                                                        let _ = Command::new("systemctl").args([arg, "cups"]).output();
-                                                        std::thread::sleep(std::time::Duration::from_millis(400));
-                                                    });
-                                                    l.set(false);
-                                                }
-                                            })
-                                    )
-                            )
+                        tile()
+                            .child(tile_head(
+                                Some(GENERAL),
+                                "CUPS printing daemon",
+                                Some(pill_switch(cups_on, {
+                                    let mut ps = printers_state;
+                                    let mut l = loaded;
+                                    let mut ld = is_loading;
+                                    move |v| {
+                                        let mut curr = ps.read().clone();
+                                        curr.cups_active = v;
+                                        ps.set(curr);
+                                        ld.set(true);
+                                        std::thread::spawn(move || {
+                                            let arg = if v { "start" } else { "stop" };
+                                            let _ = Command::new("systemctl").args([arg, "cups"]).output();
+                                            std::thread::sleep(std::time::Duration::from_millis(400));
+                                        });
+                                        l.set(false);
+                                    }
+                                })),
+                            ))
+                            .child(tile_sub(if cups_on {
+                                "System print spooler service is active and listening for print jobs."
+                            } else {
+                                "CUPS service is stopped. Print jobs cannot be processed."
+                            }))
                             // Overview Metrics Strip
                             .child(
                                 rect()
@@ -368,101 +323,98 @@ impl Component for Printers {
                                     .padding((10., 14.))
                                     .margin((8., 0., 14., 0.))
                                     .corner_radius(8.)
-                                    .background(t.bg_base)
-                                    .border(Border::new().width(1.).fill(t.border_subtle))
+                                    .background(t.panel_raised)
+                                    .border(Border::new().width(1.).fill(t.border))
                                     .child(
-                                        rect()
-                                            .width(Size::flex(1.))
-                                            .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("CONFIGURED PRINTERS"))
-                                            .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(format!("{}", info.printers.len())))
+                                        rect().width(Size::flex(1.)).child(field_label("Configured printers")).child(
+                                            label()
+                                                .font_size(14.)
+                                                .font_weight(FontWeight::SEMI_BOLD)
+                                                .color(t.text)
+                                                .text(format!("{}", info.printers.len())),
+                                        ),
                                     )
                                     .child(
-                                        rect()
-                                            .width(Size::flex(1.))
-                                            .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("SCANNERS DETECTED"))
-                                            .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(format!("{}", info.scanners.len())))
+                                        rect().width(Size::flex(1.)).child(field_label("Scanners detected")).child(
+                                            label()
+                                                .font_size(14.)
+                                                .font_weight(FontWeight::SEMI_BOLD)
+                                                .color(t.text)
+                                                .text(format!("{}", info.scanners.len())),
+                                        ),
                                     )
                                     .child(
-                                        rect()
-                                            .width(Size::flex(1.))
-                                            .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("ACTIVE QUEUE JOBS"))
-                                            .child(
-                                                rect()
-                                                    .horizontal()
-                                                    .cross_align(Alignment::Center)
-                                                    .spacing(6.)
-                                                    .child(
-                                                        rect()
-                                                            .width(Size::px(8.))
-                                                            .height(Size::px(8.))
-                                                            .corner_radius(4.)
-                                                            .background(if info.active_jobs.is_empty() { t.accent_green } else { t.accent_orange })
-                                                    )
-                                                    .child(
-                                                        label()
-                                                            .font_size(14.)
-                                                            .font_weight(FontWeight::SEMI_BOLD)
-                                                            .color(if info.active_jobs.is_empty() { t.text_primary } else { t.accent_orange })
-                                                            .text(if info.active_jobs.is_empty() { "Queue Idle (0)".to_string() } else { format!("{} Pending", info.active_jobs.len()) })
-                                                    )
-                                            )
-                                    )
+                                        rect().width(Size::flex(1.)).child(field_label("Active queue jobs")).child(
+                                            rect()
+                                                .horizontal()
+                                                .cross_align(Alignment::Center)
+                                                .spacing(6.)
+                                                .child(
+                                                    rect()
+                                                        .width(Size::px(8.))
+                                                        .height(Size::px(8.))
+                                                        .corner_radius(4.)
+                                                        .background(if info.active_jobs.is_empty() {
+                                                            t.accent_green
+                                                        } else {
+                                                            t.accent_orange
+                                                        }),
+                                                )
+                                                .child(
+                                                    label()
+                                                        .font_size(14.)
+                                                        .font_weight(FontWeight::SEMI_BOLD)
+                                                        .color(if info.active_jobs.is_empty() {
+                                                            t.text
+                                                        } else {
+                                                            t.accent_orange
+                                                        })
+                                                        .text(if info.active_jobs.is_empty() {
+                                                            "Queue Idle (0)".to_string()
+                                                        } else {
+                                                            format!("{} Pending", info.active_jobs.len())
+                                                        }),
+                                                ),
+                                        ),
+                                    ),
                             )
                             // Action buttons
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .spacing(8.)
-                                    .child(
-                                        secondary_button(if loading { "Refreshing..." } else { "Refresh Devices" }, {
-                                            let mut l = loaded;
-                                            let mut ld = is_loading;
-                                            move || {
-                                                ld.set(true);
-                                                l.set(false);
-                                            }
-                                        })
-                                    )
-                            )
+                            .child(rect().horizontal().spacing(8.).child(secondary_button(
+                                if loading { "Refreshing..." } else { "Refresh Devices" },
+                                {
+                                    let mut l = loaded;
+                                    let mut ld = is_loading;
+                                    move || {
+                                        ld.set(true);
+                                        l.set(false);
+                                    }
+                                },
+                            ))),
                     )
-
-                    // --- Printers Section ---
                     .child(
-                        rect()
-                            .width(Size::fill())
-                            .margin((0., 0., 16., 0.))
-                            .padding(16.)
-                            .corner_radius(12.)
-                            .background(t.bg_card)
-                            .border(Border::new().width(1.).fill(t.border_card))
-                            .overflow(Overflow::Clip)
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .margin((0., 0., 14., 0.))
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .font_weight(FontWeight::BOLD)
-                                            .color(t.text_secondary)
-                                            .text(format!("INSTALLED PRINTERS ({})", info.printers.len()))
-                                    )
-                            )
+                        tile()
+                            .child(tile_head(None, format!("Installed printers ({})", info.printers.len()), None::<String>))
                             .child({
                                 if loading && info.printers.is_empty() {
                                     rect()
                                         .width(Size::fill())
                                         .padding(16.)
                                         .center()
-                                        .child(label().font_size(14.).color(t.text_secondary).text("Discovering printers..."))
+                                        .child(
+                                            label().font_size(14.).color(t.text_dim).text("Discovering printers..."),
+                                        )
                                         .into_element()
                                 } else if info.printers.is_empty() {
                                     rect()
                                         .width(Size::fill())
                                         .padding(16.)
                                         .center()
-                                        .child(label().font_size(14.).color(t.text_muted).text("No printers found or configured on this system."))
+                                        .child(
+                                            label()
+                                                .font_size(14.)
+                                                .color(t.text_dim)
+                                                .text("No printers found or configured on this system."),
+                                        )
                                         .into_element()
                                 } else {
                                     rect()
@@ -485,8 +437,12 @@ impl Component for Printers {
                                                 .margin((0., 0., 8., 0.))
                                                 .padding((12., 14.))
                                                 .corner_radius(8.)
-                                                .background(if is_def { t.bg_active } else { t.bg_base })
-                                                .border(Border::new().width(1.).fill(if is_def { t.primary_accent } else { t.border_subtle }))
+                                                .background(if is_def { t.bg_active } else { t.panel_raised })
+                                                .border(Border::new().width(1.).fill(if is_def {
+                                                    t.primary_accent
+                                                } else {
+                                                    t.border
+                                                }))
                                                 .child(
                                                     rect()
                                                         .width(Size::fill())
@@ -498,8 +454,14 @@ impl Component for Printers {
                                                                 .width(Size::px(10.))
                                                                 .height(Size::px(10.))
                                                                 .corner_radius(5.)
-                                                                .background(if is_ready { t.accent_green } else if is_paused { t.accent_orange } else { t.accent_red })
-                                                                .margin((0., 12., 0., 0.))
+                                                                .background(if is_ready {
+                                                                    t.accent_green
+                                                                } else if is_paused {
+                                                                    t.accent_orange
+                                                                } else {
+                                                                    t.accent_red
+                                                                })
+                                                                .margin((0., 12., 0., 0.)),
                                                         )
                                                         .child(
                                                             rect()
@@ -513,34 +475,24 @@ impl Component for Printers {
                                                                             label()
                                                                                 .font_size(15.)
                                                                                 .font_weight(FontWeight::BOLD)
-                                                                                .color(t.text_primary)
-                                                                                .text(p_name)
+                                                                                .color(t.text)
+                                                                                .text(p_name),
                                                                         )
                                                                         .child({
                                                                             if is_def {
-                                                                                rect()
-                                                                                    .padding((2., 6.))
-                                                                                    .corner_radius(4.)
-                                                                                    .background(t.primary_accent)
-                                                                                    .child(
-                                                                                        label()
-                                                                                            .font_size(10.)
-                                                                                            .font_weight(FontWeight::BOLD)
-                                                                                            .color(t.bg_base)
-                                                                                            .text("DEFAULT")
-                                                                                    )
+                                                                                status_chip("Default", true, None)
                                                                                     .into_element()
                                                                             } else {
                                                                                 rect().into_element()
                                                                             }
-                                                                        })
+                                                                        }),
                                                                 )
                                                                 .child(
                                                                     label()
                                                                         .font_size(13.)
-                                                                        .color(t.text_secondary)
+                                                                        .color(t.text_dim)
                                                                         .margin((2., 0., 0., 0.))
-                                                                        .text(printer.description.clone())
+                                                                        .text(printer.description.clone()),
                                                                 )
                                                                 .child(
                                                                     rect()
@@ -550,15 +502,39 @@ impl Component for Printers {
                                                                         .child(
                                                                             label()
                                                                                 .font_size(12.)
-                                                                                .color(if is_ready { t.accent_green } else { t.text_secondary })
-                                                                                .text(format!("Status: {}", status_str))
+                                                                                .color(if is_ready {
+                                                                                    t.accent_green
+                                                                                } else {
+                                                                                    t.text_dim
+                                                                                })
+                                                                                .text(format!("Status: {}", status_str)),
                                                                         )
-                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                        .child(label().font_size(12.).color(t.text_secondary).text(loc))
-                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                        .child(label().font_size(12.).color(t.text_secondary).text(drv))
-                                                                )
-                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text("•"),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text(loc),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text("•"),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text(drv),
+                                                                        ),
+                                                                ),
+                                                        ),
                                                 )
                                                 // Action Toolbar for this printer
                                                 .child(
@@ -582,10 +558,13 @@ impl Component for Printers {
                                                                     ld_c.set(true);
                                                                     std::thread::spawn(move || {
                                                                         set_default_printer(&s);
-                                                                        std::thread::sleep(std::time::Duration::from_millis(400));
+                                                                        std::thread::sleep(
+                                                                            std::time::Duration::from_millis(400),
+                                                                        );
                                                                     });
                                                                     l_c.set(false);
-                                                                }).into_element()
+                                                                })
+                                                                .into_element()
                                                             } else {
                                                                 rect().into_element()
                                                             }
@@ -595,12 +574,19 @@ impl Component for Printers {
                                                             let mut ps_c = ps;
                                                             let mut l_c = l;
                                                             let mut ld_c = ld;
-                                                            let action_label = if is_paused { "Resume Queue" } else { "Pause Queue" };
+                                                            let action_label =
+                                                                if is_paused { "Resume Queue" } else { "Pause Queue" };
                                                             secondary_button(action_label, move || {
                                                                 let s = sys_c.clone();
                                                                 let mut curr = ps_c.read().clone();
-                                                                if let Some(p) = curr.printers.iter_mut().find(|p| p.system_name == s) {
-                                                                    p.status = if is_paused { "Ready".to_string() } else { "Paused".to_string() };
+                                                                if let Some(p) =
+                                                                    curr.printers.iter_mut().find(|p| p.system_name == s)
+                                                                {
+                                                                    p.status = if is_paused {
+                                                                        "Ready".to_string()
+                                                                    } else {
+                                                                        "Paused".to_string()
+                                                                    };
                                                                     p.is_accepting = is_paused;
                                                                 }
                                                                 ps_c.set(curr);
@@ -611,10 +597,12 @@ impl Component for Printers {
                                                                     } else {
                                                                         pause_printer(&s);
                                                                     }
-                                                                    std::thread::sleep(std::time::Duration::from_millis(400));
+                                                                    std::thread::sleep(std::time::Duration::from_millis(
+                                                                        400,
+                                                                    ));
                                                                 });
                                                                 l_c.set(false);
-                                                             })
+                                                            })
                                                         })
                                                         .child({
                                                             let sys_c = p_sys.clone();
@@ -624,45 +612,29 @@ impl Component for Printers {
                                                                     print_test_page(&s);
                                                                 });
                                                             })
-                                                        })
+                                                        }),
                                                 )
                                                 .into_element()
                                         }))
                                         .into_element()
                                 }
-                            })
+                            }),
                     )
-
-                    // --- Scanners Section ---
                     .child(
-                        rect()
-                            .width(Size::fill())
-                            .margin((0., 0., 16., 0.))
-                            .padding(16.)
-                            .corner_radius(12.)
-                            .background(t.bg_card)
-                            .border(Border::new().width(1.).fill(t.border_card))
-                            .overflow(Overflow::Clip)
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .margin((0., 0., 14., 0.))
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .font_weight(FontWeight::BOLD)
-                                            .color(t.text_secondary)
-                                            .text(format!("CONNECTED SCANNERS ({})", info.scanners.len()))
-                                    )
-                            )
+                        tile()
+                            .child(tile_head(None, format!("Connected scanners ({})", info.scanners.len()), None::<String>))
                             .child({
                                 if info.scanners.is_empty() {
                                     rect()
                                         .width(Size::fill())
                                         .padding(16.)
                                         .center()
-                                        .child(label().font_size(14.).color(t.text_muted).text("No document scanners or digital imaging units detected."))
+                                        .child(
+                                            label()
+                                                .font_size(14.)
+                                                .color(t.text_dim)
+                                                .text("No document scanners or digital imaging units detected."),
+                                        )
                                         .into_element()
                                 } else {
                                     rect()
@@ -681,8 +653,8 @@ impl Component for Printers {
                                                 .padding((10., 12.))
                                                 .margin((0., 0., 6., 0.))
                                                 .corner_radius(8.)
-                                                .background(t.bg_base)
-                                                .border(Border::new().width(1.).fill(t.border_subtle))
+                                                .background(t.panel_raised)
+                                                .border(Border::new().width(1.).fill(t.border))
                                                 .child(
                                                     rect()
                                                         .horizontal()
@@ -693,7 +665,7 @@ impl Component for Printers {
                                                                 .height(Size::px(10.))
                                                                 .corner_radius(5.)
                                                                 .background(t.accent_green)
-                                                                .margin((0., 12., 0., 0.))
+                                                                .margin((0., 12., 0., 0.)),
                                                         )
                                                         .child(
                                                             rect()
@@ -701,68 +673,79 @@ impl Component for Printers {
                                                                     label()
                                                                         .font_size(14.)
                                                                         .font_weight(FontWeight::SEMI_BOLD)
-                                                                        .color(t.text_primary)
-                                                                        .text(s_name)
+                                                                        .color(t.text)
+                                                                        .text(s_name),
                                                                 )
                                                                 .child(
                                                                     rect()
                                                                         .horizontal()
                                                                         .spacing(8.)
                                                                         .margin((2., 0., 0., 0.))
-                                                                        .child(label().font_size(12.).color(t.text_secondary).text(s_model))
-                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                        .child(label().font_size(12.).color(t.text_secondary).text(s_conn))
-                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                        .child(label().font_size(12.).color(t.accent_green).text(s_status))
-                                                                )
-                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text(s_model),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text("•"),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text(s_conn),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text("•"),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.accent_green)
+                                                                                .text(s_status),
+                                                                        ),
+                                                                ),
+                                                        ),
                                                 )
-                                                .child(
-                                                    secondary_button("Scan Document", move || {
-                                                        std::thread::spawn(move || {
-                                                            let _ = Command::new("scanimage")
-                                                                .args(["--format=png", "--output-file=/tmp/scan_output.png"])
-                                                                .output();
-                                                        });
-                                                    })
-                                                )
+                                                .child(secondary_button("Scan Document", move || {
+                                                    std::thread::spawn(move || {
+                                                        let _ = Command::new("scanimage")
+                                                            .args(["--format=png", "--output-file=/tmp/scan_output.png"])
+                                                            .output();
+                                                    });
+                                                }))
                                                 .into_element()
                                         }))
                                         .into_element()
                                 }
-                            })
+                            }),
                     )
-
-                    // --- Active Print Queue Section ---
                     .child(
-                        rect()
-                            .width(Size::fill())
-                            .margin((0., 0., 16., 0.))
-                            .padding(16.)
-                            .corner_radius(12.)
-                            .background(t.bg_card)
-                            .border(Border::new().width(1.).fill(t.border_card))
-                            .overflow(Overflow::Clip)
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .margin((0., 0., 14., 0.))
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .font_weight(FontWeight::BOLD)
-                                            .color(t.text_secondary)
-                                            .text(format!("ACTIVE PRINT QUEUE ({})", info.active_jobs.len()))
-                                    )
-                            )
+                        tile()
+                            .child(tile_head(
+                                None,
+                                format!("Active print queue ({})", info.active_jobs.len()),
+                                None::<String>,
+                            ))
                             .child({
                                 if info.active_jobs.is_empty() {
                                     rect()
                                         .width(Size::fill())
                                         .padding(16.)
                                         .center()
-                                        .child(label().font_size(14.).color(t.text_muted).text("No active print jobs in spool."))
+                                        .child(
+                                            label()
+                                                .font_size(14.)
+                                                .color(t.text_dim)
+                                                .text("No active print jobs in spool."),
+                                        )
                                         .into_element()
                                 } else {
                                     rect()
@@ -784,8 +767,8 @@ impl Component for Printers {
                                                 .padding((10., 12.))
                                                 .margin((0., 0., 6., 0.))
                                                 .corner_radius(8.)
-                                                .background(t.bg_base)
-                                                .border(Border::new().width(1.).fill(t.border_subtle))
+                                                .background(t.panel_raised)
+                                                .border(Border::new().width(1.).fill(t.border))
                                                 .child(
                                                     rect()
                                                         .horizontal()
@@ -796,7 +779,7 @@ impl Component for Printers {
                                                                 .height(Size::px(10.))
                                                                 .corner_radius(5.)
                                                                 .background(t.accent_orange)
-                                                                .margin((0., 12., 0., 0.))
+                                                                .margin((0., 12., 0., 0.)),
                                                         )
                                                         .child(
                                                             rect()
@@ -804,146 +787,111 @@ impl Component for Printers {
                                                                     label()
                                                                         .font_size(14.)
                                                                         .font_weight(FontWeight::SEMI_BOLD)
-                                                                        .color(t.text_primary)
-                                                                        .text(doc)
+                                                                        .color(t.text)
+                                                                        .text(doc),
                                                                 )
                                                                 .child(
                                                                     rect()
                                                                         .horizontal()
                                                                         .spacing(8.)
                                                                         .margin((2., 0., 0., 0.))
-                                                                        .child(label().font_size(12.).color(t.accent_orange).text(stat))
-                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                        .child(label().font_size(12.).color(t.text_secondary).text(format!("Job {}", j_id)))
-                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                        .child(label().font_size(12.).color(t.text_secondary).text(format!("User: {}", u)))
-                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                        .child(label().font_size(12.).color(t.text_secondary).text(sz))
-                                                                )
-                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.accent_orange)
+                                                                                .text(stat),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text("•"),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text(format!("Job {}", j_id)),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text("•"),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text(format!("User: {}", u)),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text("•"),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text(sz),
+                                                                        ),
+                                                                ),
+                                                        ),
                                                 )
-                                                .child(
-                                                    secondary_button("Cancel Job", {
-                                                        let j_c = j_id.clone();
-                                                        let mut ps_c = ps;
-                                                        let mut l_c = l;
-                                                        move || {
-                                                            let job = j_c.clone();
-                                                            let mut curr = ps_c.read().clone();
-                                                            curr.active_jobs.retain(|j| j.id != job);
-                                                            ps_c.set(curr);
-                                                            std::thread::spawn(move || {
-                                                                cancel_print_job(&job);
-                                                            });
-                                                            l_c.set(false);
-                                                        }
-                                                    })
-                                                )
+                                                .child(secondary_button("Cancel Job", {
+                                                    let j_c = j_id.clone();
+                                                    let mut ps_c = ps;
+                                                    let mut l_c = l;
+                                                    move || {
+                                                        let job = j_c.clone();
+                                                        let mut curr = ps_c.read().clone();
+                                                        curr.active_jobs.retain(|j| j.id != job);
+                                                        ps_c.set(curr);
+                                                        std::thread::spawn(move || {
+                                                            cancel_print_job(&job);
+                                                        });
+                                                        l_c.set(false);
+                                                    }
+                                                }))
                                                 .into_element()
                                         }))
                                         .into_element()
                                 }
-                            })
+                            }),
                     )
-
-                    // --- Global Printing Preferences Card ---
                     .child(
-                        rect()
-                            .width(Size::fill())
-                            .margin((0., 0., 16., 0.))
-                            .padding(16.)
-                            .corner_radius(12.)
-                            .background(t.bg_card)
-                            .border(Border::new().width(1.).fill(t.border_card))
-                            .overflow(Overflow::Clip)
-                            .child(
-                                label()
-                                    .font_size(13.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(t.text_secondary)
-                                    .margin((0., 0., 14., 0.))
-                                    .text("GLOBAL PRINTING PREFERENCES")
-                            )
-                            // Network Discovery
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .main_align(Alignment::SpaceBetween)
-                                    .cross_align(Alignment::Center)
-                                    .width(Size::fill())
-                                    .margin((0., 0., 14., 0.))
-                                    .content(Content::Flex)
-                                    .child(
-                                        rect()
-                                            .width(Size::flex(1.))
-                                            .child(
-                                                label()
-                                                    .font_size(15.)
-                                                    .font_weight(FontWeight::SEMI_BOLD)
-                                                    .color(t.text_primary)
-                                                    .text("Automatic Network Discovery")
-                                            )
-                                            .child(
-                                                label()
-                                                    .font_size(13.)
-                                                    .color(t.text_secondary)
-                                                    .margin((4., 0., 0., 0.))
-                                                    .text("Automatically detect mDNS / Bonjour and IPP Everywhere printers on the local LAN.")
-                                            )
-                                    )
-                                    .child(
-                                        Switch::new()
-                                            .toggled(discovery_on)
-                                            .on_toggle({
-                                                let mut ps = printers_state;
-                                                move |_| {
-                                                    let mut curr = ps.read().clone();
-                                                    curr.network_discovery = !curr.network_discovery;
-                                                    ps.set(curr);
-                                                }
-                                            })
-                                    )
-                            )
-                            // Share Printers on Local Network
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .main_align(Alignment::SpaceBetween)
-                                    .cross_align(Alignment::Center)
-                                    .width(Size::fill())
-                                    .content(Content::Flex)
-                                    .child(
-                                        rect()
-                                            .width(Size::flex(1.))
-                                            .child(
-                                                label()
-                                                    .font_size(15.)
-                                                    .font_weight(FontWeight::SEMI_BOLD)
-                                                    .color(t.text_primary)
-                                                    .text("Share Printers on Local Network")
-                                            )
-                                            .child(
-                                                label()
-                                                    .font_size(13.)
-                                                    .color(t.text_secondary)
-                                                    .margin((4., 0., 0., 0.))
-                                                    .text("Allow other devices on this subnet to send print jobs to this machine's printers.")
-                                            )
-                                    )
-                                    .child(
-                                        Switch::new()
-                                            .toggled(info.share_printers)
-                                            .on_toggle({
-                                                let mut ps = printers_state;
-                                                move |_| {
-                                                    let mut curr = ps.read().clone();
-                                                    curr.share_printers = !curr.share_printers;
-                                                    ps.set(curr);
-                                                }
-                                            })
-                                    )
-                            )
-                    )
-            )
+                        tile()
+                            .child(tile_head(None, "Printing preferences", None::<String>))
+                            .child(setting_row(
+                                "Automatic network discovery",
+                                Some("Automatically detect mDNS / Bonjour and IPP Everywhere printers on the local LAN."),
+                                false,
+                                pill_switch(discovery_on, {
+                                    let mut ps = printers_state;
+                                    move |v| {
+                                        let mut curr = ps.read().clone();
+                                        curr.network_discovery = v;
+                                        ps.set(curr);
+                                    }
+                                }),
+                            ))
+                            .child(setting_row(
+                                "Share printers on local network",
+                                Some("Allow other devices on this subnet to send print jobs to this machine's printers."),
+                                true,
+                                pill_switch(info.share_printers, {
+                                    let mut ps = printers_state;
+                                    move |v| {
+                                        let mut curr = ps.read().clone();
+                                        curr.share_printers = v;
+                                        ps.set(curr);
+                                    }
+                                }),
+                            )),
+                    ),
+            ),
+        )
     }
 }

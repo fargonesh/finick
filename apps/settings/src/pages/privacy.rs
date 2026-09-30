@@ -1,6 +1,4 @@
-use std::process::Command;
-use freya::prelude::*;
-use ui::*;
+use {freya::prelude::*, std::process::Command, ui::*};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FirewallInfo {
@@ -39,12 +37,7 @@ fn query_firewall_status() -> FirewallInfo {
                     }
                 }
             }
-            return FirewallInfo {
-                is_active: true,
-                status_text: "Active (UFW)".to_string(),
-                incoming,
-                outgoing,
-            };
+            return FirewallInfo { is_active: true, status_text: "Active (UFW)".to_string(), incoming, outgoing };
         } else if lower.contains("status: inactive") {
             return FirewallInfo {
                 is_active: false,
@@ -70,14 +63,15 @@ fn query_firewall_status() -> FirewallInfo {
 
     // 3. Try iptables
     if let Ok(output) = Command::new("iptables").args(["-L", "-n"]).output()
-        && output.status.success() {
-            return FirewallInfo {
-                is_active: true,
-                status_text: "Active (iptables)".to_string(),
-                incoming: "Filtered".to_string(),
-                outgoing: "Allow".to_string(),
-            };
-        }
+        && output.status.success()
+    {
+        return FirewallInfo {
+            is_active: true,
+            status_text: "Active (iptables)".to_string(),
+            incoming: "Filtered".to_string(),
+            outgoing: "Allow".to_string(),
+        };
+    }
 
     // 4. Default clean fallback
     FirewallInfo {
@@ -107,10 +101,7 @@ fn query_device_privacy() -> DevicePrivacyInfo {
         }
     }
 
-    DevicePrivacyInfo {
-        camera_count,
-        has_microphone,
-    }
+    DevicePrivacyInfo { camera_count, has_microphone }
 }
 
 #[derive(PartialEq)]
@@ -118,8 +109,6 @@ pub struct Privacy;
 
 impl Component for Privacy {
     fn render(&self) -> impl IntoElement {
-        let t = use_app_theme();
-
         let location_enabled = use_state(|| true);
         let camera_enabled = use_state(|| true);
         let mic_enabled = use_state(|| true);
@@ -131,10 +120,7 @@ impl Component for Privacy {
             incoming: "Deny (incoming)".to_string(),
             outgoing: "Allow (outgoing)".to_string(),
         });
-        let devices = use_state(|| DevicePrivacyInfo {
-            camera_count: 0,
-            has_microphone: true,
-        });
+        let devices = use_state(|| DevicePrivacyInfo { camera_count: 0, has_microphone: true });
         let mut loaded = use_state(|| false);
 
         if !*loaded.read() {
@@ -164,316 +150,95 @@ impl Component for Privacy {
         let is_mic = *mic_enabled.read();
         let is_sandboxing = *sandboxing_enabled.read();
 
-        rect()
-            .width(Size::fill())
-            .height(Size::fill())
-            .child(page_header(
-                "Privacy & Security",
-                "Manage permissions and security settings.",
-            ))
-            // Firewall & Network Security Card
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .margin((0., 0., 16., 0.))
-                    .padding(16.)
-                    .corner_radius(12.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .overflow(Overflow::Clip)
-                    .child(
-                        rect()
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .width(Size::fill())
-                            .margin((0., 0., 14., 0.))
-                            .child(
-                                label()
-                                    .font_size(13.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(t.text_secondary)
-                                    .text("FIREWALL & NETWORK SECURITY"),
-                            )
-                            .child(secondary_button("Refresh", {
+        FadeSlideIn::new().child(
+            rect()
+                .width(Size::fill())
+                .height(Size::fill())
+                .vertical()
+                .spacing(GAP)
+                .child(page_head(LOCK, "Privacy and security", "Manage permissions and security settings."))
+                .child(
+                    tile()
+                        .child(tile_head(
+                            Some(LOCK),
+                            "Firewall",
+                            Some(secondary_button("Refresh", {
                                 let mut l = loaded;
                                 move || l.set(false)
                             })),
-                    )
-                    .child(
-                        rect()
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .width(Size::fill())
-                            .margin((0., 0., 14., 0.))
-                            .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .width(Size::flex(1.))
-                                    .child(
-                                        label()
-                                            .font_size(15.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("Firewall Protection"),
-                                    )
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .color(t.text_secondary)
-                                            .margin((4., 0., 0., 0.))
-                                            .text("Block unauthorized network access and guard local ports."),
-                                    ),
-                            )
-                            .child(
-                                Switch::new()
-                                    .toggled(fw.is_active)
-                                    .on_toggle({
-                                        let mut fw_state = firewall_info;
-                                        move |_| {
-                                            let mut current = fw_state.read().clone();
-                                            current.is_active = !current.is_active;
-                                            current.status_text = if current.is_active {
-                                                "Active".to_string()
-                                            } else {
-                                                "Inactive".to_string()
-                                            };
-                                            fw_state.set(current);
-                                        }
-                                    }),
-                            ),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::fill())
-                            .padding((12., 14.))
-                            .corner_radius(8.)
-                            .background(t.bg_base)
-                            .border(Border::new().width(1.).fill(t.border_subtle))
-                            .horizontal()
-                            .cross_align(Alignment::Center)
-                            .child(
-                                rect()
-                                    .width(Size::px(10.))
-                                    .height(Size::px(10.))
-                                    .corner_radius(5.)
-                                    .background(if fw.is_active { t.accent_green } else { t.accent_red })
-                                    .margin((0., 12., 0., 0.)),
-                            )
-                            .child(
-                                rect()
-                                    .child(
-                                        label()
-                                            .font_size(14.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text(format!("Status: {}", fw.status_text)),
-                                    )
-                                    .child(
-                                        label()
-                                            .font_size(12.)
-                                            .color(t.text_secondary)
-                                            .text(format!("Incoming: {} • Outgoing: {}", fw.incoming, fw.outgoing)),
-                                    ),
-                            ),
-                    ),
-            )
-            // Hardware Access & Permissions Card
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .margin((0., 0., 16., 0.))
-                    .padding(16.)
-                    .corner_radius(12.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .overflow(Overflow::Clip)
-                    .child(
-                        label()
-                            .font_size(13.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(t.text_secondary)
-                            .margin((0., 0., 14., 0.))
-                            .text("HARDWARE PERMISSIONS"),
-                    )
-                    // Camera
-                    .child(
-                        rect()
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .width(Size::fill())
-                            .margin((0., 0., 14., 0.))
-                            .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .width(Size::flex(1.))
-                                    .child(
-                                        label()
-                                            .font_size(15.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("Camera Access"),
-                                    )
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .color(t.text_secondary)
-                                            .margin((4., 0., 0., 0.))
-                                            .text(if dev.camera_count > 0 {
-                                                format!("Allow applications to use connected video capture devices ({} detected).", dev.camera_count)
-                                            } else {
-                                                "Allow applications to capture video streams from webcam devices.".to_string()
-                                            }),
-                                    ),
-                            )
-                            .child(
-                                Switch::new()
-                                    .toggled(is_cam)
-                                    .on_toggle({
-                                        let mut cam = camera_enabled;
-                                        move |_| {
-                                            let next = !*cam.read();
-                                            cam.set(next);
-                                        }
-                                    }),
-                            ),
-                    )
-                    // Microphone
-                    .child(
-                        rect()
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .width(Size::fill())
-                            .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .width(Size::flex(1.))
-                                    .child(
-                                        label()
-                                            .font_size(15.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("Microphone Access"),
-                                    )
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .color(t.text_secondary)
-                                            .margin((4., 0., 0., 0.))
-                                            .text("Allow desktop applications to record audio and capture sound input."),
-                                    ),
-                            )
-                            .child(
-                                Switch::new()
-                                    .toggled(is_mic)
-                                    .on_toggle({
-                                        let mut mic = mic_enabled;
-                                        move |_| {
-                                            let next = !*mic.read();
-                                            mic.set(next);
-                                        }
-                                    }),
-                            ),
-                    ),
-            )
-            // Location & Sandboxing Card
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .margin((0., 0., 16., 0.))
-                    .padding(16.)
-                    .corner_radius(12.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .overflow(Overflow::Clip)
-                    .child(
-                        label()
-                            .font_size(13.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(t.text_secondary)
-                            .margin((0., 0., 14., 0.))
-                            .text("LOCATION & SANDBOXING"),
-                    )
-                    // Location Services
-                    .child(
-                        rect()
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .width(Size::fill())
-                            .margin((0., 0., 14., 0.))
-                            .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .width(Size::flex(1.))
-                                    .child(
-                                        label()
-                                            .font_size(15.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("Location Services"),
-                                    )
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .color(t.text_secondary)
-                                            .margin((4., 0., 0., 0.))
-                                            .text("Allow location-aware applications to determine your geographic coordinates."),
-                                    ),
-                            )
-                            .child(
-                                Switch::new()
-                                    .toggled(is_loc)
-                                    .on_toggle({
-                                        let mut loc = location_enabled;
-                                        move |_| {
-                                            let next = !*loc.read();
-                                            loc.set(next);
-                                        }
-                                    }),
-                            ),
-                    )
-                    // Application Sandboxing
-                    .child(
-                        rect()
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .width(Size::fill())
-                            .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .width(Size::flex(1.))
-                                    .child(
-                                        label()
-                                            .font_size(15.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("Application Sandboxing & Isolation"),
-                                    )
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .color(t.text_secondary)
-                                            .margin((4., 0., 0., 0.))
-                                            .text("Enforce portal restrictions and filesystem boundaries for untrusted software."),
-                                    ),
-                            )
-                            .child(
-                                Switch::new()
-                                    .toggled(is_sandboxing)
-                                    .on_toggle({
-                                        let mut s = sandboxing_enabled;
-                                        move |_| {
-                                            let next = !*s.read();
-                                            s.set(next);
-                                        }
-                                    }),
-                            ),
-                    ),
-            )
+                        ))
+                        .child(setting_row(
+                            "Firewall protection",
+                            Some("Block unauthorized network access and guard local ports."),
+                            false,
+                            pill_switch(fw.is_active, {
+                                let mut fw_state = firewall_info;
+                                move |v| {
+                                    let mut current = fw_state.read().clone();
+                                    current.is_active = v;
+                                    current.status_text = if v { "Active".to_string() } else { "Inactive".to_string() };
+                                    fw_state.set(current);
+                                }
+                            }),
+                        ))
+                        .child(dot_status_row(
+                            "Firewall",
+                            Some(format!("{} · Incoming: {} · Outgoing: {}", fw.status_text, fw.incoming, fw.outgoing)),
+                            fw.is_active,
+                            status_chip(if fw.is_active { "Protected" } else { "Off" }, fw.is_active, None),
+                        )),
+                )
+                .child(
+                    tile()
+                        .child(tile_head(None, "Hardware permissions", None::<String>))
+                        .child(setting_row(
+                            "Camera access",
+                            Some(if dev.camera_count > 0 {
+                                format!(
+                                    "Allow applications to use connected video capture devices ({} detected).",
+                                    dev.camera_count
+                                )
+                            } else {
+                                "Allow applications to capture video streams from webcam devices.".to_string()
+                            }),
+                            false,
+                            pill_switch(is_cam, {
+                                let mut cam = camera_enabled;
+                                move |v| cam.set(v)
+                            }),
+                        ))
+                        .child(setting_row(
+                            "Microphone access",
+                            Some("Allow desktop applications to record audio and capture sound input."),
+                            true,
+                            pill_switch(is_mic, {
+                                let mut mic = mic_enabled;
+                                move |v| mic.set(v)
+                            }),
+                        )),
+                )
+                .child(
+                    tile()
+                        .child(tile_head(None, "Location and sandboxing", None::<String>))
+                        .child(setting_row(
+                            "Location services",
+                            Some("Allow location-aware applications to determine your geographic coordinates."),
+                            false,
+                            pill_switch(is_loc, {
+                                let mut loc = location_enabled;
+                                move |v| loc.set(v)
+                            }),
+                        ))
+                        .child(setting_row(
+                            "Application sandboxing",
+                            Some("Enforce portal restrictions and filesystem boundaries for untrusted software."),
+                            true,
+                            pill_switch(is_sandboxing, {
+                                let mut s = sandboxing_enabled;
+                                move |v| s.set(v)
+                            }),
+                        )),
+                ),
+        )
     }
 }

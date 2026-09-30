@@ -1,6 +1,4 @@
-use freya::prelude::*;
-use crate::state::power_action;
-use ui::*;
+use {crate::state::power_action, freya::prelude::*, ui::*};
 
 #[derive(PartialEq)]
 pub struct SessionMenu;
@@ -16,60 +14,54 @@ impl Component for SessionMenu {
             .center()
             .content(Content::Flex)
             .child(
-                rect()
-                    .width(Size::px(420.))
-                    .padding(20.)
-                    .corner_radius(20.)
-                    .background(t.panel)
-                    .border(Border::new().width(1.).fill(t.border))
-                    .vertical()
-                    .spacing(14.)
-                    .content(Content::Flex)
-                    .child(label().font_size(18.).font_weight(FontWeight::BOLD).color(t.text).text("Session"))
-                    .child(label().font_size(12.).color(t.text_dim).text("Choose a power action"))
-                    .child(
-                        rect()
-                            .width(Size::fill())
-                            .horizontal()
-                            .spacing(10.)
-                            .content(Content::Flex)
-                            .child(session_btn("Logout", ARROW_RIGHT, t.panel_raised, t.text, move || { power_action("logout"); close(); }))
-                            .child(session_btn("Reboot", REFRESH_CW, t.panel_raised, t.text, move || { power_action("reboot"); close(); })),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::fill())
-                            .horizontal()
-                            .spacing(10.)
-                            .content(Content::Flex)
-                            .child(session_btn("Sleep", FOCUS, t.panel_raised, t.text, move || { power_action("sleep"); close(); }))
-                            .child(session_btn("Shutdown", LOCK, t.accent_red, Color::WHITE, move || { power_action("shutdown"); close(); })),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::fill())
-                            .horizontal()
-                            .main_align(Alignment::End)
-                            .content(Content::Flex)
-                            .margin((10., 0., 0., 0.))
-                            .child(ghost_button("Cancel", move || close())),
-                    ),
+                FadeSlideIn::new().child(
+                    dialog_card(420.)
+                        .spacing(14.)
+                        .child(label().font_size(18.).font_weight(FontWeight::BOLD).color(t.text).text("Session"))
+                        .child(label().font_size(12.).color(t.text_dim).text("Choose a power action"))
+                        .child(
+                            rect()
+                                .width(Size::fill())
+                                .horizontal()
+                                .spacing(10.)
+                                .content(Content::Flex)
+                                .child(action_tile_flex("⎋", "Logout", false, move || {
+                                    power_action("logout");
+                                    close();
+                                }))
+                                .child(action_tile_flex("↻", "Reboot", false, move || {
+                                    power_action("reboot");
+                                    close();
+                                })),
+                        )
+                        .child(
+                            rect()
+                                .width(Size::fill())
+                                .horizontal()
+                                .spacing(10.)
+                                .content(Content::Flex)
+                                .child(action_tile_flex("☾", "Sleep", false, move || {
+                                    power_action("sleep");
+                                    close();
+                                }))
+                                .child(action_tile_flex("⏻", "Shutdown", true, move || {
+                                    power_action("shutdown");
+                                    close();
+                                })),
+                        )
+                        .child(
+                            rect()
+                                .width(Size::fill())
+                                .horizontal()
+                                .main_align(Alignment::End)
+                                .content(Content::Flex)
+                                .margin((10., 0., 0., 0.))
+                                .child(ghost_button("Cancel", move || close())),
+                        ),
+                ),
             )
             .into_element()
     }
-}
-
-fn session_btn(label_text: &'static str, svg: &'static str, bg: Color, fg: Color, mut act: impl FnMut() + 'static) -> impl IntoElement {
-    rect()
-        .width(Size::flex(1.))
-        .height(Size::px(72.))
-        .corner_radius(12.)
-        .background(bg)
-        .border(Border::new().width(1.).fill(if bg == Color::WHITE { bg } else { Color::TRANSPARENT }))
-        .center()
-        .cursor(CursorIcon::Pointer)
-        .on_press(move |_| act())
-        .child(rect().vertical().center().spacing(6.).child(icon(svg, 18., fg)).child(label().font_size(12.).font_weight(FontWeight::SEMI_BOLD).color(fg).text(label_text.to_string())))
 }
 
 pub fn session_app() -> Element {

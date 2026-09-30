@@ -1,6 +1,4 @@
-use freya::prelude::*;
-use ui::*;
-use std::process::Command;
+use {freya::prelude::*, std::process::Command, ui::*};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DateTimeInfo {
@@ -58,19 +56,21 @@ pub fn fetch_date_time_info() -> DateTimeInfo {
             } else if let Some(rest) = l.strip_prefix("System clock synchronized:") {
                 info.ntp_synced = rest.trim().eq_ignore_ascii_case("yes");
             } else if let Some(rest) = l.strip_prefix("NTP service:")
-                && !info.ntp_synced {
-                    info.ntp_synced = rest.trim().eq_ignore_ascii_case("active");
-                }
+                && !info.ntp_synced
+            {
+                info.ntp_synced = rest.trim().eq_ignore_ascii_case("active");
+            }
         }
     }
 
     if (info.timezone == "UTC" || info.timezone.is_empty())
-        && let Ok(out) = Command::new("date").arg("+%:z (%Z)").output() {
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !s.is_empty() {
-                info.timezone = s;
-            }
+        && let Ok(out) = Command::new("date").arg("+%:z (%Z)").output()
+    {
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !s.is_empty() {
+            info.timezone = s;
         }
+    }
 
     info
 }
@@ -107,291 +107,120 @@ impl Component for DateTime {
         let info = date_time_data.read().clone();
         let use_24h = *is_24_hour.read();
         let is_auto_sync = *auto_sync.read();
-        let display_time = if use_24h {
-            info.time_24.clone()
-        } else {
-            info.time_12.clone()
-        };
+        let display_time = if use_24h { info.time_24.clone() } else { info.time_12.clone() };
 
-        rect()
-            .width(Size::fill())
-            .child(page_header(
-                "Date & Time",
-                "Manage system time, time zone, and clock preferences.",
-            ))
-            // Clock & Date Card
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .margin((0., 0., 16., 0.))
-                    .padding(16.)
-                    .corner_radius(12.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .overflow(Overflow::Clip)
-                    .child(
-                        rect()
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .width(Size::fill())
-                            .margin((0., 0., 14., 0.))
-                            .child(
-                                label()
-                                    .font_size(13.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(t.text_secondary)
-                                    .text("CURRENT TIME & DATE"),
-                            )
-                            .child(secondary_button("Sync / Refresh", {
+        FadeSlideIn::new().child(
+            rect()
+                .width(Size::fill())
+                .vertical()
+                .spacing(GAP)
+                .child(page_head(CLOCK_ICON, "Date and time", "Manage system time, time zone, and clock preferences."))
+                .child(
+                    tile()
+                        .child(tile_head(
+                            Some(CLOCK_ICON),
+                            "Current time",
+                            Some(secondary_button("Sync / Refresh", {
                                 let mut l = loaded;
                                 move || l.set(false)
                             })),
-                    )
-                    .child(
-                        rect()
-                            .margin((0., 0., 12., 0.))
-                            .child(
-                                label()
-                                    .font_size(36.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(t.text_primary)
-                                    .text(display_time),
-                            )
-                            .child(
-                                label()
-                                    .font_size(15.)
-                                    .color(t.text_secondary)
-                                    .margin((4., 0., 0., 0.))
-                                    .text(info.date.clone()),
-                            ),
-                    )
-                    .child(
-                        rect()
-                            .horizontal()
-                            .cross_align(Alignment::Center)
-                            .margin((4., 0., 0., 0.))
-                            .child(
-                                rect()
-                                    .width(Size::px(8.))
-                                    .height(Size::px(8.))
-                                    .corner_radius(4.)
-                                    .background(if info.ntp_synced {
-                                        t.accent_green
-                                    } else {
-                                        t.accent_orange
-                                    })
-                                    .margin((0., 8., 0., 0.)),
-                            )
-                            .child(
-                                label()
-                                    .font_size(13.)
-                                    .color(if info.ntp_synced {
-                                        t.accent_green
-                                    } else {
-                                        t.text_secondary
-                                    })
-                                    .text(if info.ntp_synced {
-                                        "Clock synchronized via Network Time Protocol (NTP)".to_string()
-                                    } else {
-                                        "Clock running locally (Not NTP synchronized)".to_string()
-                                    }),
-                            ),
-                    ),
-            )
-            // Time Format Settings Card
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .margin((0., 0., 16., 0.))
-                    .padding(16.)
-                    .corner_radius(12.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .overflow(Overflow::Clip)
-                    .child(
-                        label()
-                            .font_size(13.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(t.text_secondary)
-                            .margin((0., 0., 14., 0.))
-                            .text("TIME FORMAT & SYNCHRONIZATION"),
-                    )
-                    .child(
-                        rect()
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .width(Size::fill())
-                            .margin((0., 0., 14., 0.))
-                            .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .width(Size::flex(1.))
-                                    .child(
-                                        label()
-                                            .font_size(15.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("24-Hour Time"),
-                                    )
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .color(t.text_secondary)
-                                            .margin((2., 0., 0., 0.))
-                                            .text("Display time in 24-hour format (e.g. 15:30) instead of 12-hour AM/PM"),
-                                    ),
-                            )
-                            .child(
-                                Switch::new()
-                                    .toggled(use_24h)
-                                    .on_toggle({
-                                        let mut h = is_24_hour;
-                                        move |_| {
-                                            let curr = *h.read();
-                                            h.set(!curr);
-                                        }
-                                    }),
-                            ),
-                    )
-                    .child(
-                        rect()
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .width(Size::fill())
-                            .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .width(Size::flex(1.))
-                                    .child(
-                                        label()
-                                            .font_size(15.)
-                                            .font_weight(FontWeight::SEMI_BOLD)
-                                            .color(t.text_primary)
-                                            .text("Automatic Date & Time"),
-                                    )
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .color(t.text_secondary)
-                                            .margin((2., 0., 0., 0.))
-                                            .text("Use network time synchronization (NTP) to keep system clock accurate"),
-                                    ),
-                            )
-                            .child(
-                                Switch::new()
-                                    .toggled(is_auto_sync)
-                                    .on_toggle({
-                                        let mut s = auto_sync;
-                                        let mut l = loaded;
-                                        move |_| {
-                                            let next = !*s.read();
-                                            s.set(next);
-                                            std::thread::spawn(move || {
-                                                let _ = Command::new("timedatectl")
-                                                    .args(["set-ntp", if next { "true" } else { "false" }])
-                                                    .output();
-                                            });
-                                            l.set(false);
-                                        }
-                                    }),
-                            ),
-                    ),
-            )
-            // Time Zone & Hardware Details Card
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .margin((0., 0., 16., 0.))
-                    .padding(16.)
-                    .corner_radius(12.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .overflow(Overflow::Clip)
-                    .child(
-                        label()
-                            .font_size(13.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(t.text_secondary)
-                            .margin((0., 0., 14., 0.))
-                            .text("TIME ZONE & DETAILS"),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::fill())
-                            .padding((10., 14.))
-                            .margin((0., 0., 6., 0.))
-                            .corner_radius(8.)
-                            .background(t.bg_base)
-                            .border(Border::new().width(1.).fill(t.border_subtle))
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .child(
-                                label()
-                                    .font_size(14.)
-                                    .font_weight(FontWeight::SEMI_BOLD)
-                                    .color(t.text_primary)
-                                    .text("Time Zone"),
-                            )
-                            .child(
-                                label()
-                                    .font_size(14.)
-                                    .color(t.text_secondary)
-                                    .text(info.timezone.clone()),
-                            ),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::fill())
-                            .padding((10., 14.))
-                            .margin((0., 0., 6., 0.))
-                            .corner_radius(8.)
-                            .background(t.bg_base)
-                            .border(Border::new().width(1.).fill(t.border_subtle))
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .child(
-                                label()
-                                    .font_size(14.)
-                                    .font_weight(FontWeight::SEMI_BOLD)
-                                    .color(t.text_primary)
-                                    .text("Universal Time (UTC)"),
-                            )
-                            .child(
-                                label()
-                                    .font_size(14.)
-                                    .color(t.text_secondary)
-                                    .text(info.universal_time.clone()),
-                            ),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::fill())
-                            .padding((10., 14.))
-                            .corner_radius(8.)
-                            .background(t.bg_base)
-                            .border(Border::new().width(1.).fill(t.border_subtle))
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .child(
-                                label()
-                                    .font_size(14.)
-                                    .font_weight(FontWeight::SEMI_BOLD)
-                                    .color(t.text_primary)
-                                    .text("RTC (Hardware Clock)"),
-                            )
-                            .child(
-                                label()
-                                    .font_size(14.)
-                                    .color(t.text_secondary)
-                                    .text(info.rtc_time.clone()),
-                            ),
-                    ),
-            )
+                        ))
+                        .child(
+                            rect()
+                                .margin((0., 0., 12., 0.))
+                                .child(
+                                    label()
+                                        .font_size(36.)
+                                        .font_weight(FontWeight::BOLD)
+                                        .color(t.text)
+                                        .text(display_time),
+                                )
+                                .child(
+                                    label()
+                                        .font_size(15.)
+                                        .color(t.text_dim)
+                                        .margin((4., 0., 0., 0.))
+                                        .text(info.date.clone()),
+                                ),
+                        )
+                        .child(
+                            rect()
+                                .horizontal()
+                                .cross_align(Alignment::Center)
+                                .margin((4., 0., 0., 0.))
+                                .child(
+                                    rect()
+                                        .width(Size::px(8.))
+                                        .height(Size::px(8.))
+                                        .corner_radius(4.)
+                                        .background(if info.ntp_synced { t.accent_green } else { t.accent_orange })
+                                        .margin((0., 8., 0., 0.)),
+                                )
+                                .child(
+                                    label()
+                                        .font_size(13.)
+                                        .color(if info.ntp_synced { t.accent_green } else { t.text_dim })
+                                        .text(if info.ntp_synced {
+                                            "Clock synchronized via Network Time Protocol (NTP)".to_string()
+                                        } else {
+                                            "Clock running locally (Not NTP synchronized)".to_string()
+                                        }),
+                                ),
+                        ),
+                )
+                .child(
+                    tile()
+                        .child(tile_head(None, "Time format", None::<String>))
+                        .child(setting_row(
+                            "24-hour time",
+                            Some("Display time in 24-hour format (e.g. 15:30) instead of 12-hour AM/PM"),
+                            false,
+                            pill_switch(use_24h, {
+                                let mut h = is_24_hour;
+                                move |v| h.set(v)
+                            }),
+                        ))
+                        .child(setting_row(
+                            "Automatic date and time",
+                            Some("Use network time synchronization (NTP) to keep system clock accurate"),
+                            true,
+                            pill_switch(is_auto_sync, {
+                                let mut s = auto_sync;
+                                let mut l = loaded;
+                                move |v| {
+                                    s.set(v);
+                                    std::thread::spawn(move || {
+                                        let _ = Command::new("timedatectl")
+                                            .args(["set-ntp", if v { "true" } else { "false" }])
+                                            .output();
+                                    });
+                                    l.set(false);
+                                }
+                            }),
+                        )),
+                )
+                .child(
+                    tile()
+                        .child(tile_head(None, "Time zone", None::<String>))
+                        .child(setting_row(
+                            "Time zone",
+                            None::<String>,
+                            false,
+                            label().font_size(14.).color(t.text_dim).text(info.timezone.clone()),
+                        ))
+                        .child(setting_row(
+                            "Universal time",
+                            None::<String>,
+                            true,
+                            label().font_size(14.).color(t.text_dim).text(info.universal_time.clone()),
+                        ))
+                        .child(setting_row(
+                            "Hardware clock",
+                            None::<String>,
+                            true,
+                            label().font_size(14.).color(t.text_dim).text(info.rtc_time.clone()),
+                        )),
+                ),
+        )
     }
 }

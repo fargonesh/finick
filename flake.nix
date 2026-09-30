@@ -94,6 +94,18 @@
             Keywords=Apps;Store;Flatpak;Flathub;Nix;
             StartupWMClass=store
             EOF
+            cat > $out/share/applications/finick-launcher.desktop <<'EOF'
+            [Desktop Entry]
+            Name=Finick Launcher
+            Comment=Spotlight-style app and file launcher
+            Exec=launcher
+            Icon=system-search
+            Terminal=false
+            Type=Application
+            Categories=System;Utility;
+            Keywords=Launcher;Search;Spotlight;Apps;
+            StartupWMClass=launcher
+            EOF
             desktop-file-validate $out/share/applications/*.desktop
           '';
         };
@@ -104,7 +116,8 @@
             let
               cargoArgs =
                 if bin == "overlay" then "-p overlay --bin overlay"
-                else if bin == "topbar" then "-p overlay --bin overlay"
+                else if bin == "topbar" then "-p overlay --bin topbar"
+                else if bin == "launcher" then "-p overlay --bin launcher"
                 else "-p ${bin}";
             in
             pkgs.writeShellScriptBin bin ''
@@ -129,7 +142,7 @@
               fi
               exec "$DEVENV_BIN" --quiet shell -- bash -c 'cd "$1"; shift; exec cargo run ${cargoArgs} --manifest-path "'"$REPO"'/Cargo.toml" -- "$@"' bash "$ORIG_DIR" "$@"
             '')
-            [ "overlay" "topbar" "settings" "files" "finickd" "index" "finickctl" "locker" "store" ]) ++ [ desktopEntries ];
+            [ "overlay" "topbar" "launcher" "settings" "files" "finickd" "index" "finickctl" "locker" "store" ]) ++ [ desktopEntries ];
           meta.mainProgram = "overlay";
         };
       in
@@ -142,12 +155,14 @@
         apps = {
           default = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/overlay"; };
           overlay = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/overlay"; };
-          topbar = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/overlay"; };
+          topbar = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/topbar"; };
+          launcher = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/launcher"; };
           settings = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/settings"; };
           files = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/files"; };
           finickd = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/finickd"; };
           index = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/index"; };
           finickctl = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/finickctl"; };
+          locker = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/locker"; };
           store = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/store"; };
         };
 

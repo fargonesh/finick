@@ -1,9 +1,4 @@
-use {
-    freya::prelude::*,
-    ipsea::notifications::Notification,
-    std::path::PathBuf,
-    ui::*,
-};
+use {freya::prelude::*, ipsea::notifications::Notification, std::path::PathBuf, ui::*};
 
 /// Helper to render an icon for a notification.
 /// Handles SVGs, local image files, named icon aliases, and defaults to the notification bell icon.
@@ -12,22 +7,11 @@ pub fn render_notification_icon(icon_str: &str, size: f32, color: Color) -> Elem
 
     if trimmed.starts_with("<svg") {
         let bytes = Bytes::copy_from_slice(trimmed.as_bytes());
-        return SvgViewer::new(bytes)
-            .width(Size::px(size))
-            .height(Size::px(size))
-            .color(color)
-            .into_element();
+        return SvgViewer::new(bytes).width(Size::px(size)).height(Size::px(size)).color(color).into_element();
     }
 
-    if trimmed.ends_with(".png")
-        || trimmed.ends_with(".jpg")
-        || trimmed.ends_with(".jpeg")
-        || trimmed.ends_with(".webp")
-    {
-        return ImageViewer::new(PathBuf::from(trimmed))
-            .width(Size::px(size))
-            .height(Size::px(size))
-            .into_element();
+    if trimmed.ends_with(".png") || trimmed.ends_with(".jpg") || trimmed.ends_with(".jpeg") || trimmed.ends_with(".webp") {
+        return ImageViewer::new(PathBuf::from(trimmed)).width(Size::px(size)).height(Size::px(size)).into_element();
     }
 
     if trimmed.ends_with(".svg") {
@@ -176,11 +160,7 @@ impl Component for NotificationPopup {
         // Unconditional hook call at top level of render
         use_hook(move || {
             if auto_dismiss {
-                let effective_timeout = if timeout > 0 {
-                    timeout as u64
-                } else {
-                    5000
-                };
+                let effective_timeout = if timeout > 0 { timeout as u64 } else { 5000 };
 
                 if let Some(on_close) = on_close {
                     spawn(async move {
@@ -191,28 +171,16 @@ impl Component for NotificationPopup {
             }
         });
 
-        let card_bg = if *is_hovered.read() {
-            t.panel_raised
-        } else {
-            t.panel
-        };
+        let card_bg = if *is_hovered.read() { t.panel_raised } else { t.panel };
 
-        let close_bg = if *close_hovered.read() {
-            t.border
-        } else {
-            Color::TRANSPARENT
-        };
+        let close_bg = if *close_hovered.read() { t.border } else { Color::TRANSPARENT };
 
         let mut card_h1 = is_hovered;
         let mut card_h2 = is_hovered;
         let mut close_h1 = close_hovered;
         let mut close_h2 = close_hovered;
 
-        let display_app = if !self.app_name.is_empty() {
-            self.app_name.clone()
-        } else {
-            "Notification".to_string()
-        };
+        let display_app = if !self.app_name.is_empty() { self.app_name.clone() } else { "Notification".to_string() };
 
         let title_text = self.title.clone();
         let body_text = self.body.clone();
@@ -220,113 +188,94 @@ impl Component for NotificationPopup {
         let on_close_handler = self.on_close.clone();
         let count = self.stack_count;
 
-        rect()
-            .width(self.width.clone())
-            .vertical()
-            .spacing(8.)
-            .padding((13., 15.))
-            .corner_radius(16.)
-            .background(card_bg)
-            .border(Border::new().width(1.).fill(t.border))
-            .shadow(Shadow::new().color(Color::from_argb(45, 0, 0, 0)).blur(12.).spread(1.))
-            .content(Content::Flex)
-            .on_pointer_enter(move |_| card_h1.set(true))
-            .on_pointer_leave(move |_| card_h2.set(false))
-            // Header Row: App Name tag + Stack Count Badge + Spacer + Close Button
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .horizontal()
-                    .cross_align(Alignment::Center)
-                    .content(Content::Flex)
-                    .child(
-                        label()
-                            .font_size(11.)
-                            .font_weight(FontWeight::SEMI_BOLD)
-                            .color(t.accent)
-                            .text(display_app),
-                    )
-                    .maybe(count > 1, |el| {
-                        el.child(
-                            rect()
-                                .margin((0., 0., 0., 6.))
-                                .padding((1., 7.))
-                                .corner_radius(999.)
-                                .background(t.accent)
-                                .center()
-                                .child(
-                                    label()
-                                        .font_size(10.)
-                                        .font_weight(FontWeight::BOLD)
-                                        .color(Color::WHITE)
-                                        .text(format!("{count}")),
-                                ),
-                        )
-                    })
-                    .child(rect().width(Size::flex(1.)))
-                    .child(
-                        rect()
-                            .width(Size::px(22.))
-                            .height(Size::px(22.))
-                            .corner_radius(999.)
-                            .background(close_bg)
-                            .center()
-                            .cursor(CursorIcon::Pointer)
-                            .on_pointer_enter(move |_| close_h1.set(true))
-                            .on_pointer_leave(move |_| close_h2.set(false))
-                            .on_press(move |_| {
-                                if let Some(ref h) = on_close_handler {
-                                    h.call(id);
-                                }
-                            })
-                            .child(
-                                label()
-                                    .font_size(11.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(t.text_dim)
-                                    .text("✕"),
-                            ),
-                    ),
-            )
-            // Content Row: Icon Container + Text Info
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .horizontal()
-                    .cross_align(Alignment::Start)
-                    .spacing(12.)
-                    .content(Content::Flex)
-                    .child(
-                        rect()
-                            .width(Size::px(38.))
-                            .height(Size::px(38.))
-                            .corner_radius(10.)
-                            .background(t.panel_raised)
-                            .border(Border::new().width(1.).fill(t.border))
-                            .center()
-                            .child(render_notification_icon(&icon_str, 20., t.text)),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::flex(1.))
-                            .vertical()
-                            .spacing(3.)
-                            .content(Content::Flex)
-                            .child(
-                                label()
-                                    .font_size(13.)
-                                    .font_weight(FontWeight::SEMI_BOLD)
-                                    .color(t.text)
-                                    .text(title_text),
+        FadeSlideIn::new().child(
+            rect()
+                .width(self.width.clone())
+                .vertical()
+                .spacing(8.)
+                .padding((13., 15.))
+                .corner_radius(16.)
+                .background(card_bg)
+                .border(Border::new().width(1.).fill(t.border))
+                .shadow(Shadow::new().color(Color::from_argb(45, 0, 0, 0)).blur(12.).spread(1.))
+                .content(Content::Flex)
+                .on_pointer_enter(move |_| card_h1.set(true))
+                .on_pointer_leave(move |_| card_h2.set(false))
+                // Header Row: App Name tag + Stack Count Badge + Spacer + Close Button
+                .child(
+                    rect()
+                        .width(Size::fill())
+                        .horizontal()
+                        .cross_align(Alignment::Center)
+                        .content(Content::Flex)
+                        .child(label().font_size(11.).font_weight(FontWeight::SEMI_BOLD).color(t.accent).text(display_app))
+                        .maybe(count > 1, |el| {
+                            el.child(
+                                rect()
+                                    .margin((0., 0., 0., 6.))
+                                    .padding((1., 7.))
+                                    .corner_radius(999.)
+                                    .background(t.accent)
+                                    .center()
+                                    .child(
+                                        label()
+                                            .font_size(10.)
+                                            .font_weight(FontWeight::BOLD)
+                                            .color(Color::WHITE)
+                                            .text(format!("{count}")),
+                                    ),
                             )
-                            .child(
-                                label()
-                                    .font_size(12.)
-                                    .color(t.text_dim)
-                                    .text(body_text),
-                            ),
-                    ),
-            )
+                        })
+                        .child(rect().width(Size::flex(1.)))
+                        .child(
+                            rect()
+                                .width(Size::px(22.))
+                                .height(Size::px(22.))
+                                .corner_radius(999.)
+                                .background(close_bg)
+                                .center()
+                                .cursor(CursorIcon::Pointer)
+                                .on_pointer_enter(move |_| close_h1.set(true))
+                                .on_pointer_leave(move |_| close_h2.set(false))
+                                .on_press(move |_| {
+                                    if let Some(ref h) = on_close_handler {
+                                        h.call(id);
+                                    }
+                                })
+                                .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_dim).text("✕")),
+                        ),
+                )
+                // Content Row: Icon Container + Text Info
+                .child(
+                    rect()
+                        .width(Size::fill())
+                        .horizontal()
+                        .cross_align(Alignment::Start)
+                        .spacing(12.)
+                        .content(Content::Flex)
+                        .child(
+                            rect()
+                                .width(Size::px(38.))
+                                .height(Size::px(38.))
+                                .corner_radius(10.)
+                                .background(t.panel_raised)
+                                .border(Border::new().width(1.).fill(t.border))
+                                .center()
+                                .child(render_notification_icon(&icon_str, 20., t.text)),
+                        )
+                        .child(
+                            rect()
+                                .width(Size::flex(1.))
+                                .vertical()
+                                .spacing(3.)
+                                .content(Content::Flex)
+                                .child(
+                                    label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title_text),
+                                )
+                                .child(label().font_size(12.).color(t.text_dim).text(body_text)),
+                        ),
+                ),
+        )
     }
 }
 
@@ -356,8 +305,7 @@ mod tests {
             timeout: 3000,
         };
 
-        let popup = NotificationPopup::from_notification(&notif)
-            .with_width(Size::fill());
+        let popup = NotificationPopup::from_notification(&notif).with_width(Size::fill());
 
         assert_eq!(popup.id, 42);
         assert_eq!(popup.title, "Now Playing");

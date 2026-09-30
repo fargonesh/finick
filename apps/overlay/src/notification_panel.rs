@@ -1,6 +1,8 @@
-use crate::state::{clear_notifications, dismiss_notification, fetch_notifications_blocking, subscribe_notifications_live};
-use freya::prelude::*;
-use ui::*;
+use {
+    crate::state::{clear_notifications, dismiss_notification, fetch_notifications_blocking, subscribe_notifications_live},
+    freya::prelude::*,
+    ui::*,
+};
 
 pub fn notification_panel_app() -> Element {
     let theme_state = use_init_app_theme(get_theme());
@@ -27,7 +29,10 @@ pub fn notification_panel_app() -> Element {
                         if s.trim().is_empty() || s.contains("\"class\": \"\"") {
                             return false;
                         }
-                        if s.contains("\"class\": \"overlay-notifications\"") || s.contains("\"class\": \"overlay\"") || s.contains("\"class\": \"topbar\"") {
+                        if s.contains("\"class\": \"overlay-notifications\"")
+                            || s.contains("\"class\": \"overlay\"")
+                            || s.contains("\"class\": \"topbar\"")
+                        {
                             return false;
                         }
                         return true;
@@ -58,7 +63,10 @@ pub fn notification_panel_app() -> Element {
                 .spacing(8.)
                 .content(Content::Flex)
                 .child(icon(NOTIFICATIONS, 16., t.text))
-                .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(format!("Notifications{}", if notif_count > 0 { format!(" · {notif_count}") } else { String::new() }))),
+                .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(format!(
+                    "Notifications{}",
+                    if notif_count > 0 { format!(" · {notif_count}") } else { String::new() }
+                ))),
         )
         .child(
             rect()
@@ -90,33 +98,17 @@ pub fn notification_panel_app() -> Element {
                             }
                         })),
                 )
-                .child(
-                    rect()
-                        .width(Size::px(28.))
-                        .height(Size::px(28.))
-                        .corner_radius(999.)
-                        .background(t.panel_raised)
-                        .border(Border::new().width(1.).fill(t.border))
-                        .center()
-                        .cursor(CursorIcon::Pointer)
-                        .on_press(|_| {
-                            if let Some(ctx) = GlobalContexts::get().try_get_context::<crate::NotificationPanelWindowId>() {
-                                if let Ok(mut g) = ctx.0.lock() {
-                                    *g = None;
-                                }
-                            }
-                            Platform::get().close_window(Platform::window_id())
-                        })
-                        .child(label().font_size(13.).color(t.text_dim).text("✕")),
-                ),
+                .child(small_close_button(move || {
+                    if let Some(ctx) = GlobalContexts::get().try_get_context::<crate::NotificationPanelWindowId>() {
+                        if let Ok(mut g) = ctx.0.lock() {
+                            *g = None;
+                        }
+                    }
+                    Platform::get().close_window(Platform::window_id())
+                })),
         );
     let list = if notifs.is_empty() {
-        rect()
-            .width(Size::fill())
-            .height(Size::fill())
-            .center()
-            .child(label().font_size(13.).color(t.text_dim).text("No notifications"))
-            .into_element()
+        empty_state(NOTIFICATIONS, "No notifications", "You're all caught up").into_element()
     } else {
         let mut col = rect().width(Size::fill()).vertical().spacing(10.).content(Content::Flex);
         for n in notifs.iter().rev().cloned() {
@@ -156,7 +148,7 @@ pub fn notification_panel_app() -> Element {
         .padding(6.)
         .background(Color::TRANSPARENT)
         .content(Content::Flex)
-        .child(inner)
+        .child(FadeSlideIn::new().child(inner))
         .into_element()
 }
 

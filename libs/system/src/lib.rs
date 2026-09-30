@@ -14,7 +14,10 @@ pub use shortcuts::*;
 pub mod desktop_apps;
 pub use desktop_apps::*;
 pub mod auth;
-pub use auth::{authenticate_user, current_username, pam_authenticate, pam_service_available, verify_password};
+pub use auth::{
+    PamReply, PamRequest, authenticate_user, current_username, pam_authenticate, pam_interactive, pam_service_available,
+    verify_password,
+};
 pub mod lock;
 pub use lock::{locker_binary, locker_locked, locker_lockfile, locker_process_alive, trigger_lock};
 pub mod store;

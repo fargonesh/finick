@@ -178,7 +178,107 @@ pub fn is_imported(hm_file: &str) -> bool {
     false
 }
 
+/// Bare Nix path literals (`/home/user@host/...`) are a syntax error —
+/// `@` is not allowed in path literals. Quote any bare absolute path
+/// containing `@` so enterprise / symlinked homes keep working.
+pub fn quote_at_paths(content: &str) -> String {
+    let chars: Vec<char> = content.chars().collect();
+    let mut out = String::with_capacity(content.len() + 16);
+    let mut i = 0;
+    let mut in_double = false;
+    let mut in_indented = false;
+    let mut in_line_comment = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if in_line_comment {
+            out.push(c);
+            if c == '\n' {
+                in_line_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+        if in_indented {
+            if c == '\'' && i + 1 < chars.len() && chars[i + 1] == '\'' {
+                out.push('\'');
+                out.push('\'');
+                i += 2;
+                in_indented = false;
+            } else {
+                out.push(c);
+                i += 1;
+            }
+            continue;
+        }
+        if in_double {
+            out.push(c);
+            if c == '\\' && i + 1 < chars.len() {
+                out.push(chars[i + 1]);
+                i += 2;
+            } else if c == '"' {
+                in_double = false;
+                i += 1;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if c == '#' {
+            in_line_comment = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == '"' {
+            in_double = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == '\'' && i + 1 < chars.len() && chars[i + 1] == '\'' {
+            in_indented = true;
+            out.push('\'');
+            out.push('\'');
+            i += 2;
+            continue;
+        }
+        if c == '/' && i + 1 < chars.len() && chars[i + 1] != '/' && chars[i + 1] != '*' {
+            let mut j = i + 1;
+            while j < chars.len() && !matches!(chars[j], '"' | '\'' | '#' | ';' | ',' | ']' | ')' | '}' | '{' | '[' | '(')
+                && !chars[j].is_whitespace()
+            {
+                j += 1;
+            }
+            let token: String = chars[i..j].iter().collect();
+            if token.contains('@') {
+                out.push('"');
+                out.push_str(&token);
+                out.push('"');
+            } else {
+                out.push_str(&token);
+            }
+            i = j;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Rewrite bare `/...@...` imports to quoted strings. Returns true when the
+/// file was changed.
+pub fn repair_bare_imports(hm_file: &str) -> bool {
+    let Ok(content) = fs::read_to_string(hm_file) else { return false };
+    let fixed = quote_at_paths(&content);
+    if fixed == content {
+        return false;
+    }
+    fs::write(hm_file, fixed).is_ok()
+}
+
 pub fn ensure_imported(hm_file: &str) -> Result<(), String> {
+    let _ = repair_bare_imports(hm_file);
     if is_imported(hm_file) {
         return Ok(());
     }
@@ -187,14 +287,25 @@ pub fn ensure_imported(hm_file: &str) -> Result<(), String> {
     let backup = format!("{hm_file}.bak-finick");
     let _ = fs::copy(hm_file, &backup);
     let status = Command::new("nix")
-        .args(["run", "github:vlinkz/nix-editor", "--", "--file", hm_file, "--arr-add", "imports", &target])
+        .args(["run", "github:vlinkz/nix-editor", "--", hm_file, "imports", "--arr", &target, "--inplace", "--format"])
         .output()
         .map_err(|e| format!("failed to run nix-editor: {e}"))?;
+    let _ = repair_bare_imports(hm_file);
     if !status.status.success() {
+        let err = String::from_utf8_lossy(&status.stderr).trim().to_string();
+        if append_import_fallback(hm_file, &target).is_ok() && is_imported(hm_file) {
+            return Ok(());
+        }
         return Err(format!(
-            "nix-editor failed: {}. Add manually: imports = [ \"{target}\" ];",
-            String::from_utf8_lossy(&status.stderr).trim()
+            "nix-editor failed: {err}. Add manually: imports = [ \"{target}\" ];",
+            target = target
         ));
+    }
+    if !is_imported(hm_file)
+        && append_import_fallback(hm_file, &target).is_ok()
+        && is_imported(hm_file)
+    {
+        return Ok(());
     }
     let parse = Command::new("nix-instantiate").args(["--parse", hm_file]).output();
     match parse {
@@ -203,8 +314,63 @@ pub fn ensure_imported(hm_file: &str) -> Result<(), String> {
     }
 }
 
+fn append_import_fallback(hm_file: &str, target: &str) -> Result<(), String> {
+    let _ = repair_bare_imports(hm_file);
+    let content = fs::read_to_string(hm_file).map_err(|e| format!("read {hm_file}: {e}"))?;
+    if content.contains(target) || content.contains("finick/store/apps.nix") {
+        return Ok(());
+    }
+    let line = format!("imports = [ \"{target}\" ];");
+    let mut out = content;
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    if let Some(idx) = out.rfind('}') {
+        out.insert_str(idx, &format!("  {line}\n"));
+    } else {
+        out.push_str(&format!("{{ {line} }}\n"));
+    }
+    fs::write(hm_file, out).map_err(|e| format!("write {hm_file}: {e}"))?;
+    let parse = Command::new("nix-instantiate").args(["--parse", hm_file]).output();
+    match parse {
+        Ok(o) if o.status.success() => Ok(()),
+        _ => {
+            let backup = format!("{hm_file}.bak-finick");
+            let _ = fs::copy(&backup, hm_file);
+            Err(format!("fallback edit failed to parse — backup at {backup}"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quotes_bare_at_path_in_imports() {
+        let input = "{\n  imports = [\n    ./phone-stuff.nix\n    /home/flora.hill@rmhedge.com/.config/finick/store/apps.nix\n  ];\n}\n";
+        let fixed = quote_at_paths(input);
+        assert!(fixed.contains("\"/home/flora.hill@rmhedge.com/.config/finick/store/apps.nix\""));
+        assert!(fixed.contains("./phone-stuff.nix"));
+    }
+
+    #[test]
+    fn leaves_quoted_and_plain_paths_alone() {
+        let input = "{\n  imports = [ \"/home/a@b/apps.nix\" ./local.nix /nix/store/plain ];\n}\n";
+        assert_eq!(quote_at_paths(input), input);
+    }
+}
+
 pub fn apply_home_manager() -> Result<String, String> {
-    for cmd in [vec!["nh", "home", "switch"], vec!["home-manager", "switch"]] {
+    // Absolute store imports (`"/home/user@host/.config/..."`) need impure
+    // evaluation; try `--impure` variants before pure fallbacks.
+    let cmds: Vec<Vec<&str>> = vec![
+        vec!["nh", "home", "switch", "--", "--impure"],
+        vec!["home-manager", "switch", "--impure"],
+        vec!["nh", "home", "switch"],
+        vec!["home-manager", "switch"],
+    ];
+    for cmd in cmds {
         if let Ok(out) = Command::new(cmd[0]).args(&cmd[1..]).output() {
             if out.status.success() {
                 return Ok(String::from_utf8_lossy(&out.stdout).to_string());

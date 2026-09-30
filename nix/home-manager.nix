@@ -123,6 +123,7 @@ in
 
     wayland.windowManager.hyprland.settings.bind = [
       "SUPER, L, exec, ${cfg.package}/bin/locker"
+      "SUPER, SPACE, exec, ${cfg.package}/bin/launcher"
     ];
 
     wayland.windowManager.hyprland.settings.windowrulev2 = [
@@ -131,6 +132,11 @@ in
       "noanim, class:^(locker)$"
       "noshadow, class:^(locker)$"
       "noborder, class:^(locker)$"
+      "float, class:^(launcher)$"
+      "pin, class:^(launcher)$"
+      "noanim, class:^(launcher)$"
+      "noshadow, class:^(launcher)$"
+      "noborder, class:^(launcher)$"
       "float, class:^(overlay)$"
       "pin, class:^(overlay)$"
       "noanim, class:^(overlay)$"

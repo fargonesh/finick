@@ -1,6 +1,10 @@
-use freya::prelude::*;
-use crate::theme::{use_app_theme, RADIUS_LG, RADIUS_MD};
-use crate::icons::icon;
+use {
+    crate::{
+        icons::icon,
+        theme::{GAP, RADIUS_LG, RADIUS_MD, RADIUS_PILL, use_app_theme},
+    },
+    freya::prelude::*,
+};
 
 /// A tile container matching .tile in ui_demo.html
 pub fn tile() -> Rect {
@@ -13,7 +17,6 @@ pub fn tile() -> Rect {
         .padding(18.)
         .vertical()
 }
-
 
 /// A tile header matching .tile-head in ui_demo.html
 pub fn tile_head(
@@ -34,55 +37,28 @@ pub fn tile_head(
             rect()
                 .horizontal()
                 .cross_align(Alignment::Center)
-                .maybe_child(icon_svg.map(|svg| {
-                    rect().margin((0., 9., 0., 0.)).child(icon(svg, 17., t.text_dim))
-                }))
-                .child(
-                    label()
-                        .font_size(14.)
-                        .font_weight(FontWeight::SEMI_BOLD)
-                        .color(t.text)
-                        .text(title_str),
-                ),
+                .maybe_child(icon_svg.map(|svg| rect().margin((0., 9., 0., 0.)).child(icon(svg, 17., t.text_dim))))
+                .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title_str)),
         )
         .maybe_child(right_action)
 }
 
-
 /// A field label matching .field-label in ui_demo.html
 pub fn field_label(text: impl Into<String>) -> impl IntoElement {
     let t = use_app_theme();
-    rect()
-        .margin((0., 0., 8., 0.))
-        .child(
-            label()
-                .font_size(12.)
-                .color(t.text_dim)
-                .text(text.into()),
-        )
+    rect().margin((0., 0., 8., 0.)).child(label().font_size(12.).color(t.text_dim).text(text.into()))
 }
 
 /// A tile subtitle matching .tile-sub in ui_demo.html
 pub fn tile_sub(text: impl Into<String>) -> impl IntoElement {
     let t = use_app_theme();
-    label()
-        .font_size(12.)
-        .color(t.text_dim)
-        .text(text.into())
+    label().font_size(12.).color(t.text_dim).text(text.into())
 }
 
 /// A toggleable quick action button (e.g. Wi-Fi, Bluetooth, DND).
-pub fn quick_action_btn(
-    title: impl Into<String>,
-    active: bool,
-    mut on_press: impl FnMut() + 'static,
-) -> impl IntoElement {
+pub fn quick_action_btn(title: impl Into<String>, active: bool, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
     let t = use_app_theme();
-    let bg = if active {
-        t.accent
-    } else {
-        t.panel_raised
-    };
+    let bg = if active { t.accent } else { t.panel_raised };
 
     rect()
         .width(Size::px(100.))
@@ -92,11 +68,101 @@ pub fn quick_action_btn(
         .center()
         .cursor(CursorIcon::Pointer)
         .on_press(move |_| on_press())
+        .child(label().font_weight(FontWeight::BOLD).color(t.text).text(title.into()))
+}
+
+pub fn dialog_card(width_px: f32) -> Rect {
+    let t = use_app_theme();
+    rect()
+        .width(Size::px(width_px))
+        .background(t.panel)
+        .border(Border::new().width(1.).fill(t.border))
+        .corner_radius(RADIUS_LG)
+        .padding(20.)
+        .vertical()
+}
+
+pub fn section_label(text: impl Into<String>) -> impl IntoElement {
+    let t = use_app_theme();
+    label().font_size(11.).font_weight(FontWeight::SEMI_BOLD).color(t.text_dim).text(text.into())
+}
+
+pub fn action_tile_flex(
+    icon_str: impl Into<String>,
+    title: impl Into<String>,
+    active: bool,
+    mut on_press: impl FnMut() + 'static,
+) -> impl IntoElement {
+    let t = use_app_theme();
+    let bg = if active { t.accent } else { t.panel };
+    let border_color = if active { t.accent } else { t.border };
+
+    rect()
+        .width(Size::flex(1.))
+        .height(Size::px(64.))
+        .corner_radius(RADIUS_MD)
+        .background(bg)
+        .border(Border::new().width(1.).fill(border_color))
+        .horizontal()
+        .cross_align(Alignment::Center)
+        .main_align(Alignment::Center)
+        .spacing(GAP)
+        .cursor(CursorIcon::Pointer)
+        .on_press(move |_| on_press())
+        .child(label().font_size(18.).color(t.text).text(icon_str.into()))
+        .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title.into()))
+}
+
+pub fn empty_state(icon_svg: &'static str, title: impl Into<String>, hint: impl Into<String>) -> impl IntoElement {
+    let t = use_app_theme();
+    rect()
+        .width(Size::fill())
+        .vertical()
+        .cross_align(Alignment::Center)
+        .main_align(Alignment::Center)
+        .spacing(8.)
+        .padding(24.)
+        .child(icon(icon_svg, 28., t.text_dim))
+        .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title.into()))
+        .child(label().font_size(12.).color(t.text_dim).text(hint.into()))
+}
+
+pub fn stat_block(label_text: impl Into<String>, value_text: impl Into<String>) -> impl IntoElement {
+    let t = use_app_theme();
+    rect()
+        .vertical()
+        .spacing(2.)
+        .child(label().font_size(12.).color(t.text_dim).text(label_text.into()))
+        .child(label().font_size(16.).font_weight(FontWeight::BOLD).color(t.text).text(value_text.into()))
+}
+
+pub fn hero_identity(
+    initial_or_icon: impl Into<String>,
+    title: impl Into<String>,
+    subtitle: impl Into<String>,
+) -> impl IntoElement {
+    let t = use_app_theme();
+    rect()
+        .horizontal()
+        .cross_align(Alignment::Center)
+        .spacing(GAP)
         .child(
-            label()
-                .font_weight(FontWeight::BOLD)
-                .color(t.text)
-                .text(title.into()),
+            rect()
+                .width(Size::px(48.))
+                .height(Size::px(48.))
+                .corner_radius(RADIUS_PILL)
+                .background(t.accent)
+                .center()
+                .child(
+                    label().font_size(18.).font_weight(FontWeight::BOLD).color(Color::WHITE).text(initial_or_icon.into()),
+                ),
+        )
+        .child(
+            rect()
+                .vertical()
+                .spacing(2.)
+                .child(label().font_size(15.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title.into()))
+                .child(label().font_size(12.).color(t.text_dim).text(subtitle.into())),
         )
 }
 
@@ -108,16 +174,8 @@ pub fn quick_action_tile(
     mut on_press: impl FnMut() + 'static,
 ) -> impl IntoElement {
     let t = use_app_theme();
-    let bg = if active {
-        t.accent
-    } else {
-        t.panel
-    };
-    let border_color = if active {
-        t.accent
-    } else {
-        t.border
-    };
+    let bg = if active { t.accent } else { t.panel };
+    let border_color = if active { t.accent } else { t.border };
 
     rect()
         .width(Size::px(120.))
@@ -132,19 +190,7 @@ pub fn quick_action_tile(
             rect()
                 .vertical()
                 .center()
-                .child(
-                    label()
-                        .font_size(24.)
-                        .margin((0., 0., 6., 0.))
-                        .text(icon_str.into()),
-                )
-                .child(
-                    label()
-                        .font_size(13.)
-                        .font_weight(FontWeight::SEMI_BOLD)
-                        .color(t.text)
-                        .text(title.into()),
-                ),
+                .child(label().font_size(24.).margin((0., 0., 6., 0.)).text(icon_str.into()))
+                .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title.into())),
         )
 }
-

@@ -1195,23 +1195,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     });
 
-    // Locker supervisor: if the session is locked but no locker process is
-    // alive (e.g. someone killed it from a stray terminal), bring it back
-    // and keep the shell overlay hidden until unlock.
-    std::thread::spawn(|| loop {
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        if !system::locker_locked() {
-            continue;
-        }
-        if !system::locker_process_alive() {
-            eprintln!("[finickd] locker died while locked, respawning");
+    std::thread::spawn(|| {
+        let mut failures: u32 = 0;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if std::env::var("FINICK_LOCKER_DISABLED").is_ok() {
+                failures = 0;
+                continue;
+            }
+            if !system::locker_locked() {
+                failures = 0;
+                continue;
+            }
+            if system::locker_process_alive() {
+                failures = 0;
+                continue;
+            }
+            failures += 1;
+            if failures > 3 {
+                eprintln!("[finickd] locker crashed {}x, giving up — clearing stale lockfile to avoid YubiKey hammer", failures);
+                let _ = std::fs::remove_file(system::locker_lockfile());
+                let _ = std::process::Command::new("systemctl").args(["--user", "start", "finick-overlay"]).output();
+                failures = 0;
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                continue;
+            }
+            eprintln!("[finickd] locker died while locked (attempt {}/3), respawning", failures);
+            let backoff = std::time::Duration::from_secs(1 << failures);
+            std::thread::sleep(backoff);
             if let Some(exe) = system::locker_binary() {
                 let _ = std::process::Command::new(&exe).spawn();
-            } else {
+            } else if std::process::Command::new("locker").spawn().is_err() {
                 let _ = std::process::Command::new("locker").spawn();
             }
         }
-        let _ = std::process::Command::new("systemctl").args(["--user", "stop", "finick-overlay"]).output();
     });
 
     tokio::select! {

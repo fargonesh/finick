@@ -1,7 +1,8 @@
-use freya::prelude::*;
-use std::collections::HashSet;
-use std::process::Command;
-use ui::*;
+use {
+    freya::prelude::*,
+    std::{collections::HashSet, process::Command},
+    ui::*,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BluetoothDevice {
@@ -73,11 +74,7 @@ impl Component for Bluetooth {
                                 };
                                 let connected = connected_macs.contains(&mac.to_uppercase());
                                 if !devs.iter().any(|d: &BluetoothDevice| d.mac.eq_ignore_ascii_case(&mac)) {
-                                    devs.push(BluetoothDevice {
-                                        mac,
-                                        name,
-                                        connected,
-                                    });
+                                    devs.push(BluetoothDevice { mac, name, connected });
                                 }
                             }
                         }
@@ -100,191 +97,148 @@ impl Component for Bluetooth {
         let bt_active = *is_enabled.read();
         let loading = *is_loading.read();
 
-        rect()
-            .width(Size::fill())
-            .child(page_header(
-                "Bluetooth",
-                "Manage Bluetooth adapter, paired devices, and connections.",
-            ))
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .margin((0., 0., 16., 0.))
-                    .padding(16.)
-                    .corner_radius(12.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .overflow(Overflow::Clip)
-                    .child(
-                        rect()
-                            .horizontal()
-                            .main_align(Alignment::SpaceBetween)
-                            .cross_align(Alignment::Center)
-                            .width(Size::fill())
-                            .margin((0., 0., 8., 0.))
-                            .child(
-                                label()
-                                    .font_size(15.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(t.text_primary)
-                                    .text("Bluetooth Adapter"),
-                            )
-                            .child(
-                                Switch::new()
-                                    .toggled(bt_active)
-                                    .on_toggle({
-                                        let mut enabled_state = is_enabled;
-                                        let mut l = loaded;
-                                        let mut load_state = is_loading;
-                                        move |_| {
-                                            let next = !*enabled_state.read();
-                                            enabled_state.set(next);
-                                            load_state.set(true);
-                                            std::thread::spawn(move || {
-                                                let _ = Command::new("bluetoothctl")
-                                                    .args(if next { &["power", "on"] } else { &["power", "off"] })
-                                                    .output();
-                                                std::thread::sleep(std::time::Duration::from_millis(400));
-                                            });
-                                            l.set(false);
-                                        }
-                                    }),
-                            ),
-                    )
-                    .child(
-                        label()
-                            .color(t.text_secondary)
-                            .font_size(13.)
-                            .margin((0., 0., 14., 0.))
-                            .text(if bt_active {
-                                "Bluetooth is powered on and ready to connect."
-                            } else {
-                                "Bluetooth is turned off. Turn it on to connect to devices."
-                            }),
-                    )
-                    .child(
-                        rect()
-                            .horizontal()
-                            .spacing(8.)
-                            .child(secondary_button("Refresh", {
+        FadeSlideIn::new().child(
+            rect()
+                .width(Size::fill())
+                .vertical()
+                .spacing(GAP)
+                .child(page_head(BLUETOOTH, "Bluetooth", "Manage Bluetooth adapter, paired devices, and connections."))
+                .child(
+                    tile()
+                        .child(tile_head(
+                            Some(BLUETOOTH),
+                            "Bluetooth Adapter",
+                            Some(pill_switch(bt_active, {
+                                let mut enabled_state = is_enabled;
                                 let mut l = loaded;
                                 let mut load_state = is_loading;
-                                move || {
+                                move |v| {
+                                    enabled_state.set(v);
                                     load_state.set(true);
+                                    std::thread::spawn(move || {
+                                        let _ = Command::new("bluetoothctl")
+                                            .args(if v { &["power", "on"] } else { &["power", "off"] })
+                                            .output();
+                                        std::thread::sleep(std::time::Duration::from_millis(400));
+                                    });
                                     l.set(false);
                                 }
                             })),
-                    ),
-            )
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .margin((0., 0., 16., 0.))
-                    .padding(16.)
-                    .corner_radius(12.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .overflow(Overflow::Clip)
-                    .child(
-                        rect()
-                            .horizontal()
-                            .cross_align(Alignment::Center)
-                            .margin((0., 0., 14., 0.))
-                            .child(
-                                label()
-                                    .font_size(13.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(t.text_secondary)
-                                    .text(format!("PAIRED DEVICES ({})", paired_devices.len())),
-                            ),
-                    )
-                    .child({
-                        if loading {
-                            rect()
-                                .width(Size::fill())
-                                .padding(16.)
-                                .center()
-                                .child(
-                                    label()
-                                        .font_size(14.)
-                                        .color(t.text_secondary)
-                                        .text("Loading paired Bluetooth devices..."),
-                                )
-                                .into_element()
-                        } else if paired_devices.is_empty() {
-                            rect()
-                                .width(Size::fill())
-                                .padding(16.)
-                                .center()
-                                .child(
-                                    label()
-                                        .font_size(14.)
-                                        .color(t.text_muted)
-                                        .text("No paired Bluetooth devices found."),
-                                )
-                                .into_element()
+                        ))
+                        .child(tile_sub(if bt_active {
+                            "Bluetooth is powered on and ready to connect."
                         } else {
-                            rect()
-                                .children(paired_devices.into_iter().map(|dev| {
-                                    let is_conn = dev.connected;
-                                    let mac = dev.mac.clone();
-                                    let name = dev.name.clone();
-                                    let l = loaded;
-                                    let load_state = is_loading;
+                            "Bluetooth is turned off. Turn it on to connect to devices."
+                        }))
+                        .child(rect().horizontal().spacing(8.).child(secondary_button("Refresh", {
+                            let mut l = loaded;
+                            let mut load_state = is_loading;
+                            move || {
+                                load_state.set(true);
+                                l.set(false);
+                            }
+                        }))),
+                )
+                .child(
+                    tile()
+                        .child(tile_head(None, format!("Paired devices ({})", paired_devices.len()), None::<String>))
+                        .child({
+                            if loading {
+                                rect()
+                                    .width(Size::fill())
+                                    .padding(16.)
+                                    .center()
+                                    .child(
+                                        label()
+                                            .font_size(14.)
+                                            .color(t.text_dim)
+                                            .text("Loading paired Bluetooth devices..."),
+                                    )
+                                    .into_element()
+                            } else if paired_devices.is_empty() {
+                                rect()
+                                    .width(Size::fill())
+                                    .padding(16.)
+                                    .center()
+                                    .child(
+                                        label()
+                                            .font_size(14.)
+                                            .color(t.text_dim)
+                                            .text("No paired Bluetooth devices found."),
+                                    )
+                                    .into_element()
+                            } else {
+                                rect()
+                                    .children(paired_devices.into_iter().map(|dev| {
+                                        let is_conn = dev.connected;
+                                        let mac = dev.mac.clone();
+                                        let name = dev.name.clone();
+                                        let l = loaded;
+                                        let load_state = is_loading;
 
-                                    rect()
-                                        .key(dev.mac.clone())
-                                        .width(Size::fill())
-                                        .horizontal()
-                                        .main_align(Alignment::SpaceBetween)
-                                        .cross_align(Alignment::Center)
-                                        .padding((10., 12.))
-                                        .margin((0., 0., 6., 0.))
-                                        .corner_radius(8.)
-                                        .background(if is_conn { t.bg_active } else { t.bg_base })
-                                        .border(Border::new().width(1.).fill(if is_conn { t.primary_accent } else { t.border_subtle }))
-                                        .child(
-                                            rect()
-                                                .horizontal()
-                                                .cross_align(Alignment::Center)
-                                                .child(
-                                                    rect()
-                                                        .width(Size::px(10.))
-                                                        .height(Size::px(10.))
-                                                        .corner_radius(5.)
-                                                        .background(if is_conn { t.accent_green } else { t.text_disabled })
-                                                        .margin((0., 12., 0., 0.)),
-                                                )
-                                                .child(
-                                                    rect()
-                                                        .child(
-                                                            label()
-                                                                .font_size(14.)
-                                                                .font_weight(FontWeight::SEMI_BOLD)
-                                                                .color(t.text_primary)
-                                                                .text(name),
-                                                        )
-                                                        .child(
-                                                            label()
-                                                                .font_size(12.)
-                                                                .color(if is_conn { t.accent_green } else { t.text_secondary })
-                                                                .text(if is_conn {
-                                                                    format!("Connected • {}", mac)
-                                                                } else {
-                                                                    format!("Paired • {}", mac)
-                                                                }),
-                                                        ),
-                                                ),
-                                        )
-                                        .child(
-                                            rect()
-                                                .horizontal()
-                                                .cross_align(Alignment::Center)
-                                                .spacing(6.)
-                                                .content(Content::Flex)
-                                                .child(ghost_button(
-                                                    if is_conn { "Disconnect" } else { "Connect" },
-                                                    {
+                                        rect()
+                                            .key(dev.mac.clone())
+                                            .width(Size::fill())
+                                            .horizontal()
+                                            .main_align(Alignment::SpaceBetween)
+                                            .cross_align(Alignment::Center)
+                                            .padding((10., 12.))
+                                            .margin((0., 0., 6., 0.))
+                                            .corner_radius(8.)
+                                            .background(if is_conn { t.bg_active } else { t.panel_raised })
+                                            .border(Border::new().width(1.).fill(if is_conn {
+                                                t.primary_accent
+                                            } else {
+                                                t.border
+                                            }))
+                                            .child(
+                                                rect()
+                                                    .horizontal()
+                                                    .cross_align(Alignment::Center)
+                                                    .child(
+                                                        rect()
+                                                            .width(Size::px(10.))
+                                                            .height(Size::px(10.))
+                                                            .corner_radius(5.)
+                                                            .background(if is_conn {
+                                                                t.accent_green
+                                                            } else {
+                                                                t.text_disabled
+                                                            })
+                                                            .margin((0., 12., 0., 0.)),
+                                                    )
+                                                    .child(
+                                                        rect()
+                                                            .child(
+                                                                label()
+                                                                    .font_size(14.)
+                                                                    .font_weight(FontWeight::SEMI_BOLD)
+                                                                    .color(t.text)
+                                                                    .text(name),
+                                                            )
+                                                            .child(
+                                                                label()
+                                                                    .font_size(12.)
+                                                                    .color(if is_conn {
+                                                                        t.accent_green
+                                                                    } else {
+                                                                        t.text_dim
+                                                                    })
+                                                                    .text(if is_conn {
+                                                                        format!("Connected • {}", mac)
+                                                                    } else {
+                                                                        format!("Paired • {}", mac)
+                                                                    }),
+                                                            ),
+                                                    ),
+                                            )
+                                            .child(
+                                                rect()
+                                                    .horizontal()
+                                                    .cross_align(Alignment::Center)
+                                                    .spacing(6.)
+                                                    .content(Content::Flex)
+                                                    .child(ghost_button(if is_conn { "Disconnect" } else { "Connect" }, {
                                                         let mac_c = mac.clone();
                                                         let mut l_c = l;
                                                         let mut ls_c = load_state;
@@ -305,30 +259,30 @@ impl Component for Bluetooth {
                                                             });
                                                             l_c.set(false);
                                                         }
-                                                    },
-                                                ))
-                                                .child(ghost_button("Forget", {
-                                                    let mac_c = mac.clone();
-                                                    let mut l_c = l;
-                                                    let mut ls_c = load_state;
-                                                    move || {
-                                                        let m = mac_c.clone();
-                                                        ls_c.set(true);
-                                                        std::thread::spawn(move || {
-                                                            let _ = Command::new("bluetoothctl")
-                                                                .args(["remove", &m])
-                                                                .output();
-                                                            std::thread::sleep(std::time::Duration::from_millis(500));
-                                                        });
-                                                        l_c.set(false);
-                                                    }
-                                                })),
-                                        )
-                                        .into_element()
-                                }))
-                                .into_element()
-                        }
-                    }),
-            )
+                                                    }))
+                                                    .child(ghost_button("Forget", {
+                                                        let mac_c = mac.clone();
+                                                        let mut l_c = l;
+                                                        let mut ls_c = load_state;
+                                                        move || {
+                                                            let m = mac_c.clone();
+                                                            ls_c.set(true);
+                                                            std::thread::spawn(move || {
+                                                                let _ = Command::new("bluetoothctl")
+                                                                    .args(["remove", &m])
+                                                                    .output();
+                                                                std::thread::sleep(std::time::Duration::from_millis(500));
+                                                            });
+                                                            l_c.set(false);
+                                                        }
+                                                    })),
+                                            )
+                                            .into_element()
+                                    }))
+                                    .into_element()
+                            }
+                        }),
+                ),
+        )
     }
 }

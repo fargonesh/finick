@@ -7,6 +7,7 @@ use {
     regex::Regex,
     rusqlite::params,
     std::{
+        collections::HashMap,
         env::{self, var},
         fs::{self, read_dir},
         os::unix::fs::PermissionsExt,
@@ -162,6 +163,9 @@ fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>
                 let executable = is_executable(&path);
 
                 if path.extension().map(|v| v.to_string_lossy().to_string()).unwrap_or_default() == "desktop" {
+                    if desktop_entry_hidden(&path) {
+                        continue;
+                    }
                     let (new_name, new_icon) = read_desktop(&path).unwrap_or_default();
                     name = if new_name.is_empty() { name } else { new_name };
                     icon = new_icon;
@@ -215,7 +219,161 @@ fn is_executable(path: &PathBuf) -> bool {
     }
 }
 
+pub fn desktop_entry_hidden(path: &Path) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let mut in_entry = false;
+    for line in content.lines() {
+        let t = line.trim();
+        if t.starts_with('[') && t.ends_with(']') {
+            in_entry = t == "[Desktop Entry]";
+            continue;
+        }
+        if !in_entry {
+            continue;
+        }
+        if let Some((k, v)) = t.split_once('=') {
+            let val = v.trim();
+            if (k.trim() == "NoDisplay" || k.trim() == "Hidden") && val.eq_ignore_ascii_case("true") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn fuzzy_score(query: &str, name: &str, path: &str, is_desktop: bool, is_executable: bool) -> Option<i64> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return Some(0);
+    }
+    let n = name.to_lowercase();
+    let p = path.to_lowercase();
+    let mut score: i64;
+    if n == q {
+        score = 2000;
+    } else if n.starts_with(&q) {
+        score = 1200;
+    } else if n.contains(&q) {
+        score = 700;
+    } else if p.split('/').next_back().unwrap_or("").starts_with(&q) {
+        score = 600;
+    } else {
+        let qchars: Vec<char> = q.chars().collect();
+        let subseq = |text: &str| -> Option<i64> {
+            let tchars: Vec<char> = text.chars().collect();
+            let mut ti = 0usize;
+            let mut gap = 0i64;
+            let mut first = -1i64;
+            for qc in &qchars {
+                let mut found = false;
+                while ti < tchars.len() {
+                    if tchars[ti] == *qc {
+                        if first < 0 {
+                            first = ti as i64;
+                        }
+                        found = true;
+                        ti += 1;
+                        break;
+                    }
+                    gap += 1;
+                    ti += 1;
+                }
+                if !found {
+                    return None;
+                }
+            }
+            Some(200 - gap * 2 - first.max(0))
+        };
+        if let Some(s) = subseq(&n) {
+            score = s.max(1);
+        } else if let Some(s) = subseq(&p) {
+            score = (s - 80).max(1);
+        } else {
+            return None;
+        }
+    }
+    if is_desktop {
+        score += 400;
+    }
+    if is_executable {
+        score += 40;
+    }
+    score -= (name.len() as i64).min(60);
+    Some(score)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
+pub struct RecentEntry {
+    pub name: String,
+    pub path: String,
+    pub count: u64,
+    pub icon: Option<String>,
+    pub is_desktop: bool,
+    pub is_executable: bool,
+    pub is_dir: bool,
+}
+
+pub fn recents_path() -> PathBuf {
+    if let Ok(home) = var("HOME") {
+        let p = PathBuf::from(home).join(".cache").join("finick").join("launcher_recents.json");
+        if let Some(parent) = p.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        return p;
+    }
+    config::finick_root().join("launcher_recents.json")
+}
+
+pub fn load_recents() -> Vec<RecentEntry> {
+    let p = recents_path();
+    let Ok(content) = fs::read_to_string(&p) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<RecentEntry> = serde_json::from_str(&content).unwrap_or_default();
+    entries.sort_by(|a, b| b.count.cmp(&a.count));
+    entries.truncate(20);
+    entries
+}
+
+pub fn recent_counts() -> HashMap<String, u64> { load_recents().into_iter().map(|e| (e.path, e.count)).collect() }
+
+pub fn bump_recent(r: &SearchResult) {
+    let mut entries = load_recents();
+    if let Some(e) = entries.iter_mut().find(|e| e.path == r.path) {
+        e.count += 1;
+        e.name = r.name.clone();
+        e.icon = r.icon.clone();
+    } else {
+        entries.push(RecentEntry {
+            name: r.name.clone(),
+            path: r.path.clone(),
+            count: 1,
+            icon: r.icon.clone(),
+            is_desktop: r.is_desktop,
+            is_executable: r.is_executable,
+            is_dir: r.is_dir,
+        });
+    }
+    entries.sort_by(|a, b| b.count.cmp(&a.count));
+    entries.truncate(20);
+    let p = recents_path();
+    if let Some(parent) = p.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&entries) {
+        let tmp = p.with_extension("tmp");
+        if fs::write(&tmp, json).is_ok() {
+            let _ = fs::rename(&tmp, &p);
+        }
+    }
+}
+
 fn read_desktop(path: &PathBuf) -> Result<(String, Option<String>), ()> {
+    if desktop_entry_hidden(path) {
+        return Err(());
+    }
     let desktop = fs::read_to_string(path).map_err(|_| ())?;
 
     let name = desktop
@@ -265,19 +423,20 @@ fn resolve_icon(name: &str) -> Option<String> {
 pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(SearchResult)) {
     let like_query = format!("%{query}%");
     let conn = pool.get().unwrap();
+    let counts = recent_counts();
 
-    // First, search in the database
     let mut res = conn
         .prepare(
             "SELECT name, path, icon, desktop, executable, is_dir, size, last_accessed
              FROM files
              WHERE name LIKE ?1 OR path LIKE ?1
-             ORDER BY executable DESC, last_accessed DESC, depth ASC, LENGTH(replace(name, ?1, '')) ASC
-             LIMIT 100",
+             ORDER BY last_accessed DESC, depth ASC
+             LIMIT 150",
         )
         .unwrap();
 
     let mut found_paths = std::collections::HashSet::new();
+    let mut scored: Vec<(i64, u64, SearchResult)> = Vec::new();
 
     let mut rows = res.query(params![like_query]).unwrap();
     while let Some(row) = rows.next().unwrap() {
@@ -290,20 +449,27 @@ pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(Sear
         let size: Option<i64> = row.get(6).unwrap_or(None);
         let last_accessed: Option<i64> = row.get(7).unwrap_or(None);
 
-        found_paths.insert(path.clone());
-        cb(SearchResult {
+        if desktop && path.ends_with(".desktop") && desktop_entry_hidden(Path::new(&path)) {
+            continue;
+        }
+        let Some(base) = fuzzy_score(query, &name, &path, desktop, executable) else {
+            continue;
+        };
+        let uses = counts.get(&path).copied().unwrap_or(0);
+        let item = SearchResult {
             name,
-            path,
+            path: path.clone(),
             icon,
             is_desktop: desktop,
             is_executable: executable,
             is_dir,
             size: size.map(|s| s as u64),
             modified: last_accessed.map(|t| t as u64),
-        });
+        };
+        found_paths.insert(path);
+        scored.push((base, uses, item));
     }
 
-    // Quick 1-depth search in $PATH directories
     if let Ok(path_var) = var("PATH") {
         for folder in env::split_paths(&path_var) {
             if let Ok(entries) = folder.read_dir() {
@@ -311,34 +477,47 @@ pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(Sear
                     let path = entry.path();
                     let name = entry.file_name().to_string_lossy().to_string();
 
-                    if path.is_file()
-                        && is_executable(&path)
-                        && path.file_name().map(|v| v.to_string_lossy()).unwrap_or_default().to_string().contains(query)
-                    {
+                    if path.is_file() && is_executable(&path) {
                         let path_str = path.to_string_lossy().to_string();
-                        if !found_paths.contains(&path_str) {
-                            let size = entry.metadata().ok().map(|m| m.len());
-                            let modified = entry
-                                .metadata()
-                                .ok()
-                                .and_then(|m| m.modified().ok())
-                                .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-                                .map(|d| d.as_secs());
-                            cb(SearchResult {
-                                name,
-                                path: path.to_string_lossy().to_string(),
-                                is_desktop: false,
-                                is_executable: true,
-                                icon: None,
-                                is_dir: false,
-                                size,
-                                modified,
-                            });
+                        if found_paths.contains(&path_str) {
+                            continue;
                         }
+                        let Some(base) = fuzzy_score(query, &name, &path_str, false, true) else {
+                            continue;
+                        };
+                        let size = entry.metadata().ok().map(|m| m.len());
+                        let modified = entry
+                            .metadata()
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs());
+                        let uses = counts.get(&path_str).copied().unwrap_or(0);
+                        found_paths.insert(path_str.clone());
+                        scored.push((base, uses, SearchResult {
+                            name,
+                            path: path_str,
+                            is_desktop: false,
+                            is_executable: true,
+                            icon: None,
+                            is_dir: false,
+                            size,
+                            modified,
+                        }));
                     }
                 }
             }
         }
+    }
+
+    scored.sort_by(|a, b| {
+        let rec_a = (a.1.min(50) as i64) * 25;
+        let rec_b = (b.1.min(50) as i64) * 25;
+        (b.0 + rec_b).cmp(&(a.0 + rec_a))
+    });
+    scored.truncate(50);
+    for (_, _, item) in scored {
+        cb(item);
     }
 }
 
@@ -403,4 +582,33 @@ pub fn watch(pool: Pool<SqliteConnectionManager>) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefix_beats_subsequence() {
+        let a = fuzzy_score("fire", "Firefox", "/usr/bin/firefox", true, false).unwrap();
+        let b = fuzzy_score("fire", "Mozilla Firefox ESR", "/usr/bin/firefox-esr", false, false).unwrap();
+        assert!(a > b);
+    }
+
+    #[test]
+    fn desktop_beats_plain() {
+        let a = fuzzy_score("term", "Terminal", "/usr/share/applications/t.desktop", true, false).unwrap();
+        let b = fuzzy_score("term", "Terminal", "/usr/bin/terminal", false, true).unwrap();
+        assert!(a > b);
+    }
+
+    #[test]
+    fn no_match_returns_none() {
+        assert!(fuzzy_score("zzzqqq", "Firefox", "/usr/bin/firefox", true, false).is_none());
+    }
+
+    #[test]
+    fn empty_query_scores_zero() {
+        assert_eq!(fuzzy_score("", "Anything", "/tmp/x", false, false), Some(0));
+    }
 }

@@ -1,6 +1,57 @@
-use freya::prelude::*;
-use crate::theme::{use_app_theme, RADIUS_PILL, RADIUS_SM};
-use crate::icons::{icon, SEARCH};
+use {
+    crate::{
+        icons::{SEARCH, icon},
+        motion::tokens::DUR_FAST,
+        theme::{RADIUS_PILL, RADIUS_SM, use_app_theme},
+    },
+    freya::{
+        animation::{AnimColor, Ease, Function, OnChange, OnCreation, use_animation_with_dependencies},
+        prelude::*,
+    },
+};
+
+#[derive(Clone, PartialEq)]
+struct NavBody {
+    icon_svg: &'static str,
+    name: String,
+    active: bool,
+}
+
+impl Component for NavBody {
+    fn render(&self) -> impl IntoElement {
+        let t = use_app_theme();
+        let active = self.active;
+        let anim = use_animation_with_dependencies(&active, move |conf, a| {
+            conf.on_creation(OnCreation::Finish);
+            conf.on_change(OnChange::Rerun);
+            if *a {
+                AnimColor::new(Color::TRANSPARENT, t.bg_active).time(DUR_FAST).ease(Ease::Out).function(Function::Quad)
+            } else {
+                AnimColor::new(t.bg_active, Color::TRANSPARENT).time(DUR_FAST).ease(Ease::Out).function(Function::Quad)
+            }
+        });
+        let text_color = if active { t.text } else { t.text_dim };
+        let icon_color = if active { t.accent } else { t.text_dim };
+
+        rect()
+            .width(Size::fill())
+            .horizontal()
+            .cross_align(Alignment::Center)
+            .spacing(10.)
+            .padding((8., 10.))
+            .corner_radius(RADIUS_SM)
+            .background(&*anim.read())
+            .child({
+                let icon_sz = match t.icon_size_pref {
+                    0 => 14.,
+                    2 => 21.,
+                    _ => 17.,
+                };
+                icon(self.icon_svg, icon_sz, icon_color)
+            })
+            .child(label().font_size(13.).font_weight(FontWeight::MEDIUM).color(text_color).text(self.name.clone()))
+    }
+}
 
 /// A nav item matching .nav-item in ui_demo.html
 pub fn nav_item(
@@ -9,52 +60,13 @@ pub fn nav_item(
     active: bool,
     mut on_press: impl FnMut() + 'static,
 ) -> impl IntoElement {
-    let t = use_app_theme();
     let name_str = name.into();
 
-    let bg = if active {
-        t.bg_active
-    } else {
-        Color::TRANSPARENT
-    };
-
-    let text_color = if active {
-        t.text
-    } else {
-        t.text_dim
-    };
-
-    let icon_color = if active {
-        t.accent
-    } else {
-        t.text_dim
-    };
-
-    rect()
-        .width(Size::fill())
-        .horizontal()
-        .cross_align(Alignment::Center)
-        .spacing(10.)
-        .padding((8., 10.))
-        .corner_radius(RADIUS_SM)
-        .background(bg)
-        .cursor(CursorIcon::Pointer)
-        .on_press(move |_| on_press())
-        .child({
-            let icon_sz = match t.icon_size_pref {
-                0 => 14.,
-                2 => 21.,
-                _ => 17.,
-            };
-            icon(icon_svg, icon_sz, icon_color)
-        })
-        .child(
-            label()
-                .font_size(13.)
-                .font_weight(FontWeight::MEDIUM)
-                .color(text_color)
-                .text(name_str),
-        )
+    rect().width(Size::fill()).cursor(CursorIcon::Pointer).on_press(move |_| on_press()).child(NavBody {
+        icon_svg,
+        name: name_str,
+        active,
+    })
 }
 
 /// A nav group label matching .nav-group-label in ui_demo.html
@@ -62,21 +74,11 @@ pub fn nav_group_label(text: impl Into<String>) -> impl IntoElement {
     let t = use_app_theme();
     rect()
         .margin((12., 10., 4., 10.))
-        .child(
-            label()
-                .font_size(11.)
-                .font_weight(FontWeight::MEDIUM)
-                .color(t.text_dim)
-                .text(text.into()),
-        )
+        .child(label().font_size(11.).font_weight(FontWeight::MEDIUM).color(t.text_dim).text(text.into()))
 }
 
 /// Brand avatar row matching .brand-row in ui_demo.html
-pub fn brand_row(
-    initial: impl Into<String>,
-    user_name: impl Into<String>,
-    subtitle: impl Into<String>,
-) -> impl IntoElement {
+pub fn brand_row(initial: impl Into<String>, user_name: impl Into<String>, subtitle: impl Into<String>) -> impl IntoElement {
     let t = use_app_theme();
     let init_str = initial.into();
     let name_str = user_name.into();
@@ -86,7 +88,15 @@ pub fn brand_row(
         let p1 = std::path::PathBuf::from(&home).join(".face.icon");
         let p2 = std::path::PathBuf::from(&home).join(".face");
         let p3 = std::path::PathBuf::from(&home).join(".config/finick/user.png");
-        let target = if p1.is_file() { Some(p1) } else if p2.is_file() { Some(p2) } else if p3.is_file() { Some(p3) } else { None };
+        let target = if p1.is_file() {
+            Some(p1)
+        } else if p2.is_file() {
+            Some(p2)
+        } else if p3.is_file() {
+            Some(p3)
+        } else {
+            None
+        };
         target.and_then(|p| std::fs::read(p).ok())
     });
 
@@ -111,41 +121,20 @@ pub fn brand_row(
                             .corner_radius(RADIUS_PILL)
                             .into_element()
                     } else {
-                        label()
-                            .font_size(13.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(t.accent)
-                            .text(init_str)
-                            .into_element()
+                        label().font_size(13.).font_weight(FontWeight::BOLD).color(t.accent).text(init_str).into_element()
                     }
                 }),
         )
         .child(
             rect()
                 .vertical()
-                .child(
-                    label()
-                        .font_size(13.)
-                        .font_weight(FontWeight::SEMI_BOLD)
-                        .color(t.text)
-                        .text(name_str),
-                )
-                .maybe(!sub_str.is_empty(), |el| {
-                    el.child(
-                        label()
-                            .font_size(11.5)
-                            .color(t.text_dim)
-                            .text(sub_str),
-                    )
-                }),
+                .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(name_str))
+                .maybe(!sub_str.is_empty(), |el| el.child(label().font_size(11.5).color(t.text_dim).text(sub_str))),
         )
 }
 
 /// Search bar in the sidebar matching .sidebar .search in ui_demo.html
-pub fn sidebar_search(
-    query: impl Into<Writable<String>>,
-    placeholder: &'static str,
-) -> impl IntoElement {
+pub fn sidebar_search(query: impl Into<Writable<String>>, placeholder: &'static str) -> impl IntoElement {
     let t = use_app_theme();
 
     rect()
@@ -159,38 +148,64 @@ pub fn sidebar_search(
         .border(Border::new().width(1.).fill(t.border))
         .child(icon(SEARCH, 14., t.text_dim))
         .child(
-            rect()
-                .width(Size::flex(1.))
-                .child(
-                    Input::new(query)
-                        .background(Color::TRANSPARENT)
-                        .border_fill(Color::TRANSPARENT)
-                        .focus_background(Color::TRANSPARENT)
-                        .focus_border_fill(Color::TRANSPARENT)
-                        .placeholder(placeholder),
-                ),
+            rect().width(Size::flex(1.)).child(
+                Input::new(query)
+                    .background(Color::TRANSPARENT)
+                    .border_fill(Color::TRANSPARENT)
+                    .focus_background(Color::TRANSPARENT)
+                    .focus_border_fill(Color::TRANSPARENT)
+                    .placeholder(placeholder),
+            ),
         )
-            .content(Content::Flex)
+        .content(Content::Flex)
 }
 
-
-/// A navigation item for sidebars (legacy compatibility).
-pub fn sidebar_item(
-    name: impl Into<String>,
-    active: bool,
-    mut on_press: impl FnMut() + 'static,
+pub fn search_field(
+    query: Writable<String>,
+    placeholder: &'static str,
+    on_clear: Option<EventHandler<()>>,
 ) -> impl IntoElement {
     let t = use_app_theme();
-    let bg = if active {
-        t.bg_selected
-    } else {
-        Color::TRANSPARENT
-    };
-    let text_color = if active {
-        t.text_primary
-    } else {
-        t.text_muted
-    };
+    let has_text = !query.read().is_empty();
+
+    rect()
+        .width(Size::fill())
+        .horizontal()
+        .cross_align(Alignment::Center)
+        .spacing(8.)
+        .padding((8., 12.))
+        .corner_radius(RADIUS_PILL)
+        .background(t.panel)
+        .border(Border::new().width(1.).fill(t.border))
+        .child(icon(SEARCH, 14., t.text_dim))
+        .child(
+            rect().width(Size::flex(1.)).child(
+                Input::new(query)
+                    .background(Color::TRANSPARENT)
+                    .border_fill(Color::TRANSPARENT)
+                    .focus_background(Color::TRANSPARENT)
+                    .focus_border_fill(Color::TRANSPARENT)
+                    .placeholder(placeholder),
+            ),
+        )
+        .maybe(has_text, |el| {
+            el.child(
+                rect()
+                    .padding(4.)
+                    .corner_radius(RADIUS_PILL)
+                    .cursor(CursorIcon::Pointer)
+                    .map(on_clear, |el, cb| el.on_press(move |_| cb.call(())))
+                    .child(label().font_size(14.).color(t.text_dim).text("×")),
+            )
+        })
+        .content(Content::Flex)
+}
+
+/// A navigation item for sidebars (legacy compatibility).
+pub fn sidebar_item(name: impl Into<String>, active: bool, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
+    let t = use_app_theme();
+    let bg = if active { t.bg_selected } else { Color::TRANSPARENT };
+    let text_color = if active { t.text_primary } else { t.text_muted };
 
     rect()
         .width(Size::fill())
@@ -199,12 +214,7 @@ pub fn sidebar_item(
         .background(bg)
         .margin((0., 0., 4., 0.))
         .on_press(move |_| on_press())
-        .child(
-            label()
-                .font_size(14.)
-                .color(text_color)
-                .text(name.into()),
-        )
+        .child(label().font_size(14.).color(text_color).text(name.into()))
 }
 
 /// A navigation item for sidebars with an icon or emoji prefix (legacy compatibility).
@@ -215,16 +225,8 @@ pub fn sidebar_icon_item(
     mut on_press: impl FnMut() + 'static,
 ) -> impl IntoElement {
     let t = use_app_theme();
-    let bg = if active {
-        t.bg_selected
-    } else {
-        Color::TRANSPARENT
-    };
-    let text_color = if active {
-        t.text_primary
-    } else {
-        t.text_muted
-    };
+    let bg = if active { t.bg_selected } else { Color::TRANSPARENT };
+    let text_color = if active { t.text_primary } else { t.text_muted };
 
     rect()
         .horizontal()
@@ -235,18 +237,8 @@ pub fn sidebar_icon_item(
         .background(bg)
         .margin((0., 0., 4., 0.))
         .on_press(move |_| on_press())
-        .child(
-            label()
-                .font_size(16.)
-                .margin((0., 8., 0., 0.))
-                .text(icon_str.into()),
-        )
-        .child(
-            label()
-                .font_size(14.)
-                .color(text_color)
-                .text(name.into()),
-        )
+        .child(label().font_size(16.).margin((0., 8., 0., 0.)).text(icon_str.into()))
+        .child(label().font_size(14.).color(text_color).text(name.into()))
 }
 
 /// A standard sidebar header title (legacy compatibility).
@@ -254,20 +246,11 @@ pub fn sidebar_header(title: impl Into<String>) -> impl IntoElement {
     let t = use_app_theme();
     rect()
         .margin((0., 0., 16., 0.))
-        .child(
-            label()
-                .font_size(22.)
-                .font_weight(FontWeight::BOLD)
-                .color(t.text_primary)
-                .text(title.into()),
-        )
+        .child(label().font_size(22.).font_weight(FontWeight::BOLD).color(t.text_primary).text(title.into()))
 }
 
 /// A styled sidebar container.
-pub fn sidebar_container(
-    width_px: f32,
-    children: impl IntoIterator<Item = impl IntoElement>,
-) -> impl IntoElement {
+pub fn sidebar_container(width_px: f32, children: impl IntoIterator<Item = impl IntoElement>) -> impl IntoElement {
     let t = use_app_theme();
     rect()
         .width(Size::px(width_px))
@@ -278,4 +261,3 @@ pub fn sidebar_container(
         .vertical()
         .children(children)
 }
-

@@ -1,7 +1,8 @@
-use freya::prelude::*;
-use std::collections::HashSet;
-use std::process::Command;
-use ui::*;
+use {
+    freya::prelude::*,
+    std::{collections::HashSet, process::Command},
+    ui::*,
+};
 
 /// Wi-Fi Network representation.
 #[derive(Clone, Debug, PartialEq)]
@@ -111,24 +112,14 @@ pub fn fetch_network_info() -> NetworkInfo {
                 seen_ssids.insert(ssid.clone());
 
                 let signal = parts[1].trim().parse::<u8>().unwrap_or(50);
-                let security = if parts[2].trim().is_empty() {
-                    "Open".to_string()
-                } else {
-                    parts[2].trim().to_string()
-                };
+                let security = if parts[2].trim().is_empty() { "Open".to_string() } else { parts[2].trim().to_string() };
                 let is_connected = parts[3].trim() == "*";
                 if is_connected {
                     active_ssid = Some(ssid.clone());
                 }
                 let is_known = known_ssids.contains(&ssid);
 
-                scanned_networks.push(WifiNetwork {
-                    ssid,
-                    signal,
-                    security,
-                    connected: is_connected,
-                    is_known,
-                });
+                scanned_networks.push(WifiNetwork { ssid, signal, security, connected: is_connected, is_known });
             }
         }
     }
@@ -144,22 +135,15 @@ pub fn fetch_network_info() -> NetworkInfo {
         let mut known_list = Vec::new();
         for ssid in &known_ssids {
             let is_connected = info.active_ssid.as_ref() == Some(ssid);
-            let signal = info.available_networks.iter()
-                .find(|n| &n.ssid == ssid)
-                .map(|n| n.signal)
-                .unwrap_or(0);
-            let security = info.available_networks.iter()
+            let signal = info.available_networks.iter().find(|n| &n.ssid == ssid).map(|n| n.signal).unwrap_or(0);
+            let security = info
+                .available_networks
+                .iter()
                 .find(|n| &n.ssid == ssid)
                 .map(|n| n.security.clone())
                 .unwrap_or_else(|| "Saved".to_string());
 
-            known_list.push(WifiNetwork {
-                ssid: ssid.clone(),
-                signal,
-                security,
-                connected: is_connected,
-                is_known: true,
-            });
+            known_list.push(WifiNetwork { ssid: ssid.clone(), signal, security, connected: is_connected, is_known: true });
         }
         known_list.sort_by(|a, b| b.connected.cmp(&a.connected).then_with(|| a.ssid.cmp(&b.ssid)));
         info.known_networks = known_list;
@@ -232,40 +216,22 @@ pub fn fetch_network_info() -> NetworkInfo {
         info.primary_interface = "—".to_string();
     }
 
-    if !real_data_detected {
-        NetworkInfo::default()
-    } else {
-        info
-    }
+    if !real_data_detected { NetworkInfo::default() } else { info }
 }
 
 /// Set Wi-Fi radio status via `nmcli`.
 pub fn set_wifi_enabled(enabled: bool) {
-    let _ = Command::new("nmcli")
-        .args(["radio", "wifi", if enabled { "on" } else { "off" }])
-        .output();
+    let _ = Command::new("nmcli").args(["radio", "wifi", if enabled { "on" } else { "off" }]).output();
 }
 
 /// Connect to a Wi-Fi network SSID via `nmcli`.
-pub fn connect_wifi(ssid: &str) {
-    let _ = Command::new("nmcli")
-        .args(["dev", "wifi", "connect", ssid])
-        .output();
-}
+pub fn connect_wifi(ssid: &str) { let _ = Command::new("nmcli").args(["dev", "wifi", "connect", ssid]).output(); }
 
 /// Disconnect from a Wi-Fi connection via `nmcli`.
-pub fn disconnect_wifi(ssid: &str) {
-    let _ = Command::new("nmcli")
-        .args(["connection", "down", ssid])
-        .output();
-}
+pub fn disconnect_wifi(ssid: &str) { let _ = Command::new("nmcli").args(["connection", "down", ssid]).output(); }
 
 /// Delete a saved Wi-Fi connection via `nmcli`.
-pub fn forget_wifi(ssid: &str) {
-    let _ = Command::new("nmcli")
-        .args(["connection", "delete", ssid])
-        .output();
-}
+pub fn forget_wifi(ssid: &str) { let _ = Command::new("nmcli").args(["connection", "delete", ssid]).output(); }
 
 /// Toggle or reconnect VPN interface.
 pub fn toggle_vpn(vpn: &VpnConnection) {
@@ -312,195 +278,94 @@ impl Component for Network {
         let loading = *is_loading.read();
         let wifi_on = info.wifi_enabled;
 
-        rect()
-            .width(Size::fill())
-            .height(Size::fill())
-            .child(
+        FadeSlideIn::new().child(
+            rect().width(Size::fill()).height(Size::fill()).child(
                 ScrollView::new()
                     .width(Size::fill())
                     .height(Size::fill())
-                    .child(page_header("Network", "Manage network connections, Wi-Fi networks, and VPN status."))
-                    
-                    // --- Status & Overview Card ---
+                    .child(page_head(WIFI, "Network", "Manage network connections, Wi-Fi networks, and VPN status."))
                     .child(
-                        rect()
-                            .width(Size::fill())
-                            .margin((0., 0., 16., 0.))
-                            .padding(16.)
-                            .corner_radius(12.)
-                            .background(t.bg_card)
-                            .border(Border::new().width(1.).fill(t.border_card))
-                            .overflow(Overflow::Clip)
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .main_align(Alignment::SpaceBetween)
-                                    .cross_align(Alignment::Center)
-                                    .width(Size::fill())
-                                    .margin((0., 0., 12., 0.))
-                                    .content(Content::Flex)
-                                    .child(
-                                        rect()
-                                            .width(Size::flex(1.))
-                                            .child(
-                                                label()
-                                                    .font_size(16.)
-                                                    .font_weight(FontWeight::BOLD)
-                                                    .color(t.text_primary)
-                                                    .text("Wi-Fi Adapter")
-                                            )
-                                            .child(
-                                                label()
-                                                    .font_size(13.)
-                                                    .color(t.text_secondary)
-                                                    .margin((4., 0., 0., 0.))
-                                                    .text(if wifi_on {
-                                                        if let Some(ref ssid) = info.active_ssid {
-                                                            format!("Connected to {}", ssid)
-                                                        } else {
-                                                            "Wi-Fi is on, not connected".to_string()
-                                                        }
-                                                    } else {
-                                                        "Wi-Fi is disabled".to_string()
-                                                    })
-                                            )
-                                    )
-                                    .child(
-                                        Switch::new()
-                                            .toggled(wifi_on)
-                                            .on_toggle({
-                                                let mut ns = network_state;
-                                                let mut l = loaded;
-                                                let mut ld = is_loading;
-                                                move |_| {
-                                                    let next_val = !wifi_on;
-                                                    let mut curr = ns.read().clone();
-                                                    curr.wifi_enabled = next_val;
-                                                    ns.set(curr);
-                                                    ld.set(true);
-                                                    std::thread::spawn(move || {
-                                                        set_wifi_enabled(next_val);
-                                                        std::thread::sleep(std::time::Duration::from_millis(500));
-                                                    });
-                                                    l.set(false);
-                                                }
-                                            })
-                                    )
-                            )
-                            // Network details strip
+                        tile()
+                            .child(tile_head(
+                                Some(WIFI),
+                                "Wi-Fi adapter",
+                                Some(pill_switch(wifi_on, {
+                                    let mut ns = network_state;
+                                    let mut l = loaded;
+                                    let mut ld = is_loading;
+                                    move |v| {
+                                        let mut curr = ns.read().clone();
+                                        curr.wifi_enabled = v;
+                                        ns.set(curr);
+                                        ld.set(true);
+                                        std::thread::spawn(move || {
+                                            set_wifi_enabled(v);
+                                            std::thread::sleep(std::time::Duration::from_millis(500));
+                                        });
+                                        l.set(false);
+                                    }
+                                })),
+                            ))
+                            .child(tile_sub(if wifi_on {
+                                if let Some(ref ssid) = info.active_ssid {
+                                    format!("Connected to {}", ssid)
+                                } else {
+                                    "Wi-Fi is on, not connected".to_string()
+                                }
+                            } else {
+                                "Wi-Fi is disabled".to_string()
+                            }))
                             .child(
                                 rect()
                                     .width(Size::fill())
                                     .horizontal()
-                                    .spacing(16.)
                                     .cross_align(Alignment::Center)
+                                    .spacing(GAP)
                                     .content(Content::Flex)
-                                    .padding((10., 14.))
-                                    .margin((8., 0., 14., 0.))
-                                    .corner_radius(8.)
-                                    .background(t.bg_base)
-                                    .border(Border::new().width(1.).fill(t.border_subtle))
                                     .child(
                                         rect()
                                             .width(Size::flex(1.))
-                                            .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("IP ADDRESS"))
-                                            .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(info.primary_ip.clone()))
+                                            .child(stat_block("IP address", info.primary_ip.clone())),
                                     )
                                     .child(
                                         rect()
                                             .width(Size::flex(1.))
-                                            .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("INTERFACE"))
-                                            .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(info.primary_interface.clone()))
+                                            .child(stat_block("Interface", info.primary_interface.clone())),
                                     )
-                                    .child(
-                                        rect()
-                                            .width(Size::flex(1.))
-                                            .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("STATUS"))
-                                            .child(
-                                                rect()
-                                                    .horizontal()
-                                                    .cross_align(Alignment::Center)
-                                                    .spacing(6.)
-                                                    .child(
-                                                        rect()
-                                                            .width(Size::px(8.))
-                                                            .height(Size::px(8.))
-                                                            .corner_radius(4.)
-                                                            .background(if wifi_on && info.active_ssid.is_some() { t.accent_green } else { t.text_disabled })
-                                                    )
-                                                    .child(
-                                                        label()
-                                                            .font_size(14.)
-                                                            .font_weight(FontWeight::SEMI_BOLD)
-                                                            .color(if wifi_on && info.active_ssid.is_some() { t.accent_green } else { t.text_secondary })
-                                                            .text(if wifi_on && info.active_ssid.is_some() { "Online" } else { "Offline" })
-                                                    )
-                                            )
-                                    )
+                                    .child(status_chip(
+                                        if wifi_on && info.active_ssid.is_some() { "Online" } else { "Offline" },
+                                        wifi_on && info.active_ssid.is_some(),
+                                        None,
+                                    )),
                             )
                             // Action buttons
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .spacing(8.)
-                                    .child(
-                                        secondary_button(if loading { "Scanning..." } else { "Scan & Refresh" }, {
-                                            let mut l = loaded;
-                                            let mut ld = is_loading;
-                                            move || {
-                                                ld.set(true);
-                                                l.set(false);
-                                            }
-                                        })
-                                    )
-                            )
+                            .child(rect().horizontal().spacing(8.).child(secondary_button(
+                                if loading { "Scanning..." } else { "Scan & Refresh" },
+                                {
+                                    let mut l = loaded;
+                                    let mut ld = is_loading;
+                                    move || {
+                                        ld.set(true);
+                                        l.set(false);
+                                    }
+                                },
+                            ))),
                     )
-
-                    // --- Available Wi-Fi Networks Section ---
                     .child(
-                        rect()
-                            .width(Size::fill())
-                            .margin((0., 0., 16., 0.))
-                            .padding(16.)
-                            .corner_radius(12.)
-                            .background(t.bg_card)
-                            .border(Border::new().width(1.).fill(t.border_card))
-                            .overflow(Overflow::Clip)
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .margin((0., 0., 14., 0.))
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .font_weight(FontWeight::BOLD)
-                                            .color(t.text_secondary)
-                                            .text(format!("AVAILABLE NETWORKS ({})", info.available_networks.len()))
-                                    )
-                            )
+                        tile()
+                            .child(tile_head(
+                                None,
+                                format!("Available networks ({})", info.available_networks.len()),
+                                None::<String>,
+                            ))
                             .child({
                                 if !wifi_on {
-                                    rect()
-                                        .width(Size::fill())
-                                        .padding(16.)
-                                        .center()
-                                        .child(label().font_size(14.).color(t.text_muted).text("Wi-Fi is turned off. Turn on Wi-Fi to scan for nearby networks."))
+                                    empty_state(WIFI, "Wi-Fi is off", "Turn on Wi-Fi to scan for nearby networks.")
                                         .into_element()
                                 } else if loading && info.available_networks.is_empty() {
-                                    rect()
-                                        .width(Size::fill())
-                                        .padding(16.)
-                                        .center()
-                                        .child(label().font_size(14.).color(t.text_secondary).text("Scanning for Wi-Fi networks..."))
-                                        .into_element()
+                                    empty_state(WIFI, "Scanning", "Looking for Wi-Fi networks nearby.").into_element()
                                 } else if info.available_networks.is_empty() {
-                                    rect()
-                                        .width(Size::fill())
-                                        .padding(16.)
-                                        .center()
-                                        .child(label().font_size(14.).color(t.text_muted).text("No wireless networks found in range."))
-                                        .into_element()
+                                    empty_state(WIFI, "No networks found", "No wireless networks in range.").into_element()
                                 } else {
                                     rect()
                                         .children(info.available_networks.into_iter().map(|net| {
@@ -520,8 +385,12 @@ impl Component for Network {
                                                 .padding((10., 12.))
                                                 .margin((0., 0., 6., 0.))
                                                 .corner_radius(8.)
-                                                .background(if is_conn { t.bg_active } else { t.bg_base })
-                                                .border(Border::new().width(1.).fill(if is_conn { t.primary_accent } else { t.border_subtle }))
+                                                .background(if is_conn { t.bg_active } else { t.panel_raised })
+                                                .border(Border::new().width(1.).fill(if is_conn {
+                                                    t.primary_accent
+                                                } else {
+                                                    t.border
+                                                }))
                                                 .child(
                                                     rect()
                                                         .horizontal()
@@ -531,8 +400,12 @@ impl Component for Network {
                                                                 .width(Size::px(10.))
                                                                 .height(Size::px(10.))
                                                                 .corner_radius(5.)
-                                                                .background(if is_conn { t.accent_green } else { t.primary_accent })
-                                                                .margin((0., 12., 0., 0.))
+                                                                .background(if is_conn {
+                                                                    t.accent_green
+                                                                } else {
+                                                                    t.primary_accent
+                                                                })
+                                                                .margin((0., 12., 0., 0.)),
                                                         )
                                                         .child(
                                                             rect()
@@ -540,8 +413,8 @@ impl Component for Network {
                                                                     label()
                                                                         .font_size(14.)
                                                                         .font_weight(FontWeight::SEMI_BOLD)
-                                                                        .color(t.text_primary)
-                                                                        .text(ssid.clone())
+                                                                        .color(t.text)
+                                                                        .text(ssid.clone()),
                                                                 )
                                                                 .child(
                                                                     rect()
@@ -551,76 +424,69 @@ impl Component for Network {
                                                                         .child(
                                                                             label()
                                                                                 .font_size(12.)
-                                                                                .color(if is_conn { t.accent_green } else { t.text_secondary })
-                                                                                .text(if is_conn { "Connected".to_string() } else { format!("Signal: {}%", sig) })
+                                                                                .color(if is_conn {
+                                                                                    t.accent_green
+                                                                                } else {
+                                                                                    t.text_dim
+                                                                                })
+                                                                                .text(if is_conn {
+                                                                                    "Connected".to_string()
+                                                                                } else {
+                                                                                    format!("Signal: {}%", sig)
+                                                                                }),
                                                                         )
-                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                        .child(label().font_size(12.).color(t.text_secondary).text(sec))
-                                                                )
-                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text("•"),
+                                                                        )
+                                                                        .child(
+                                                                            label()
+                                                                                .font_size(12.)
+                                                                                .color(t.text_dim)
+                                                                                .text(sec),
+                                                                        ),
+                                                                ),
+                                                        ),
                                                 )
-                                                .child(
-                                                    rect()
-                                                        .horizontal()
-                                                        .spacing(8.)
-                                                        .child(
-                                                            secondary_button(if is_conn { "Disconnect" } else { "Connect" }, {
-                                                                let ssid_c = ssid.clone();
-                                                                let mut l_c = l;
-                                                                let mut ld_c = ld;
-                                                                move || {
-                                                                    let s = ssid_c.clone();
-                                                                    ld_c.set(true);
-                                                                    std::thread::spawn(move || {
-                                                                        if is_conn {
-                                                                            disconnect_wifi(&s);
-                                                                        } else {
-                                                                            connect_wifi(&s);
-                                                                        }
-                                                                        std::thread::sleep(std::time::Duration::from_millis(800));
-                                                                    });
-                                                                    l_c.set(false);
+                                                .child(rect().horizontal().spacing(8.).child(secondary_button(
+                                                    if is_conn { "Disconnect" } else { "Connect" },
+                                                    {
+                                                        let ssid_c = ssid.clone();
+                                                        let mut l_c = l;
+                                                        let mut ld_c = ld;
+                                                        move || {
+                                                            let s = ssid_c.clone();
+                                                            ld_c.set(true);
+                                                            std::thread::spawn(move || {
+                                                                if is_conn {
+                                                                    disconnect_wifi(&s);
+                                                                } else {
+                                                                    connect_wifi(&s);
                                                                 }
-                                                            })
-                                                        )
-                                                )
+                                                                std::thread::sleep(std::time::Duration::from_millis(800));
+                                                            });
+                                                            l_c.set(false);
+                                                        }
+                                                    },
+                                                )))
                                                 .into_element()
                                         }))
                                         .into_element()
                                 }
-                            })
+                            }),
                     )
-
-                    // --- Known Networks Section ---
                     .child(
-                        rect()
-                            .width(Size::fill())
-                            .margin((0., 0., 16., 0.))
-                            .padding(16.)
-                            .corner_radius(12.)
-                            .background(t.bg_card)
-                            .border(Border::new().width(1.).fill(t.border_card))
-                            .overflow(Overflow::Clip)
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .margin((0., 0., 14., 0.))
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .font_weight(FontWeight::BOLD)
-                                            .color(t.text_secondary)
-                                            .text(format!("KNOWN NETWORKS ({})", info.known_networks.len()))
-                                    )
-                            )
+                        tile()
+                            .child(tile_head(
+                                None,
+                                format!("Known networks ({})", info.known_networks.len()),
+                                None::<String>,
+                            ))
                             .child({
                                 if info.known_networks.is_empty() {
-                                    rect()
-                                        .width(Size::fill())
-                                        .padding(16.)
-                                        .center()
-                                        .child(label().font_size(14.).color(t.text_muted).text("No known networks saved on this system."))
+                                    empty_state(WIFI, "No known networks", "No saved networks on this system.")
                                         .into_element()
                                 } else {
                                     rect()
@@ -640,8 +506,12 @@ impl Component for Network {
                                                 .padding((10., 12.))
                                                 .margin((0., 0., 6., 0.))
                                                 .corner_radius(8.)
-                                                .background(if is_conn { t.bg_active } else { t.bg_base })
-                                                .border(Border::new().width(1.).fill(if is_conn { t.primary_accent } else { t.border_subtle }))
+                                                .background(if is_conn { t.bg_active } else { t.panel_raised })
+                                                .border(Border::new().width(1.).fill(if is_conn {
+                                                    t.primary_accent
+                                                } else {
+                                                    t.border
+                                                }))
                                                 .child(
                                                     rect()
                                                         .horizontal()
@@ -651,8 +521,12 @@ impl Component for Network {
                                                                 .width(Size::px(10.))
                                                                 .height(Size::px(10.))
                                                                 .corner_radius(5.)
-                                                                .background(if is_conn { t.accent_green } else { t.text_disabled })
-                                                                .margin((0., 12., 0., 0.))
+                                                                .background(if is_conn {
+                                                                    t.accent_green
+                                                                } else {
+                                                                    t.text_disabled
+                                                                })
+                                                                .margin((0., 12., 0., 0.)),
                                                         )
                                                         .child(
                                                             rect()
@@ -660,24 +534,33 @@ impl Component for Network {
                                                                     label()
                                                                         .font_size(14.)
                                                                         .font_weight(FontWeight::SEMI_BOLD)
-                                                                        .color(t.text_primary)
-                                                                        .text(ssid.clone())
+                                                                        .color(t.text)
+                                                                        .text(ssid.clone()),
                                                                 )
                                                                 .child(
                                                                     label()
                                                                         .font_size(12.)
-                                                                        .color(if is_conn { t.accent_green } else { t.text_secondary })
+                                                                        .color(if is_conn {
+                                                                            t.accent_green
+                                                                        } else {
+                                                                            t.text_dim
+                                                                        })
                                                                         .margin((2., 0., 0., 0.))
-                                                                        .text(if is_conn { "Connected • Saved Profile".to_string() } else { format!("Saved Profile • {}", sec) })
-                                                                )
-                                                        )
+                                                                        .text(if is_conn {
+                                                                            "Connected • Saved Profile".to_string()
+                                                                        } else {
+                                                                            format!("Saved Profile • {}", sec)
+                                                                        }),
+                                                                ),
+                                                        ),
                                                 )
                                                 .child(
                                                     rect()
                                                         .horizontal()
                                                         .spacing(8.)
-                                                        .child(
-                                                            secondary_button(if is_conn { "Disconnect" } else { "Connect" }, {
+                                                        .child(secondary_button(
+                                                            if is_conn { "Disconnect" } else { "Connect" },
+                                                            {
                                                                 let ssid_c = ssid.clone();
                                                                 let mut l_c = l;
                                                                 let mut ld_c = ld;
@@ -690,153 +573,155 @@ impl Component for Network {
                                                                         } else {
                                                                             connect_wifi(&s);
                                                                         }
-                                                                        std::thread::sleep(std::time::Duration::from_millis(800));
+                                                                        std::thread::sleep(
+                                                                            std::time::Duration::from_millis(800),
+                                                                        );
                                                                     });
                                                                     l_c.set(false);
                                                                 }
-                                                            })
-                                                        )
-                                                        .child(
-                                                            secondary_button("Forget", {
-                                                                let ssid_c = ssid.clone();
-                                                                let mut l_c = l;
-                                                                let mut ld_c = ld;
-                                                                move || {
-                                                                    let s = ssid_c.clone();
-                                                                    ld_c.set(true);
-                                                                    std::thread::spawn(move || {
-                                                                        forget_wifi(&s);
-                                                                        std::thread::sleep(std::time::Duration::from_millis(500));
-                                                                    });
-                                                                    l_c.set(false);
-                                                                }
-                                                            })
-                                                        )
+                                                            },
+                                                        ))
+                                                        .child(secondary_button("Forget", {
+                                                            let ssid_c = ssid.clone();
+                                                            let mut l_c = l;
+                                                            let mut ld_c = ld;
+                                                            move || {
+                                                                let s = ssid_c.clone();
+                                                                ld_c.set(true);
+                                                                std::thread::spawn(move || {
+                                                                    forget_wifi(&s);
+                                                                    std::thread::sleep(std::time::Duration::from_millis(
+                                                                        500,
+                                                                    ));
+                                                                });
+                                                                l_c.set(false);
+                                                            }
+                                                        })),
                                                 )
                                                 .into_element()
                                         }))
                                         .into_element()
                                 }
-                            })
+                            }),
                     )
-
-                    // --- VPN & Secure Tunnels Section ---
                     .child(
-                        rect()
-                            .width(Size::fill())
-                            .margin((0., 0., 16., 0.))
-                            .padding(16.)
-                            .corner_radius(12.)
-                            .background(t.bg_card)
-                            .border(Border::new().width(1.).fill(t.border_card))
-                            .overflow(Overflow::Clip)
-                            .child(
+                        tile().child(tile_head(None, format!("Vpn tunnels ({})", info.vpns.len()), None::<String>)).child({
+                            if info.vpns.is_empty() {
+                                empty_state(LOCK, "No VPN tunnels", "No active or configured VPN tunnels found.")
+                                    .into_element()
+                            } else {
                                 rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .margin((0., 0., 14., 0.))
-                                    .child(
-                                        label()
-                                            .font_size(13.)
-                                            .font_weight(FontWeight::BOLD)
-                                            .color(t.text_secondary)
-                                            .text(format!("VPN & SECURE TUNNELS ({})", info.vpns.len()))
-                                    )
-                            )
-                            .child({
-                                if info.vpns.is_empty() {
-                                    rect()
-                                        .width(Size::fill())
-                                        .padding(16.)
-                                        .center()
-                                        .child(label().font_size(14.).color(t.text_muted).text("No active or configured VPN tunnels found."))
-                                        .into_element()
-                                } else {
-                                    rect()
-                                        .children(info.vpns.into_iter().map(|vpn| {
-                                            let vpn_clone = vpn.clone();
-                                            let is_conn = vpn.connected;
-                                            let ip_str = vpn.ip_address.clone().unwrap_or_else(|| "No IP assigned".to_string());
-                                            let l = loaded;
-                                            let ld = is_loading;
+                                    .children(info.vpns.into_iter().map(|vpn| {
+                                        let vpn_clone = vpn.clone();
+                                        let is_conn = vpn.connected;
+                                        let ip_str = vpn.ip_address.clone().unwrap_or_else(|| "No IP assigned".to_string());
+                                        let l = loaded;
+                                        let ld = is_loading;
 
-                                            rect()
-                                                .key(format!("vpn-{}", vpn.interface))
-                                                .width(Size::fill())
-                                                .horizontal()
-                                                .main_align(Alignment::SpaceBetween)
-                                                .cross_align(Alignment::Center)
-                                                .padding((10., 12.))
-                                                .margin((0., 0., 6., 0.))
-                                                .corner_radius(8.)
-                                                .background(if is_conn { t.bg_active } else { t.bg_base })
-                                                .border(Border::new().width(1.).fill(if is_conn { t.primary_accent } else { t.border_subtle }))
-                                                .child(
-                                                    rect()
-                                                        .horizontal()
-                                                        .cross_align(Alignment::Center)
-                                                        .child(
-                                                            rect()
-                                                                .width(Size::px(10.))
-                                                                .height(Size::px(10.))
-                                                                .corner_radius(5.)
-                                                                .background(if is_conn { t.accent_green } else { t.text_disabled })
-                                                                .margin((0., 12., 0., 0.))
-                                                        )
-                                                        .child(
-                                                            rect()
-                                                                .child(
-                                                                    label()
-                                                                        .font_size(14.)
-                                                                        .font_weight(FontWeight::SEMI_BOLD)
-                                                                        .color(t.text_primary)
-                                                                        .text(vpn.name.clone())
-                                                                )
-                                                                .child(
-                                                                    rect()
-                                                                        .horizontal()
-                                                                        .spacing(8.)
-                                                                        .margin((2., 0., 0., 0.))
-                                                                        .child(
-                                                                            label()
-                                                                                .font_size(12.)
-                                                                                .color(if is_conn { t.accent_green } else { t.text_secondary })
-                                                                                .text(if is_conn { "Active" } else { "Disconnected" })
-                                                                        )
-                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                        .child(label().font_size(12.).color(t.text_secondary).text(format!("Interface: {}", vpn.interface)))
-                                                                        .child(label().font_size(12.).color(t.text_muted).text("•"))
-                                                                        .child(label().font_size(12.).color(t.text_secondary).text(ip_str))
-                                                                )
-                                                        )
-                                                )
-                                                .child(
-                                                    rect()
-                                                        .horizontal()
-                                                        .spacing(8.)
-                                                        .child(
-                                                            secondary_button(if is_conn { "Disconnect" } else { "Connect" }, {
-                                                                let v = vpn_clone.clone();
-                                                                let mut l_c = l;
-                                                                let mut ld_c = ld;
-                                                                move || {
-                                                                    let v_act = v.clone();
-                                                                    ld_c.set(true);
-                                                                    std::thread::spawn(move || {
-                                                                        toggle_vpn(&v_act);
-                                                                        std::thread::sleep(std::time::Duration::from_millis(800));
-                                                                    });
-                                                                    l_c.set(false);
-                                                                }
+                                        rect()
+                                            .key(format!("vpn-{}", vpn.interface))
+                                            .width(Size::fill())
+                                            .horizontal()
+                                            .main_align(Alignment::SpaceBetween)
+                                            .cross_align(Alignment::Center)
+                                            .padding((10., 12.))
+                                            .margin((0., 0., 6., 0.))
+                                            .corner_radius(8.)
+                                            .background(if is_conn { t.bg_active } else { t.panel_raised })
+                                            .border(Border::new().width(1.).fill(if is_conn {
+                                                t.primary_accent
+                                            } else {
+                                                t.border
+                                            }))
+                                            .child(
+                                                rect()
+                                                    .horizontal()
+                                                    .cross_align(Alignment::Center)
+                                                    .child(
+                                                        rect()
+                                                            .width(Size::px(10.))
+                                                            .height(Size::px(10.))
+                                                            .corner_radius(5.)
+                                                            .background(if is_conn {
+                                                                t.accent_green
+                                                            } else {
+                                                                t.text_disabled
                                                             })
-                                                        )
-                                                )
-                                                .into_element()
-                                        }))
-                                        .into_element()
-                                }
-                            })
-                    )
-            )
+                                                            .margin((0., 12., 0., 0.)),
+                                                    )
+                                                    .child(
+                                                        rect()
+                                                            .child(
+                                                                label()
+                                                                    .font_size(14.)
+                                                                    .font_weight(FontWeight::SEMI_BOLD)
+                                                                    .color(t.text)
+                                                                    .text(vpn.name.clone()),
+                                                            )
+                                                            .child(
+                                                                rect()
+                                                                    .horizontal()
+                                                                    .spacing(8.)
+                                                                    .margin((2., 0., 0., 0.))
+                                                                    .child(
+                                                                        label()
+                                                                            .font_size(12.)
+                                                                            .color(if is_conn {
+                                                                                t.accent_green
+                                                                            } else {
+                                                                                t.text_dim
+                                                                            })
+                                                                            .text(if is_conn {
+                                                                                "Active"
+                                                                            } else {
+                                                                                "Disconnected"
+                                                                            }),
+                                                                    )
+                                                                    .child(
+                                                                        label().font_size(12.).color(t.text_dim).text("•"),
+                                                                    )
+                                                                    .child(
+                                                                        label()
+                                                                            .font_size(12.)
+                                                                            .color(t.text_dim)
+                                                                            .text(format!("Interface: {}", vpn.interface)),
+                                                                    )
+                                                                    .child(
+                                                                        label().font_size(12.).color(t.text_dim).text("•"),
+                                                                    )
+                                                                    .child(
+                                                                        label()
+                                                                            .font_size(12.)
+                                                                            .color(t.text_dim)
+                                                                            .text(ip_str),
+                                                                    ),
+                                                            ),
+                                                    ),
+                                            )
+                                            .child(rect().horizontal().spacing(8.).child(secondary_button(
+                                                if is_conn { "Disconnect" } else { "Connect" },
+                                                {
+                                                    let v = vpn_clone.clone();
+                                                    let mut l_c = l;
+                                                    let mut ld_c = ld;
+                                                    move || {
+                                                        let v_act = v.clone();
+                                                        ld_c.set(true);
+                                                        std::thread::spawn(move || {
+                                                            toggle_vpn(&v_act);
+                                                            std::thread::sleep(std::time::Duration::from_millis(800));
+                                                        });
+                                                        l_c.set(false);
+                                                    }
+                                                },
+                                            )))
+                                            .into_element()
+                                    }))
+                                    .into_element()
+                            }
+                        }),
+                    ),
+            ),
+        )
     }
 }

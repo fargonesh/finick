@@ -26,6 +26,14 @@ enum Program {
 
 fn accent_to_hex(s: &str) -> String { config::ty::accent_to_hex(s) }
 
+fn apps_run_job(job: system::store::StoreJob) -> Result<String, String> {
+    let mut progress = |ev: system::store::StoreProgress| match ev {
+        system::store::StoreProgress::Started(d) => eprintln!("{d}…"),
+        system::store::StoreProgress::Log(l) => eprintln!("{l}"),
+    };
+    system::store::run_job_ipc_or_local(job, &mut progress)
+}
+
 fn main() {
     let args = Args::parse();
     match args.program {
@@ -203,6 +211,25 @@ fn main() {
             }
         }
         Program::launcher => {
+            let toggle = args.data.as_deref().is_some_and(|d| d == "--toggle" || d == "toggle" || d == "-t");
+            let lock = std::path::PathBuf::from("/tmp/finick-launcher.lock");
+            if toggle {
+                if let Ok(pid_str) = std::fs::read_to_string(&lock) {
+                    if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                        if std::path::PathBuf::from(format!("/proc/{pid}")).exists() {
+                            let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
+                            let _ = std::fs::remove_file(&lock);
+                            println!("Launcher toggled off");
+                            return;
+                        }
+                    }
+                }
+                let _ = std::fs::remove_file(&lock);
+            }
+            if args.data.as_deref().is_some_and(|d| !d.starts_with('-') && d != "toggle") {
+                eprintln!("Unknown launcher arg: {}", args.data.as_deref().unwrap_or_default());
+                std::process::exit(1);
+            }
             let try_direct = std::process::Command::new("launcher").spawn();
             if try_direct.is_ok() {
                 println!("Launcher started");
@@ -247,35 +274,29 @@ fn main() {
                         }
                     }
                 }
-                "install-nix" => match system::store::install_nix_reproducible(rest) {
+                "install-nix" => match apps_run_job(system::store::StoreJob::InstallNix(rest.to_string())) {
                     Ok(m) => println!("{m}"),
                     Err(e) => {
                         eprintln!("{e}");
                         std::process::exit(1);
                     }
                 },
-                "remove-nix" => match system::store::remove_nix_reproducible(rest) {
+                "remove-nix" => match apps_run_job(system::store::StoreJob::RemoveNix(rest.to_string())) {
                     Ok(m) => println!("{m}"),
                     Err(e) => {
                         eprintln!("{e}");
                         std::process::exit(1);
                     }
                 },
-                "install-flatpak" => match system::store_flatpak::install(rest) {
-                    Ok(m) => {
-                        let _ = system::store_hm::add_flatpak(rest);
-                        println!("{m}");
-                    }
+                "install-flatpak" => match apps_run_job(system::store::StoreJob::InstallFlatpak(rest.to_string())) {
+                    Ok(m) => println!("{m}"),
                     Err(e) => {
                         eprintln!("{e}");
                         std::process::exit(1);
                     }
                 },
-                "remove-flatpak" => match system::store_flatpak::remove(rest) {
-                    Ok(m) => {
-                        let _ = system::store_hm::remove_flatpak(rest);
-                        println!("{m}");
-                    }
+                "remove-flatpak" => match apps_run_job(system::store::StoreJob::RemoveFlatpak(rest.to_string())) {
+                    Ok(m) => println!("{m}"),
                     Err(e) => {
                         eprintln!("{e}");
                         std::process::exit(1);
@@ -294,7 +315,7 @@ fn main() {
                         }
                     }
                 }
-                "apply" => match system::store_hm::apply_home_manager() {
+                "apply" => match apps_run_job(system::store::StoreJob::ApplyHomeManager) {
                     Ok(log) => println!("Applied. {log}"),
                     Err(e) => {
                         eprintln!("{e}");

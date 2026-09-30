@@ -1,8 +1,10 @@
-use freya::prelude::*;
-use ipsea::modals::{ModalRequest, ModalResponse};
-use ui::*;
-use system::{HyprlandBackend, SystemBackend};
-use std::sync::{Arc, Mutex};
+use {
+    freya::prelude::*,
+    ipsea::modals::{ModalRequest, ModalResponse},
+    std::sync::{Arc, Mutex},
+    system::{HyprlandBackend, SystemBackend},
+    ui::*,
+};
 
 #[derive(Clone, Default)]
 pub struct ModalState {
@@ -29,7 +31,7 @@ impl Component for ModalApp {
         let Some((req, tx, wid)) = req_snapshot else {
             return rect().into_element();
         };
-        
+
         match req {
             ModalRequest::WifiPassword { ssid, security } => {
                 let pwd = password;
@@ -40,56 +42,67 @@ impl Component for ModalApp {
                     .center()
                     .content(Content::Flex)
                     .child(
-                        rect()
-                            .width(Size::px(400.))
-                            .padding(20.)
-                            .corner_radius(16.)
-                            .background(t.panel)
-                            .border(Border::new().width(1.).fill(t.border))
-                            .spacing(12.)
-                            .child(label().font_size(18.).font_weight(FontWeight::BOLD).color(t.text).text(format!("Join {}", ssid)))
-                            .child(label().font_size(12.).color(t.text_dim).text(format!("Security: {}", security)))
-                            .child(Input::new(pwd.into_writable()))
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .spacing(10.)
-                                    .child(
-                                        Button::new().on_press({
+                        FadeSlideIn::new().child(
+                            dialog_card(400.)
+                                .spacing(12.)
+                                .child(
+                                    label()
+                                        .font_size(18.)
+                                        .font_weight(FontWeight::BOLD)
+                                        .color(t.text)
+                                        .text(format!("Join {}", ssid)),
+                                )
+                                .child(label().font_size(12.).color(t.text_dim).text(format!("Security: {}", security)))
+                                .child(Input::new(pwd.into_writable()))
+                                .child(
+                                    rect()
+                                        .horizontal()
+                                        .spacing(10.)
+                                        .child(secondary_button("Cancel", {
                                             let ctx = ctx.clone();
                                             let tx = tx.clone();
-                                            move |_| {
+                                            move || {
                                                 let _ = tx.send(ModalResponse::Canceled);
-                                                if let Ok(mut g) = ctx.req.lock() { *g = None; }
+                                                if let Ok(mut g) = ctx.req.lock() {
+                                                    *g = None;
+                                                }
                                                 Platform::get().close_window(wid);
                                             }
-                                        }).child("Cancel")
-                                    )
-                                    .child(
-                                        Button::new().on_press({
-                                            let p = pwd.clone();
-                                            let s = ssid.clone();
-                                            let ctx = ctx.clone();
-                                            let mut iw = is_working;
-                                            let tx = tx.clone();
-                                            move |_| {
-                                                iw.set(true);
-                                                let p_str = p.read().clone();
-                                                let s_str = s.clone();
-                                                let tx2 = tx.clone();
-                                                let ctx2 = ctx.clone();
-                                                std::thread::spawn(move || {
-                                                    let _ = HyprlandBackend.connect_wifi_with_password(&s_str, Some(&p_str), false);
-                                                    let _ = tx2.send(ModalResponse::Success { data: None });
-                                                    if let Ok(mut g) = ctx2.req.lock() { *g = None; }
-                                                    Platform::get().close_window(wid);
-                                                });
-                                            }
-                                        }).child(if *is_working.read() { "Connecting..." } else { "Connect" })
-                                    )
-                            )
-                    ).into_element()
-            },
+                                        }))
+                                        .child(primary_button(
+                                            if *is_working.read() { "Connecting..." } else { "Connect" },
+                                            {
+                                                let p = pwd.clone();
+                                                let s = ssid.clone();
+                                                let ctx = ctx.clone();
+                                                let mut iw = is_working;
+                                                let tx = tx.clone();
+                                                move || {
+                                                    iw.set(true);
+                                                    let p_str = p.read().clone();
+                                                    let s_str = s.clone();
+                                                    let tx2 = tx.clone();
+                                                    let ctx2 = ctx.clone();
+                                                    std::thread::spawn(move || {
+                                                        let _ = HyprlandBackend.connect_wifi_with_password(
+                                                            &s_str,
+                                                            Some(&p_str),
+                                                            false,
+                                                        );
+                                                        let _ = tx2.send(ModalResponse::Success { data: None });
+                                                        if let Ok(mut g) = ctx2.req.lock() {
+                                                            *g = None;
+                                                        }
+                                                        Platform::get().close_window(wid);
+                                                    });
+                                                }
+                                            },
+                                        )),
+                                ),
+                        ),
+                    )
+                    .into_element()
+            }
             ModalRequest::BluetoothPair { name, mac } => {
                 let pwd = password;
                 rect()
@@ -99,56 +112,63 @@ impl Component for ModalApp {
                     .center()
                     .content(Content::Flex)
                     .child(
-                        rect()
-                            .width(Size::px(400.))
-                            .padding(20.)
-                            .corner_radius(16.)
-                            .background(t.panel)
-                            .border(Border::new().width(1.).fill(t.border))
-                            .spacing(12.)
-                            .child(label().font_size(18.).font_weight(FontWeight::BOLD).color(t.text).text(format!("Pair {}", name)))
-                            .child(label().font_size(12.).color(t.text_dim).text(format!("MAC: {}", mac)))
-                            .child(Input::new(pwd.into_writable()))
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .spacing(10.)
-                                    .child(
-                                        Button::new().on_press({
+                        FadeSlideIn::new().child(
+                            dialog_card(400.)
+                                .spacing(12.)
+                                .child(
+                                    label()
+                                        .font_size(18.)
+                                        .font_weight(FontWeight::BOLD)
+                                        .color(t.text)
+                                        .text(format!("Pair {}", name)),
+                                )
+                                .child(label().font_size(12.).color(t.text_dim).text(format!("MAC: {}", mac)))
+                                .child(Input::new(pwd.into_writable()))
+                                .child(
+                                    rect()
+                                        .horizontal()
+                                        .spacing(10.)
+                                        .child(secondary_button("Cancel", {
                                             let ctx = ctx.clone();
                                             let tx = tx.clone();
-                                            move |_| {
+                                            move || {
                                                 let _ = tx.send(ModalResponse::Canceled);
-                                                if let Ok(mut g) = ctx.req.lock() { *g = None; }
+                                                if let Ok(mut g) = ctx.req.lock() {
+                                                    *g = None;
+                                                }
                                                 Platform::get().close_window(wid);
                                             }
-                                        }).child("Cancel")
-                                    )
-                                    .child(
-                                        Button::new().on_press({
+                                        }))
+                                        .child(primary_button(if *is_working.read() { "Pairing..." } else { "Pair" }, {
                                             let m = mac.clone();
                                             let p = pwd.clone();
                                             let ctx = ctx.clone();
                                             let mut iw = is_working;
                                             let tx = tx.clone();
-                                            move |_| {
+                                            move || {
                                                 iw.set(true);
                                                 let m_str = m.clone();
                                                 let p_str = p.read().clone();
                                                 let tx2 = tx.clone();
                                                 let ctx2 = ctx.clone();
                                                 std::thread::spawn(move || {
-                                                    let _ = HyprlandBackend.pair_bluetooth_device(&m_str, if p_str.is_empty() { None } else { Some(&p_str) });
+                                                    let _ = HyprlandBackend.pair_bluetooth_device(
+                                                        &m_str,
+                                                        if p_str.is_empty() { None } else { Some(&p_str) },
+                                                    );
                                                     let _ = tx2.send(ModalResponse::Success { data: None });
-                                                    if let Ok(mut g) = ctx2.req.lock() { *g = None; }
+                                                    if let Ok(mut g) = ctx2.req.lock() {
+                                                        *g = None;
+                                                    }
                                                     Platform::get().close_window(wid);
                                                 });
                                             }
-                                        }).child(if *is_working.read() { "Pairing..." } else { "Pair" })
-                                    )
-                            )
-                    ).into_element()
-            },
+                                        })),
+                                ),
+                        ),
+                    )
+                    .into_element()
+            }
             ModalRequest::PamAuth { prompt } => {
                 let pwd = password;
                 rect()
@@ -158,90 +178,72 @@ impl Component for ModalApp {
                     .center()
                     .content(Content::Flex)
                     .child(
-                        rect()
-                            .width(Size::px(400.))
-                            .padding(20.)
-                            .corner_radius(16.)
-                            .background(t.panel)
-                            .border(Border::new().width(1.).fill(t.border))
-                            .spacing(12.)
-                            .child(label().font_size(18.).font_weight(FontWeight::BOLD).color(t.text).text(prompt))
-                            .child(Input::new(pwd.into_writable()))
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .spacing(10.)
-                                    .child(
-                                        Button::new().on_press({
+                        FadeSlideIn::new().child(
+                            dialog_card(400.)
+                                .spacing(12.)
+                                .child(label().font_size(18.).font_weight(FontWeight::BOLD).color(t.text).text(prompt))
+                                .child(Input::new(pwd.into_writable()))
+                                .child(
+                                    rect()
+                                        .horizontal()
+                                        .spacing(10.)
+                                        .child(secondary_button("Cancel", {
                                             let ctx = ctx.clone();
                                             let tx = tx.clone();
-                                            move |_| {
+                                            move || {
                                                 let _ = tx.send(ModalResponse::Canceled);
-                                                if let Ok(mut g) = ctx.req.lock() { *g = None; }
+                                                if let Ok(mut g) = ctx.req.lock() {
+                                                    *g = None;
+                                                }
                                                 Platform::get().close_window(wid);
                                             }
-                                        }).child("Cancel")
-                                    )
-                                    .child(
-                                        Button::new().on_press({
-                                            let p = pwd.clone();
-                                            let ctx = ctx.clone();
-                                            let mut iw = is_working;
-                                            let tx = tx.clone();
-                                            move |_| {
-                                                iw.set(true);
-                                                let p_str = p.read().clone();
-                                                let tx2 = tx.clone();
-                                                let ctx2 = ctx.clone();
-                                                std::thread::spawn(move || {
-                                                    let _ = tx2.send(ModalResponse::Success { data: Some(p_str) });
-                                                    if let Ok(mut g) = ctx2.req.lock() { *g = None; }
-                                                    Platform::get().close_window(wid);
-                                                });
-                                            }
-                                        }).child(if *is_working.read() { "Authenticating..." } else { "Authenticate" })
-                                    )
-                            )
-                    ).into_element()
-            },
-            ModalRequest::Clipboard => {
-                rect()
-                    .width(Size::fill())
-                    .height(Size::fill())
-                    .background(Color::from_argb(120, 0, 0, 0))
-                    .center()
-                    .content(Content::Flex)
-                    .child(
-                        rect()
-                            .width(Size::px(520.))
-                            .height(Size::px(520.))
-                            .corner_radius(16.)
-                            .background(t.panel)
-                            .border(Border::new().width(1.).fill(t.border))
-                            .child(crate::clipboard_manager::ClipboardManager)
-                    ).into_element()
-            },
-            ModalRequest::Screenshot => {
-                rect()
-                    .width(Size::fill())
-                    .height(Size::fill())
-                    .background(Color::from_argb(120, 0, 0, 0))
-                    .center()
-                    .content(Content::Flex)
-                    .child(
-                        rect()
-                            .width(Size::px(500.))
-                            .corner_radius(16.)
-                            .background(t.panel)
-                            .border(Border::new().width(1.).fill(t.border))
-                            .child(crate::screenshot::ScreenshotUtility)
-                    ).into_element()
-            },
-            _ => rect().into_element()
+                                        }))
+                                        .child(primary_button(
+                                            if *is_working.read() { "Authenticating..." } else { "Authenticate" },
+                                            {
+                                                let p = pwd.clone();
+                                                let ctx = ctx.clone();
+                                                let mut iw = is_working;
+                                                let tx = tx.clone();
+                                                move || {
+                                                    iw.set(true);
+                                                    let p_str = p.read().clone();
+                                                    let tx2 = tx.clone();
+                                                    let ctx2 = ctx.clone();
+                                                    std::thread::spawn(move || {
+                                                        let _ = tx2.send(ModalResponse::Success { data: Some(p_str) });
+                                                        if let Ok(mut g) = ctx2.req.lock() {
+                                                            *g = None;
+                                                        }
+                                                        Platform::get().close_window(wid);
+                                                    });
+                                                }
+                                            },
+                                        )),
+                                ),
+                        ),
+                    )
+                    .into_element()
+            }
+            ModalRequest::Clipboard => rect()
+                .width(Size::fill())
+                .height(Size::fill())
+                .background(Color::from_argb(120, 0, 0, 0))
+                .center()
+                .content(Content::Flex)
+                .child(FadeSlideIn::new().child(dialog_card(520.).child(crate::clipboard_manager::ClipboardManager)))
+                .into_element(),
+            ModalRequest::Screenshot => rect()
+                .width(Size::fill())
+                .height(Size::fill())
+                .background(Color::from_argb(120, 0, 0, 0))
+                .center()
+                .content(Content::Flex)
+                .child(FadeSlideIn::new().child(dialog_card(500.).child(crate::screenshot::ScreenshotUtility)))
+                .into_element(),
+            _ => rect().into_element(),
         }
     }
 }
 
-pub fn fullscreen_modal_app() -> impl IntoElement {
-    ModalApp
-}
+pub fn fullscreen_modal_app() -> impl IntoElement { ModalApp }

@@ -1,13 +1,19 @@
-use crate::state::{
-        apply, load_initial_batch, parse_capacity_pct, power_action, subscribe_live,
-    };
 use {
+    crate::state::{apply, load_initial_batch, parse_capacity_pct, power_action, subscribe_live},
     freya::prelude::*,
     ipsea::settings::SettingKey,
     system::{BluetoothDevice, CurrentWifiInfo, HyprlandBackend, SystemBackend, WifiNetworkDetail, WiredInfo},
     ui::*,
 };
-fn trunc(s: &str, n: usize) -> String { if s.chars().count() <= n { s.to_string() } else { let mut t: String = s.chars().take(n-1).collect(); t.push('…'); t } }
+fn trunc(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        let mut t: String = s.chars().take(n - 1).collect();
+        t.push('…');
+        t
+    }
+}
 
 pub fn compute_panel_height(
     wifi_on: bool,
@@ -27,11 +33,7 @@ pub fn compute_panel_height(
     } else {
         let conn_h = if has_connected_wifi { 28 } else { 0 };
         let shown_networks = available_wifi_count.min(5);
-        let net_h = if shown_networks == 0 && !has_connected_wifi {
-            22
-        } else {
-            shown_networks * 28
-        };
+        let net_h = if shown_networks == 0 && !has_connected_wifi { 22 } else { shown_networks * 28 };
         66 + conn_h + net_h
     };
     let wired_card_h = if has_wired { 10 + 64 } else { 0 };
@@ -41,11 +43,7 @@ pub fn compute_panel_height(
     let bt_card_h = if !bt_on {
         76
     } else {
-        let conn_h = if connected_bt_count > 0 {
-            connected_bt_count.min(3) * 36
-        } else {
-            22
-        };
+        let conn_h = if connected_bt_count > 0 { connected_bt_count.min(3) * 36 } else { 22 };
         let other_h = other_bt_count.min(4) * 28;
         let empty_h = if connected_bt_count == 0 && other_bt_count == 0 { 22 } else { 0 };
         66 + conn_h + other_h + empty_h
@@ -84,9 +82,7 @@ fn resize_panel_window(target_h: i32) {
         let _ = std::process::Command::new("hyprctl").args(["eval", &lua]).output();
     });
 }
-fn should_resize(last: i32, target: i32) -> bool {
-    (last - target).abs() >= 12
-}
+fn should_resize(last: i32, target: i32) -> bool { (last - target).abs() >= 12 }
 
 pub fn control_panel_app() -> Element {
     let theme_state = use_init_app_theme(get_theme());
@@ -130,19 +126,21 @@ pub fn control_panel_app() -> Element {
         });
 
         spawn(async move {
-            let initial_bt = tokio::task::spawn_blocking(|| HyprlandBackend.get_paired_bluetooth_devices()).await.unwrap_or_default();
+            let initial_bt =
+                tokio::task::spawn_blocking(|| HyprlandBackend.get_paired_bluetooth_devices()).await.unwrap_or_default();
             bt_state.set_if_modified(initial_bt);
         });
 
         spawn(async move {
             let wired_now = tokio::task::spawn_blocking(|| HyprlandBackend.get_wired_info()).await.unwrap_or(None);
             wired_state.set_if_modified(wired_now);
-            let power = tokio::task::spawn_blocking(|| HyprlandBackend.get_power_info()).await.unwrap_or(system::PowerInfo {
-                capacity: "0%".to_string(),
-                status: "Unknown".to_string(),
-                health_percent: None,
-                cycle_count: None,
-            });
+            let power =
+                tokio::task::spawn_blocking(|| HyprlandBackend.get_power_info()).await.unwrap_or(system::PowerInfo {
+                    capacity: "0%".to_string(),
+                    status: "Unknown".to_string(),
+                    health_percent: None,
+                    cycle_count: None,
+                });
             let p = parse_capacity_pct(&power.capacity);
             pct_state.set_if_modified(p);
             status_state.set_if_modified(power.status);
@@ -152,8 +150,7 @@ pub fn control_panel_app() -> Element {
             let _ = std::process::Command::new("bluetoothctl").args(["scan", "on"]).output();
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(8)).await;
-                let wired_now =
-                    tokio::task::spawn_blocking(|| HyprlandBackend.get_wired_info()).await.unwrap_or(None);
+                let wired_now = tokio::task::spawn_blocking(|| HyprlandBackend.get_wired_info()).await.unwrap_or(None);
                 wired_state.set_if_modified(wired_now);
                 let power =
                     tokio::task::spawn_blocking(|| HyprlandBackend.get_power_info()).await.unwrap_or(system::PowerInfo {
@@ -167,7 +164,8 @@ pub fn control_panel_app() -> Element {
                 status_state.set_if_modified(power.status.clone());
                 let w = tokio::task::spawn_blocking(|| HyprlandBackend.get_wifi_details()).await.unwrap_or_default();
                 wifi_state.set_if_modified(w);
-                let b = tokio::task::spawn_blocking(|| HyprlandBackend.get_paired_bluetooth_devices()).await.unwrap_or_default();
+                let b =
+                    tokio::task::spawn_blocking(|| HyprlandBackend.get_paired_bluetooth_devices()).await.unwrap_or_default();
                 bt_state.set_if_modified(b);
             }
         });
@@ -184,7 +182,11 @@ pub fn control_panel_app() -> Element {
                         if s.trim().is_empty() || s.contains("\"class\": \"\"") {
                             return false;
                         }
-                        if s.contains("\"class\": \"overlay-panel\"") || s.contains("\"class\": \"overlay\"") || s.contains("\"class\": \"topbar-panel\"") || s.contains("\"class\": \"topbar\"") {
+                        if s.contains("\"class\": \"overlay-panel\"")
+                            || s.contains("\"class\": \"overlay\"")
+                            || s.contains("\"class\": \"topbar-panel\"")
+                            || s.contains("\"class\": \"topbar\"")
+                        {
                             return false;
                         }
                         return true;
@@ -220,9 +222,13 @@ pub fn control_panel_app() -> Element {
                     w.set_if_modified(v);
                     apply(SettingKey::WifiEnabled, v.into());
                     if v {
-                        std::thread::spawn(|| { let _ = std::process::Command::new("nmcli").args(["radio","wifi","on"]).output(); });
+                        std::thread::spawn(|| {
+                            let _ = std::process::Command::new("nmcli").args(["radio", "wifi", "on"]).output();
+                        });
                     } else {
-                        std::thread::spawn(|| { let _ = std::process::Command::new("nmcli").args(["radio","wifi","off"]).output(); });
+                        std::thread::spawn(|| {
+                            let _ = std::process::Command::new("nmcli").args(["radio", "wifi", "off"]).output();
+                        });
                     }
                 })
             }),
@@ -237,24 +243,26 @@ pub fn control_panel_app() -> Element {
                     card = card.child(
                         rect()
                             .width(Size::fill())
-                            .horizontal()
-                            .cross_align(Alignment::Center)
-                            .main_align(Alignment::SpaceBetween)
+                            .cursor(CursorIcon::Pointer)
                             .content(Content::Flex)
                             .padding((6., 0.))
-                            .cursor(CursorIcon::Pointer)
                             .on_press(move |_| {
                                 let iface = iface.clone();
                                 std::thread::spawn(move || {
-                                    if let Some(iface) = iface { let _ = std::process::Command::new("nmcli").args(["dev","disconnect", &iface]).output(); } else { HyprlandBackend.disconnect_wifi(); }
+                                    if let Some(iface) = iface {
+                                        let _ =
+                                            std::process::Command::new("nmcli").args(["dev", "disconnect", &iface]).output();
+                                    } else {
+                                        HyprlandBackend.disconnect_wifi();
+                                    }
                                 });
                             })
-                            .child(
-                                rect().horizontal().spacing(8.).cross_align(Alignment::Center).content(Content::Flex)
-                                    .child(label().font_size(12.).color(t.accent).text("●"))
-                                    .child(label().font_size(12.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(display))
-                            )
-                            .child(label().font_size(11.).color(t.text_dim).text("Connected"))
+                            .child(dot_status_row(
+                                display,
+                                None::<String>,
+                                true,
+                                label().font_size(11.).color(t.text_dim).text("Connected"),
+                            )),
                     );
                 }
             }
@@ -262,33 +270,38 @@ pub fn control_panel_app() -> Element {
             let iface_clone = current_wifi.interface.clone();
             let mut shown = 0;
             for net in available_networks.iter() {
-                if shown >= 8 { break; }
-                if current_wifi.ssid.as_ref() == Some(&net.ssid) && net.is_connected { continue; }
+                if shown >= 8 {
+                    break;
+                }
+                if current_wifi.ssid.as_ref() == Some(&net.ssid) && net.is_connected {
+                    continue;
+                }
                 let ssid = net.ssid.clone();
                 let ssid2 = ssid.clone();
                 let display = trunc(&ssid, 20);
                 let is_connected = current_wifi.ssid.as_ref() == Some(&ssid);
                 let iface_for_row = iface_clone.clone();
-                let is_secured = !net.is_saved && !net.security.is_empty() && net.security != "--" && !net.security.eq_ignore_ascii_case("Open");
+                let is_secured = !net.is_saved
+                    && !net.security.is_empty()
+                    && net.security != "--"
+                    && !net.security.eq_ignore_ascii_case("Open");
                 let net_for_click = net.clone();
                 rows.push(
                     rect()
                         .width(Size::fill())
-                        .horizontal()
-                        .cross_align(Alignment::Center)
-                        .main_align(Alignment::SpaceBetween)
-                        .content(Content::Flex)
-                        .padding((6., 2.))
                         .corner_radius(8.)
                         .cursor(CursorIcon::Pointer)
                         .background(Color::TRANSPARENT)
+                        .content(Content::Flex)
                         .on_press({
                             move |_| {
                                 if is_connected {
                                     let iface = iface_for_row.clone();
                                     std::thread::spawn(move || {
                                         if let Some(iface) = iface {
-                                            let _ = std::process::Command::new("nmcli").args(["dev", "disconnect", &iface]).output();
+                                            let _ = std::process::Command::new("nmcli")
+                                                .args(["dev", "disconnect", &iface])
+                                                .output();
                                         } else {
                                             HyprlandBackend.disconnect_wifi();
                                         }
@@ -296,10 +309,11 @@ pub fn control_panel_app() -> Element {
                                 } else if is_secured {
                                     let net = net_for_click.clone();
                                     std::thread::spawn(move || {
-                                        let _ = ipsea::modals::send_modal_request(ipsea::modals::ModalRequest::WifiPassword {
-                                            ssid: net.ssid,
-                                            security: net.security,
-                                        });
+                                        let _ =
+                                            ipsea::modals::send_modal_request(ipsea::modals::ModalRequest::WifiPassword {
+                                                ssid: net.ssid,
+                                                security: net.security,
+                                            });
                                     });
                                 } else {
                                     let s = ssid2.clone();
@@ -309,9 +323,17 @@ pub fn control_panel_app() -> Element {
                                 }
                             }
                         })
-                        .child(label().font_size(12.).color(t.text).text(display))
-                        .maybe(is_connected, |el| el.child(label().font_size(11.).color(t.accent).text("Connected")))
-                        .into_element()
+                        .child(setting_row(
+                            display,
+                            None::<String>,
+                            false,
+                            if is_connected {
+                                label().font_size(11.).color(t.accent).text("Connected").into_element()
+                            } else {
+                                rect().into_element()
+                            },
+                        ))
+                        .into_element(),
                 );
                 shown += 1;
             }
@@ -324,9 +346,7 @@ pub fn control_panel_app() -> Element {
                     .width(Size::fill())
                     .height(Size::px(list_h))
                     .show_scrollbar(rows.len() > 4)
-                    .child(
-                        rect().width(Size::fill()).vertical().spacing(2.).content(Content::Flex).children(rows)
-                    )
+                    .child(rect().width(Size::fill()).vertical().spacing(2.).content(Content::Flex).children(rows)),
             );
         }
         card
@@ -344,8 +364,12 @@ pub fn control_panel_app() -> Element {
                     apply(SettingKey::BluetoothEnabled, v.into());
                     let en = v;
                     std::thread::spawn(move || {
-                        let _ = std::process::Command::new("rfkill").args([if en {"unblock"} else {"block"}, "bluetooth"]).output();
-                        if en { let _ = std::process::Command::new("bluetoothctl").args(["scan","on"]).output(); }
+                        let _ = std::process::Command::new("rfkill")
+                            .args([if en { "unblock" } else { "block" }, "bluetooth"])
+                            .output();
+                        if en {
+                            let _ = std::process::Command::new("bluetoothctl").args(["scan", "on"]).output();
+                        }
                     });
                 })
             }),
@@ -362,20 +386,25 @@ pub fn control_panel_app() -> Element {
                     let name = dev.name.clone();
                     let display = trunc(&name, 20);
                     rows.push(
-                        rect().width(Size::fill()).horizontal().cross_align(Alignment::Center).main_align(Alignment::SpaceBetween).content(Content::Flex).padding((6.,2.)).corner_radius(8.).cursor(CursorIcon::Pointer)
+                        rect()
+                            .width(Size::fill())
+                            .corner_radius(8.)
+                            .cursor(CursorIcon::Pointer)
+                            .background(Color::TRANSPARENT)
+                            .content(Content::Flex)
                             .on_press(move |_| {
                                 let m = mac.clone();
-                                std::thread::spawn(move || { HyprlandBackend.disconnect_bluetooth_device(&m); });
+                                std::thread::spawn(move || {
+                                    HyprlandBackend.disconnect_bluetooth_device(&m);
+                                });
                             })
-                            .child(
-                                rect().vertical().spacing(3.).content(Content::Flex)
-                                    .child(rect().horizontal().spacing(6.).cross_align(Alignment::Center).content(Content::Flex)
-                                        .child(label().font_size(11.).color(t.accent).text("●"))
-                                        .child(label().font_size(12.).color(t.text).text(display.clone())))
-                                    .child(label().font_size(10.).color(t.accent).text("Connected"))
-                            )
-                            .child(icon(CHEVRON_RIGHT, 12., t.text_dim))
-                            .into_element()
+                            .child(dot_status_row(
+                                display.clone(),
+                                Some("Connected"),
+                                true,
+                                icon(CHEVRON_RIGHT, 12., t.text_dim),
+                            ))
+                            .into_element(),
                     );
                 }
             } else {
@@ -386,7 +415,12 @@ pub fn control_panel_app() -> Element {
                 let display = trunc(&name, 20);
                 let dev_for_click = dev.clone();
                 rows.push(
-                    rect().width(Size::fill()).horizontal().cross_align(Alignment::Center).main_align(Alignment::SpaceBetween).content(Content::Flex).padding((6.,2.)).corner_radius(8.).cursor(CursorIcon::Pointer)
+                    rect()
+                        .width(Size::fill())
+                        .corner_radius(8.)
+                        .cursor(CursorIcon::Pointer)
+                        .background(Color::TRANSPARENT)
+                        .content(Content::Flex)
                         .on_press({
                             move |_| {
                                 let dev = dev_for_click.clone();
@@ -398,8 +432,8 @@ pub fn control_panel_app() -> Element {
                                 });
                             }
                         })
-                        .child(label().font_size(12.).color(t.text).text(display.clone()))
-                        .into_element()
+                        .child(setting_row(display.clone(), None::<String>, false, rect().into_element()))
+                        .into_element(),
                 );
             }
             if bt_list.is_empty() {
@@ -411,7 +445,7 @@ pub fn control_panel_app() -> Element {
                     .width(Size::fill())
                     .height(Size::px(list_h))
                     .show_scrollbar(rows.len() > 4)
-                    .child(rect().width(Size::fill()).vertical().spacing(2.).content(Content::Flex).children(rows))
+                    .child(rect().width(Size::fill()).vertical().spacing(2.).content(Content::Flex).children(rows)),
             );
         }
         card
@@ -419,19 +453,24 @@ pub fn control_panel_app() -> Element {
     let wired_card =
         tile().child(tile_head(Some(WIRED), "Wired", None::<Element>)).child(if let Some(ref info) = wired_info {
             if info.ip_address.is_empty() {
-                setting_row(info.interface.clone(), None::<String>, false, label().font_size(12.).color(t.accent).text("●"))
-                    .into_element()
+                dot_status_row(
+                    info.interface.clone(),
+                    None::<String>,
+                    true,
+                    label().font_size(12.).color(t.accent).text("●"),
+                )
+                .into_element()
             } else {
-                setting_row(
+                dot_status_row(
                     info.interface.clone(),
                     Some(info.ip_address.clone()),
-                    false,
+                    true,
                     label().font_size(12.).color(t.accent).text("●"),
                 )
                 .into_element()
             }
         } else {
-            setting_row(
+            dot_status_row(
                 "No connection".to_string(),
                 None::<String>,
                 false,
@@ -450,24 +489,26 @@ pub fn control_panel_app() -> Element {
             })
         }),
     ));
-    let sound_card = tile()
-        .child(tile_head(Some(SOUND), "Sound", None::<Element>))
-        .child({
-            let mut v = volume;
-            slider_row(Some(SOUND), *v.read(), move |nv| {
-                v.set_if_modified(nv);
-                apply(SettingKey::AudioVolume, nv.into());
-                let pct = nv as i32;
-                std::thread::spawn(move || { HyprlandBackend.set_volume(pct); });
-            })
-        });
+    let sound_card = tile().child(tile_head(Some(SOUND), "Sound", None::<Element>)).child({
+        let mut v = volume;
+        slider_row(Some(SOUND), *v.read(), move |nv| {
+            v.set_if_modified(nv);
+            apply(SettingKey::AudioVolume, nv.into());
+            let pct = nv as i32;
+            std::thread::spawn(move || {
+                HyprlandBackend.set_volume(pct);
+            });
+        })
+    });
     let brightness_card = tile().child(tile_head(Some(DISPLAY), "Brightness", None::<Element>)).child({
         let mut b = brightness;
         slider_row(Some(SUN), *b.read(), move |nv| {
             b.set_if_modified(nv);
             apply(SettingKey::DisplayBrightness, nv.into());
             let pct = nv as u32;
-            std::thread::spawn(move || { HyprlandBackend.set_brightness(pct); });
+            std::thread::spawn(move || {
+                HyprlandBackend.set_brightness(pct);
+            });
         })
     });
     let battery_card = tile().child(tile_head(Some(BATTERY), "Power", None::<Element>)).child(
@@ -485,7 +526,11 @@ pub fn control_panel_app() -> Element {
                     .child(
                         label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(format!("{bat_pct}%")),
                     )
-                    .child(label().font_size(12.).color(t.text_dim).text(if bat_status.is_empty() { "Unknown".to_string() } else { bat_status })),
+                    .child(label().font_size(12.).color(t.text_dim).text(if bat_status.is_empty() {
+                        "Unknown".to_string()
+                    } else {
+                        bat_status
+                    })),
             ),
     );
     let power_btn = |label_text: &'static str, svg: &'static str, bg: Color, fg: Color, action: fn()| {
@@ -541,28 +586,18 @@ pub fn control_panel_app() -> Element {
                         .cursor(CursorIcon::Pointer)
                         .on_press(|_| {
                             std::thread::spawn(|| {
-                                let _ = std::process::Command::new("finick-settings").spawn()
-                                    .or_else(|_| std::process::Command::new("hyprctl")
+                                let _ = std::process::Command::new("finick-settings").spawn().or_else(|_| {
+                                    std::process::Command::new("hyprctl")
                                         .args(["dispatch", "exec", "finick-settings"])
-                                        .spawn());
+                                        .spawn()
+                                });
                             });
                         })
                         .child(icon(GENERAL, 14., t.text_dim)),
                 )
                 .child(label().font_size(12.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text("Overlay")),
         )
-        .child(
-            rect()
-                .width(Size::px(28.))
-                .height(Size::px(28.))
-                .corner_radius(999.)
-                .background(t.panel_raised)
-                .border(Border::new().width(1.).fill(t.border))
-                .center()
-                .cursor(CursorIcon::Pointer)
-                .on_press(|_| Platform::get().close_window(Platform::window_id()))
-                .child(label().font_size(13.).color(t.text_dim).text("✕")),
-        );
+        .child(small_close_button(move || Platform::get().close_window(Platform::window_id())));
     let panel_inner_content = rect()
         .width(Size::fill())
         .vertical()
@@ -585,9 +620,11 @@ pub fn control_panel_app() -> Element {
                 .spacing(10.)
                 .content(Content::Flex)
                 .child(rect().width(Size::flex(1.)).child(sound_card))
-                .maybe_child(system::HyprlandBackend.supports_brightness().then(|| {
-                    rect().width(Size::flex(1.)).child(brightness_card).into_element()
-                })),
+                .maybe_child(
+                    system::HyprlandBackend
+                        .supports_brightness()
+                        .then(|| rect().width(Size::flex(1.)).child(brightness_card).into_element()),
+                ),
         )
         .maybe(has_battery, |el| el.child(battery_card))
         .child(actions_row);
@@ -599,13 +636,7 @@ pub fn control_panel_app() -> Element {
         .content(Content::Flex)
         .corner_radius(20.)
         .border(Border::new().width(1.).fill(t.border))
-        .child(
-            ScrollView::new()
-                .width(Size::fill())
-                .height(Size::fill())
-                .show_scrollbar(false)
-                .child(panel_inner_content)
-        );
+        .child(ScrollView::new().width(Size::fill()).height(Size::fill()).show_scrollbar(false).child(panel_inner_content));
     rect()
         .width(Size::fill())
         .height(Size::fill())

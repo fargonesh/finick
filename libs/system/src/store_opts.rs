@@ -33,6 +33,9 @@ pub struct OptField {
     pub default: Option<Value>,
 }
 
+const SCHEMA_RELEASE: &str = "nixos-25.05_hm-25.05";
+const CACHE_TTL_SECS: u64 = 7 * 24 * 60 * 60;
+
 fn cache_dir() -> std::path::PathBuf {
     std::env::var("HOME")
         .map(|h| std::path::PathBuf::from(format!("{h}/.cache/finick/hm-options")))
@@ -70,7 +73,15 @@ in
 "#;
 
 fn read_cache(name: &str) -> Option<String> {
-    std::fs::read_to_string(cache_dir().join(name)).ok()
+    let path = cache_dir().join(name);
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if let Ok(mtime) = meta.modified() {
+            if mtime.elapsed().map(|e| e.as_secs() > CACHE_TTL_SECS).unwrap_or(false) {
+                return None;
+            }
+        }
+    }
+    std::fs::read_to_string(path).ok()
 }
 
 fn write_cache(name: &str, content: &str) {
@@ -80,9 +91,10 @@ fn write_cache(name: &str, content: &str) {
     }
 }
 
-/// All `programs.*` module names (one slow eval, cached indefinitely).
+/// All `programs.*` module names (one slow eval, release-keyed TTL cache).
 pub fn program_modules() -> Vec<String> {
-    if let Some(cached) = read_cache("programs.json")
+    let cache_name = format!("programs-{SCHEMA_RELEASE}.json");
+    if let Some(cached) = read_cache(&cache_name)
         && let Ok(list) = serde_json::from_str::<Vec<String>>(&cached)
     {
         return list;
@@ -92,18 +104,58 @@ pub fn program_modules() -> Vec<String> {
         .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
         .unwrap_or_default();
     if !list.is_empty() {
-        write_cache("programs.json", &serde_json::to_string(&list).unwrap_or_default());
+        write_cache(&cache_name, &serde_json::to_string(&list).unwrap_or_default());
     }
     list
 }
 
-/// Exact-match module for a nix package attr (`firefox` → `programs.firefox`).
+pub fn normalize_module_candidate(attr: &str) -> String {
+    let pname = attr.trim().trim_start_matches("nixpkgs#").split('.').next_back().unwrap_or("").to_string();
+    let mut lower = pname.to_lowercase();
+    loop {
+        let mut stripped = false;
+        for suffix in ["-esr", "-bin", "-git"] {
+            if let Some(s) = lower.strip_suffix(suffix) {
+                lower = s.to_string();
+                stripped = true;
+                break;
+            }
+        }
+        if !stripped {
+            break;
+        }
+    }
+    lower
+}
+
 pub fn module_for_attr(attr: &str) -> Option<String> {
     let pname = attr.trim().trim_start_matches("nixpkgs#").split('.').next_back().unwrap_or("").to_string();
     if pname.is_empty() {
         return None;
     }
-    program_modules().into_iter().find(|m| *m == pname)
+    let modules = program_modules();
+    if let Some(found) = modules.iter().find(|m| m.as_str() == pname.as_str()) {
+        return Some(found.clone());
+    }
+    let norm = normalize_module_candidate(&pname);
+    if norm.is_empty() {
+        return None;
+    }
+    if let Some(found) = modules.iter().find(|m| m.to_lowercase() == norm) {
+        return Some(found.clone());
+    }
+    let mut best: Option<String> = None;
+    let mut best_len = 0usize;
+    for m in modules {
+        let ml = m.to_lowercase();
+        if norm.contains(&ml) || ml.contains(&norm) {
+            if m.len() > best_len {
+                best_len = m.len();
+                best = Some(m);
+            }
+        }
+    }
+    best
 }
 
 #[derive(Deserialize)]
@@ -127,7 +179,7 @@ struct RawDefault {
 
 /// Full schema for one module (cached per module after first slow eval).
 pub fn module_schema(module: &str) -> Vec<OptField> {
-    let cache_name = format!("{module}.json");
+    let cache_name = format!("{module}-{SCHEMA_RELEASE}.json");
     if let Some(cached) = read_cache(&cache_name)
         && let Ok(fields) = fields_from_cache(&cached)
     {
@@ -346,5 +398,14 @@ mod tests {
         assert_eq!(nix_literal(&serde_json::json!(3)), Some("3".to_string()));
         assert_eq!(nix_literal(&Value::String("a\"b".to_string())), Some("\"a\\\"b\"".to_string()));
         assert_eq!(nix_literal(&serde_json::json!({"a": 1})), None);
+    }
+
+    #[test]
+    fn test_normalize_module_candidate() {
+        assert_eq!(normalize_module_candidate("firefox-esr"), "firefox");
+        assert_eq!(normalize_module_candidate("nixpkgs#firefox-esr"), "firefox");
+        assert_eq!(normalize_module_candidate("Firefox-BIN"), "firefox");
+        assert_eq!(normalize_module_candidate("ripgrep-git"), "ripgrep");
+        assert_eq!(normalize_module_candidate("firefox"), "firefox");
     }
 }

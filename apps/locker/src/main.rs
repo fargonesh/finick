@@ -56,7 +56,7 @@ fn hex_to_color(hex: &str) -> Option<Color> {
 
 fn locker_app() -> Element {
     let _st = use_init_app_theme(get_theme());
-    let t = use_app_theme();
+    let _t = use_app_theme();
     let mut password = use_state(String::new);
     let mut error = use_state(|| Option::<String>::None);
     let attempts = use_state(|| 0u32);
@@ -113,14 +113,15 @@ fn locker_app() -> Element {
             spawn(async move {
                 let p2 = p.clone();
                 let user2 = user_c.clone();
-                let ok = tokio::task::spawn_blocking(move || system::verify_password(&user2, &p2)).await.unwrap_or(false);
+                let ok = tokio::task::spawn_blocking(move || system::authenticate_user(&user2, &p2)).await.unwrap_or(false);
                 if ok {
                     release_single_instance();
                     start_shell_overlay();
                     std::process::exit(0);
                 } else {
                     err_c.set(Some("Incorrect password — try again".to_string()));
-                    att_c.set(*att_c.read() + 1);
+                    let next = *att_c.read() + 1;
+                    att_c.set(next);
                     pwd_c.set(String::new());
                 }
             });
@@ -250,139 +251,86 @@ fn locker_app() -> Element {
                         ),
                 )
                 .child(
-                    rect()
-                        .width(Size::px(380.))
-                        .padding(24.)
-                        .corner_radius(24.)
-                        .background(Color::from_argb(205, 26, 27, 33))
-                        .border(Border::new().width(1.).fill(Color::from_argb(55, 255, 255, 255)))
-                        .shadow(Shadow::new().blur(40.).color(Color::from_argb(120, 0, 0, 0)))
-                        .spacing(14.)
-                        .child(
-                            rect()
-                                .width(Size::fill())
-                                .horizontal()
-                                .cross_align(Alignment::Center)
-                                .spacing(12.)
-                                .content(Content::Flex)
-                                .child(
+                    FadeSlideIn::new().child(
+                        rect()
+                            .width(Size::px(380.))
+                            .padding(24.)
+                            .corner_radius(24.)
+                            .background(Color::from_argb(205, 26, 27, 33))
+                            .border(Border::new().width(1.).fill(Color::from_argb(55, 255, 255, 255)))
+                            .shadow(Shadow::new().blur(40.).color(Color::from_argb(120, 0, 0, 0)))
+                            .spacing(14.)
+                            .child(hero_identity(initial.clone(), username.clone(), hostname.clone()))
+                            .child(
+                                rect()
+                                    .width(Size::fill())
+                                    .height(Size::px(46.))
+                                    .corner_radius(14.)
+                                    .background(Color::from_argb(255, 14, 15, 19))
+                                    .border(Border::new().width(1.).fill(if has_error {
+                                        Color::from_rgb(180, 70, 70)
+                                    } else {
+                                        Color::from_argb(50, 255, 255, 255)
+                                    }))
+                                    .padding((0., 14.))
+                                    .cross_align(Alignment::Center)
+                                    .content(Content::Flex)
+                                    .horizontal()
+                                    .spacing(10.)
+                                    .child(icon(LOCK, 15., Color::from_rgb(150, 151, 158)))
+                                    .child(
+                                        Input::new(pwd_writable)
+                                            .width(Size::fill())
+                                            .placeholder("Password")
+                                            .mode(InputMode::new_password())
+                                            .auto_focus(true)
+                                            .theme_colors(InputColorsThemePartial {
+                                                background: Some(Color::from_argb(255, 14, 15, 19).into()),
+                                                focus_background: Some(Color::from_argb(255, 14, 15, 19).into()),
+                                                border_fill: Some(Color::TRANSPARENT.into()),
+                                                focus_border_fill: Some(Color::TRANSPARENT.into()),
+                                                color: Some(Color::WHITE.into()),
+                                                placeholder_color: Some(Color::from_rgb(150, 151, 158).into()),
+                                                ..Default::default()
+                                            })
+                                            .on_submit({
+                                                let mut h = do_unlock.clone();
+                                                move |_| h(())
+                                            }),
+                                    ),
+                            )
+                            .maybe(has_error, |el| {
+                                el.child(
                                     rect()
-                                        .width(Size::px(52.))
-                                        .height(Size::px(52.))
-                                        .corner_radius(999.)
-                                        .background(t.accent)
-                                        .center()
-                                        .child(
-                                            label()
-                                                .font_size(20.)
-                                                .font_weight(FontWeight::BOLD)
-                                                .color(Color::WHITE)
-                                                .text(initial),
-                                        ),
-                                )
-                                .child(
-                                    rect()
-                                        .vertical()
-                                        .spacing(2.)
-                                        .child(
-                                            label()
-                                                .font_size(15.)
-                                                .font_weight(FontWeight::SEMI_BOLD)
-                                                .color(Color::WHITE)
-                                                .text(username.clone()),
-                                        )
+                                        .width(Size::fill())
+                                        .padding((8., 12.))
+                                        .corner_radius(12.)
+                                        .background(Color::from_argb(255, 52, 22, 22))
+                                        .border(Border::new().width(1.).fill(Color::from_rgb(130, 55, 55)))
                                         .child(
                                             label()
                                                 .font_size(12.)
-                                                .color(Color::from_rgb(170, 171, 178))
-                                                .text(hostname.clone()),
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .color(Color::from_rgb(255, 140, 140))
+                                                .text(err_msg.clone()),
                                         ),
-                                ),
-                        )
-                        .child(
-                            rect()
-                                .width(Size::fill())
-                                .height(Size::px(46.))
-                                .corner_radius(14.)
-                                .background(Color::from_argb(255, 14, 15, 19))
-                                .border(Border::new().width(1.).fill(if has_error {
-                                    Color::from_rgb(180, 70, 70)
-                                } else {
-                                    Color::from_argb(50, 255, 255, 255)
-                                }))
-                                .padding((0., 14.))
-                                .cross_align(Alignment::Center)
-                                .content(Content::Flex)
-                                .horizontal()
-                                .spacing(10.)
-                                .child(icon(LOCK, 15., Color::from_rgb(150, 151, 158)))
-                                .child(Input::new(pwd_writable).width(Size::fill()).placeholder("Password").mode(InputMode::new_password()).auto_focus(true).theme_colors(InputColorsThemePartial {
-                                    background: Some(Color::from_argb(255, 14, 15, 19).into()),
-                                    focus_background: Some(Color::from_argb(255, 14, 15, 19).into()),
-                                    border_fill: Some(Color::TRANSPARENT.into()),
-                                    focus_border_fill: Some(Color::TRANSPARENT.into()),
-                                    color: Some(Color::WHITE.into()),
-                                    placeholder_color: Some(Color::from_rgb(150, 151, 158).into()),
-                                    ..Default::default()
-                                }).on_submit({
-                                    let mut h = do_unlock.clone();
-                                    move |_| h(())
-                                })),
-                        )
-                        .maybe(has_error, |el| {
-                            el.child(
-                                rect()
-                                    .width(Size::fill())
-                                    .padding((8., 12.))
-                                    .corner_radius(12.)
-                                    .background(Color::from_argb(255, 52, 22, 22))
-                                    .border(Border::new().width(1.).fill(Color::from_rgb(130, 55, 55)))
-                                    .child(
-                                        label()
-                                            .font_size(12.)
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .color(Color::from_rgb(255, 140, 140))
-                                            .text(err_msg.clone()),
-                                    ),
-                            )
-                        })
-                        .maybe(fail_count > 0 && !has_error, |el| {
-                            el.child(rect().width(Size::fill()).center().child(
-                                label().font_size(11.).color(Color::from_rgb(150, 151, 158)).text(format!(
-                                    "{fail_count} failed {} — Caps Lock?",
-                                    if fail_count == 1 { "attempt" } else { "attempts" }
-                                )),
-                            ))
-                        })
-                        .child(
-                            rect()
-                                .width(Size::fill())
-                                .height(Size::px(46.))
-                                .corner_radius(14.)
-                                .background(t.accent)
-                                .center()
-                                .cursor(CursorIcon::Pointer)
-                                .on_press({
-                                    let mut h = do_unlock.clone();
-                                    move |_: Event<PressEventData>| h(())
-                                })
-                                .child(
-                                    rect()
-                                        .horizontal()
-                                        .cross_align(Alignment::Center)
-                                        .spacing(8.)
-                                        .content(Content::Flex)
-                                        .child(
-                                            label()
-                                                .font_size(14.)
-                                                .font_weight(FontWeight::BOLD)
-                                                .color(Color::WHITE)
-                                                .text("Unlock"),
-                                        )
-                                        .child(icon(ARROW_RIGHT, 15., Color::WHITE)),
-                                ),
-                        ),
-                )
+                                )
+                            })
+                            .maybe(fail_count > 0 && !has_error, |el| {
+                                el.child(rect().width(Size::fill()).center().child(
+                                    label().font_size(11.).color(Color::from_rgb(150, 151, 158)).text(format!(
+                                        "{fail_count} failed {} — Caps Lock?",
+                                        if fail_count == 1 { "attempt" } else { "attempts" }
+                                    )),
+                                ))
+                            })
+                            .child(primary_button_full("Unlock", {
+                                let mut h = do_unlock.clone();
+                                move || h(())
+                            }))
+                            .into_element(),
+                    ),
+                ),
         )
         .into_element()
 }
@@ -424,13 +372,12 @@ fn claim_single_instance() -> bool {
     if system::locker_process_alive() {
         return false;
     }
+    let _ = std::fs::remove_file(system::locker_lockfile());
     let _ = std::fs::write(system::locker_lockfile(), std::process::id().to_string());
     true
 }
 
-fn release_single_instance() {
-    let _ = std::fs::remove_file(system::locker_lockfile());
-}
+fn release_single_instance() { let _ = std::fs::remove_file(system::locker_lockfile()); }
 
 fn stop_shell_overlay() {
     let _ = std::process::Command::new("systemctl").args(["--user", "stop", "finick-overlay"]).output();
@@ -490,8 +437,11 @@ fn place_locker_windows(mons: Vec<LockerMonitor>) {
             std::thread::sleep(std::time::Duration::from_millis(wait));
             let _ = std::process::Command::new("hyprctl").args(["eval", &lua]).output();
         }
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(300));
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if !system::locker_locked() {
+                break;
+            }
             let _ = std::process::Command::new("hyprctl").args(["eval", &lua]).output();
         }
     });

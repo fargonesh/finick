@@ -1,6 +1,8 @@
-use freya::prelude::*;
-use ipsea::settings::{SettingKey, SubscriptionFilter, SETTINGS_SOCKET_NAME, subscribe_channel};
-use ui::*;
+use {
+    freya::prelude::*,
+    ipsea::settings::{SETTINGS_SOCKET_NAME, SettingKey, SubscriptionFilter, subscribe_channel},
+    ui::*,
+};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum OsdKind {
@@ -34,10 +36,15 @@ impl Component for OsdOverlay {
             OsdKind::Brightness => SUN,
         };
         let label_text = match k {
-            OsdKind::Volume => if is_muted { "Muted".to_string() } else { format!("Volume {}%", v as i32) },
+            OsdKind::Volume => {
+                if is_muted {
+                    "Muted".to_string()
+                } else {
+                    format!("Volume {}%", v as i32)
+                }
+            }
             OsdKind::Brightness => format!("Brightness {}%", v as i32),
         };
-        let pct = v.clamp(0.0, 100.0) as f32;
         rect()
             .width(Size::fill())
             .height(Size::fill())
@@ -49,33 +56,23 @@ impl Component for OsdOverlay {
                 move |_| vis.set(false)
             })
             .child(
-                rect()
-                    .width(Size::px(360.))
-                    .padding(16.)
-                    .corner_radius(16.)
-                    .background(t.panel)
-                    .border(Border::new().width(1.).fill(t.border))
-                    .vertical()
-                    .spacing(10.)
-                    .content(Content::Flex)
-                    .child(
-                        rect()
-                            .width(Size::fill())
-                            .horizontal()
-                            .cross_align(Alignment::Center)
-                            .spacing(10.)
-                            .content(Content::Flex)
-                            .child(icon(icon_svg, 18., t.text))
-                            .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(label_text)),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::fill())
-                            .height(Size::px(8.))
-                            .corner_radius(999.)
-                            .background(t.track)
-                            .child(rect().width(Size::percent(pct)).height(Size::fill()).corner_radius(999.).background(t.accent)),
-                    ),
+                FadeSlideIn::new().child(
+                    dialog_card(360.)
+                        .spacing(10.)
+                        .child(
+                            rect()
+                                .width(Size::fill())
+                                .horizontal()
+                                .cross_align(Alignment::Center)
+                                .spacing(10.)
+                                .content(Content::Flex)
+                                .child(icon(icon_svg, 18., t.text))
+                                .child(
+                                    label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(label_text),
+                                ),
+                        )
+                        .child(input_level_pill(v)),
+                ),
             )
             .into_element()
     }
@@ -94,17 +91,28 @@ pub fn use_osd_state() -> (State<bool>, State<OsdKind>, State<f64>, State<bool>)
         let mut mu = muted;
         let mut g = r#gen;
         spawn(async move {
-            let init = tokio::task::spawn_blocking(|| ipsea::settings::get_all_settings(SETTINGS_SOCKET_NAME)).await.unwrap_or(Ok(vec![])).unwrap_or_default();
+            let init = tokio::task::spawn_blocking(|| ipsea::settings::get_all_settings(SETTINGS_SOCKET_NAME))
+                .await
+                .unwrap_or(Ok(vec![]))
+                .unwrap_or_default();
             for e in init {
                 if e.key == SettingKey::AudioVolume {
-                    if let Some(v) = e.value.as_f64() { val.set(v); }
-                    if let Some(v) = e.value.as_i64() { val.set(v as f64); }
+                    if let Some(v) = e.value.as_f64() {
+                        val.set(v);
+                    }
+                    if let Some(v) = e.value.as_i64() {
+                        val.set(v as f64);
+                    }
                 }
                 if e.key == SettingKey::DisplayBrightness {
-                    if let Some(v) = e.value.as_f64() { val.set(v); }
+                    if let Some(v) = e.value.as_f64() {
+                        val.set(v);
+                    }
                 }
                 if e.key == SettingKey::AudioMuted {
-                    if let Some(b) = e.value.as_bool() { mu.set(b); }
+                    if let Some(b) = e.value.as_bool() {
+                        mu.set(b);
+                    }
                 }
             }
             if let Ok(mut rx) = subscribe_channel(SETTINGS_SOCKET_NAME, SubscriptionFilter::all()) {
@@ -120,7 +128,9 @@ pub fn use_osd_state() -> (State<bool>, State<OsdKind>, State<f64>, State<bool>)
                                 show = true;
                             }
                             SettingKey::AudioMuted => {
-                                if let Some(b) = v.as_bool() { mu.set(b); }
+                                if let Some(b) = v.as_bool() {
+                                    mu.set(b);
+                                }
                                 new_kind = OsdKind::Volume;
                                 new_val = *val.read();
                                 show = true;
@@ -142,7 +152,9 @@ pub fn use_osd_state() -> (State<bool>, State<OsdKind>, State<f64>, State<bool>)
                             let g2 = g;
                             spawn(async move {
                                 tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-                                if *g2.read() == cur { vis2.set(false); }
+                                if *g2.read() == cur {
+                                    vis2.set(false);
+                                }
                             });
                         }
                     }

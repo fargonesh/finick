@@ -1,6 +1,4 @@
-use std::process::Command;
-use freya::prelude::*;
-use ui::*;
+use {freya::prelude::*, std::process::Command, ui::*};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AboutInfo {
@@ -33,20 +31,12 @@ pub fn fetch_about_info() -> AboutInfo {
         .and_then(|o| {
             if o.status.success() {
                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if !s.is_empty() {
-                    Some(s)
-                } else {
-                    None
-                }
+                if !s.is_empty() { Some(s) } else { None }
             } else {
                 None
             }
         })
-        .or_else(|| {
-            std::fs::read_to_string("/etc/hostname")
-                .ok()
-                .map(|s| s.trim().to_string())
-        })
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|s| s.trim().to_string()))
         .unwrap_or_else(|| "finick-station".to_string());
 
     // OS Version
@@ -56,21 +46,11 @@ pub fn fetch_about_info() -> AboutInfo {
             let pretty = content
                 .lines()
                 .find(|l| l.starts_with("PRETTY_NAME="))
-                .map(|l| {
-                    l.trim_start_matches("PRETTY_NAME=")
-                        .trim_matches('"')
-                        .trim()
-                        .to_string()
-                });
+                .map(|l| l.trim_start_matches("PRETTY_NAME=").trim_matches('"').trim().to_string());
             let version = content
                 .lines()
                 .find(|l| l.starts_with("VERSION="))
-                .map(|l| {
-                    l.trim_start_matches("VERSION=")
-                        .trim_matches('"')
-                        .trim()
-                        .to_string()
-                });
+                .map(|l| l.trim_start_matches("VERSION=").trim_matches('"').trim().to_string());
 
             match (pretty, version) {
                 (Some(p), Some(v)) if !p.contains(&v) => Some(format!("{} ({})", p, v)),
@@ -80,22 +60,14 @@ pub fn fetch_about_info() -> AboutInfo {
             }
         })
         .or_else(|| {
-            Command::new("uname")
-                .arg("-o")
-                .output()
-                .ok()
-                .and_then(|o| {
-                    if o.status.success() {
-                        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                        if !s.is_empty() {
-                            Some(format!("Finick OS ({})", s))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                })
+            Command::new("uname").arg("-o").output().ok().and_then(|o| {
+                if o.status.success() {
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if !s.is_empty() { Some(format!("Finick OS ({})", s)) } else { None }
+                } else {
+                    None
+                }
+            })
         })
         .unwrap_or_else(|| "Finick OS 1.0 (Rolling)".to_string());
 
@@ -107,11 +79,7 @@ pub fn fetch_about_info() -> AboutInfo {
         .and_then(|o| {
             if o.status.success() {
                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if !s.is_empty() {
-                    Some(s)
-                } else {
-                    None
-                }
+                if !s.is_empty() { Some(s) } else { None }
             } else {
                 None
             }
@@ -127,11 +95,7 @@ pub fn fetch_about_info() -> AboutInfo {
             if o.status.success() {
                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
                 let clean = s.strip_prefix("up ").unwrap_or(&s).trim().to_string();
-                if !clean.is_empty() {
-                    Some(clean)
-                } else {
-                    None
-                }
+                if !clean.is_empty() { Some(clean) } else { None }
             } else {
                 None
             }
@@ -162,11 +126,7 @@ pub fn fetch_about_info() -> AboutInfo {
         .and_then(|o| {
             if o.status.success() {
                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if !s.is_empty() {
-                    Some(s)
-                } else {
-                    None
-                }
+                if !s.is_empty() { Some(s) } else { None }
             } else {
                 None
             }
@@ -190,14 +150,7 @@ pub fn fetch_about_info() -> AboutInfo {
         })
         .unwrap_or_else(|| "Unknown".to_string());
 
-    AboutInfo {
-        os_version,
-        hostname,
-        kernel,
-        uptime,
-        architecture,
-        memory,
-    }
+    AboutInfo { os_version, hostname, kernel, uptime, architecture, memory }
 }
 
 #[derive(PartialEq)]
@@ -228,111 +181,60 @@ impl Component for About {
 
         let current = info.read().clone();
 
-        rect()
-            .width(Size::fill())
-            .child(page_header("About", "System and device specifications."))
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .margin((0., 0., 16., 0.))
-                    .padding(16.)
-                    .corner_radius(12.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .horizontal()
-                    .cross_align(Alignment::Center)
-                    .child(
-                        rect()
-                            .width(Size::px(48.))
-                            .height(Size::px(48.))
-                            .corner_radius(24.)
-                            .background(t.primary_accent)
-                            .center()
-                            .margin((0., 16., 0., 0.))
-                            .child(
-                                label()
-                                    .font_size(22.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(t.bg_base)
-                                    .text("⚡"),
-                            ),
-                    )
-                    .child(
-                        rect()
-                            .child(
-                                label()
-                                    .font_size(18.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(t.text_primary)
-                                    .text(current.os_version.clone()),
-                            )
-                            .child(
-                                label()
-                                    .font_size(13.)
-                                    .color(t.text_secondary)
-                                    .margin((4., 0., 0., 0.))
-                                    .text("Finick Desktop Environment"),
-                            ),
-                    ),
-            )
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .margin((0., 0., 16., 0.))
-                    .padding(16.)
-                    .corner_radius(12.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .child(
-                        label()
-                            .font_size(13.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(t.text_secondary)
-                            .margin((0., 0., 14., 0.))
-                            .text("SYSTEM SPECIFICATIONS"),
-                    )
-                    .child(info_row("Device Name", &current.hostname, &t))
-                    .child(info_row("Operating System", &current.os_version, &t))
-                    .child(info_row("Kernel Version", &current.kernel, &t))
-                    .child(info_row("System Uptime", &current.uptime, &t))
-                    .child(info_row("Architecture", &current.architecture, &t))
-                    .child(info_row("Memory", &current.memory, &t))
-                    .child(
-                        rect()
-                            .horizontal()
-                            .margin((8., 0., 0., 0.))
-                            .spacing(12.)
-                            .child(secondary_button("Refresh Info", {
+        FadeSlideIn::new().child(
+            rect()
+                .width(Size::fill())
+                .vertical()
+                .spacing(GAP)
+                .child(page_head(ABOUT, "About", "System and device specifications."))
+                .child(tile().child(hero_identity("⚡", current.os_version.clone(), "Finick desktop environment")))
+                .child(
+                    tile()
+                        .child(tile_head(Some(ABOUT), "System specifications", None::<String>))
+                        .child(setting_row(
+                            "Device name",
+                            None::<String>,
+                            false,
+                            label().font_size(14.).color(t.text_dim).text(current.hostname.clone()),
+                        ))
+                        .child(setting_row(
+                            "Operating system",
+                            None::<String>,
+                            true,
+                            label().font_size(14.).color(t.text_dim).text(current.os_version.clone()),
+                        ))
+                        .child(setting_row(
+                            "Kernel version",
+                            None::<String>,
+                            true,
+                            label().font_size(14.).color(t.text_dim).text(current.kernel.clone()),
+                        ))
+                        .child(setting_row(
+                            "System uptime",
+                            None::<String>,
+                            true,
+                            label().font_size(14.).color(t.text_dim).text(current.uptime.clone()),
+                        ))
+                        .child(setting_row(
+                            "Architecture",
+                            None::<String>,
+                            true,
+                            label().font_size(14.).color(t.text_dim).text(current.architecture.clone()),
+                        ))
+                        .child(setting_row(
+                            "Memory",
+                            None::<String>,
+                            true,
+                            label().font_size(14.).color(t.text_dim).text(current.memory.clone()),
+                        ))
+                        .child(rect().horizontal().margin((8., 0., 0., 0.)).spacing(12.).child(secondary_button(
+                            "Refresh info",
+                            {
                                 let mut l = loaded;
                                 move || l.set(false)
-                            })),
-                    ),
-            )
+                            },
+                        ))),
+                ),
+        )
     }
-}
-
-fn info_row(label_text: &str, value_text: &str, t: &ui::Theme) -> impl IntoElement {
-    rect()
-        .horizontal()
-        .main_align(Alignment::SpaceBetween)
-        .cross_align(Alignment::Center)
-        .width(Size::fill())
-        .padding((10., 14.))
-        .margin((0., 0., 6., 0.))
-        .corner_radius(8.)
-        .background(t.bg_base)
-        .border(Border::new().width(1.).fill(t.border_subtle))
-        .child(
-            label()
-                .font_size(14.)
-                .font_weight(FontWeight::SEMI_BOLD)
-                .color(t.text_primary)
-                .text(label_text.to_string()),
-        )
-        .child(
-            label()
-                .font_size(14.)
-                .color(t.text_secondary)
-                .text(value_text.to_string()),
-        )
 }

@@ -1,27 +1,21 @@
-use freya::prelude::*;
-use ipsea::settings::SettingKey;
-use system::{DisplayInfo, SystemBackend};
-use ui::*;
-use crate::pages::network::{fetch_network_info, NetworkInfo};
-use crate::state::*;
+use {
+    crate::{
+        pages::network::{NetworkInfo, fetch_network_info},
+        state::*,
+    },
+    freya::prelude::*,
+    ipsea::settings::SettingKey,
+    system::{DisplayInfo, SystemBackend},
+    ui::*,
+};
 
 pub fn grid2(children: impl IntoIterator<Item = impl IntoElement>) -> impl IntoElement {
     let items: Vec<Element> = children.into_iter().map(|c| c.into_element()).collect();
     responsive_view(720.0, move |compact| {
         if compact {
-            rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                .children(items.clone())
-                .content(Content::Flex)
+            rect().width(Size::fill()).vertical().spacing(GAP).children(items.clone()).content(Content::Flex)
         } else {
-            rect()
-                .width(Size::fill())
-                .horizontal()
-                .spacing(GAP)
-                .children(items.clone())
-                .content(Content::Flex)
+            rect().width(Size::fill()).horizontal().spacing(GAP).children(items.clone()).content(Content::Flex)
         }
     })
 }
@@ -47,8 +41,6 @@ impl Component for AppearanceDetailPage {
         let is_scroll_locked = scroll_lock.is_some();
         let icon_lock = store.lock_label(&SettingKey::IconSize);
         let is_icon_locked = icon_lock.is_some();
-
-
 
         responsive_view(1000.0, move |compact| {
             rect()
@@ -449,10 +441,7 @@ impl Component for AppearanceDetailPage {
 }
 
 /// Helper function returning AppearanceDetailPage Component
-pub fn appearance_detail_page(
-    theme_state: State<AppTheme>,
-    store: SettingsStore,
-) -> AppearanceDetailPage {
+pub fn appearance_detail_page(theme_state: State<AppTheme>, store: SettingsStore) -> AppearanceDetailPage {
     AppearanceDetailPage { theme_state, store }
 }
 
@@ -501,7 +490,8 @@ impl Component for WifiDetailPage {
                 ld.set(false);
                 let _ = tokio::task::spawn_blocking(|| {
                     let _ = std::process::Command::new("nmcli").args(["dev", "wifi", "rescan"]).output();
-                }).await;
+                })
+                .await;
                 tokio::time::sleep(std::time::Duration::from_millis(800)).await;
                 let updated = tokio::task::spawn_blocking(fetch_network_info).await.unwrap_or_default();
                 if !updated.available_networks.is_empty() {
@@ -532,161 +522,146 @@ impl Component for WifiDetailPage {
             .map(|n| n.security.clone())
             .unwrap_or_else(|| if wifi_on { "—".to_string() } else { "—".to_string() });
 
-        let modal_el = if let Some(target) = wifi_modal_target.read().clone() {
-            let s_target = target.clone();
-            let is_manual = target.is_manual;
-            let connecting = *wifi_connecting.read();
-            let err_opt = wifi_error.read().clone();
+        let modal_el =
+            if let Some(target) = wifi_modal_target.read().clone() {
+                let s_target = target.clone();
+                let is_manual = target.is_manual;
+                let connecting = *wifi_connecting.read();
+                let err_opt = wifi_error.read().clone();
 
-            rect()
-                .position(Position::new_global().top(0.).left(0.))
-                .width(Size::fill())
-                .height(Size::fill())
-                .background(Color::from_argb(140, 0, 0, 0))
-                .center()
-                .content(Content::Flex)
-                .child(
-                    rect()
-                        .width(Size::px(380.))
-                        .padding(20.)
-                        .corner_radius(16.)
-                        .background(t.bg_card)
-                        .border(Border::new().width(1.).fill(t.border_card))
-                        .spacing(14.)
-                        .child(
-                            rect()
-                                .horizontal()
-                                .main_align(Alignment::SpaceBetween)
-                                .cross_align(Alignment::Center)
-                                .width(Size::fill())
-                                .content(Content::Flex)
-                                .child(
-                                    label()
-                                        .font_size(16.)
-                                        .font_weight(FontWeight::BOLD)
-                                        .color(t.text_primary)
-                                        .text(if is_manual {
-                                            "Join Other Network".to_string()
-                                        } else {
-                                            format!("Join “{}”", target.ssid)
-                                        }),
-                                )
-                                .child(
-                                    rect()
-                                        .cursor(CursorIcon::Pointer)
-                                        .on_press({
-                                            let mut mt = wifi_modal_target;
-                                            move |_| mt.set(None)
-                                        })
-                                        .child(label().font_size(14.).color(t.text_dim).text("✕")),
-                                ),
-                        )
-                        .maybe(!is_manual, |el| {
-                            el.child(
+                rect()
+                    .position(Position::new_global().top(0.).left(0.))
+                    .width(Size::fill())
+                    .height(Size::fill())
+                    .background(Color::from_argb(140, 0, 0, 0))
+                    .center()
+                    .content(Content::Flex)
+                    .child(
+                        dialog_card(380.)
+                            .spacing(14.)
+                            .child(
                                 rect()
                                     .horizontal()
-                                    .spacing(8.)
-                                    .child(
+                                    .main_align(Alignment::SpaceBetween)
+                                    .cross_align(Alignment::Center)
+                                    .width(Size::fill())
+                                    .content(Content::Flex)
+                                    .child(label().font_size(16.).font_weight(FontWeight::BOLD).color(t.text).text(
+                                        if is_manual {
+                                            "Join other network".to_string()
+                                        } else {
+                                            format!("Join “{}”", target.ssid)
+                                        },
+                                    ))
+                                    .child({
+                                        let mut mt = wifi_modal_target;
+                                        small_close_button(move || mt.set(None))
+                                    }),
+                            )
+                            .maybe(!is_manual, |el| {
+                                el.child(
+                                    rect().horizontal().spacing(8.).child(
                                         label()
                                             .font_size(12.)
                                             .color(t.text_dim)
                                             .text(format!("Security: {} · Signal: {}%", target.security, target.signal)),
                                     ),
+                                )
+                            })
+                            .maybe(is_manual, |el| {
+                                el.child(
+                                    rect().vertical().spacing(6.).child(field_label("Network Name (SSID)")).child(
+                                        Input::new(custom_ssid).width(Size::fill()).placeholder("Enter network name"),
+                                    ),
+                                )
+                            })
+                            .child(
+                                rect().vertical().spacing(6.).child(field_label("Password")).child(
+                                    Input::new(wifi_password).width(Size::fill()).placeholder("Enter Wi-Fi password"),
+                                ),
                             )
-                        })
-                        .maybe(is_manual, |el| {
-                            el.child(
+                            .maybe_child(err_opt.map(|err| {
                                 rect()
-                                    .vertical()
-                                    .spacing(6.)
-                                    .child(field_label("Network Name (SSID)"))
-                                    .child(Input::new(custom_ssid).width(Size::fill()).placeholder("Enter network name")),
-                            )
-                        })
-                        .child(
-                            rect()
-                                .vertical()
-                                .spacing(6.)
-                                .child(field_label("Password"))
-                                .child(Input::new(wifi_password).width(Size::fill()).placeholder("Enter Wi-Fi password")),
-                        )
-                        .maybe_child(err_opt.map(|err| {
-                            rect()
-                                .padding((6., 10.))
-                                .corner_radius(6.)
-                                .background(Color::from_argb(35, 235, 80, 80))
-                                .child(label().font_size(12.).color(Color::from_rgb(235, 80, 80)).text(err))
-                        }))
-                        .child(
-                            rect()
-                                .horizontal()
-                                .spacing(10.)
-                                .main_align(Alignment::End)
-                                .content(Content::Flex)
-                                .child(secondary_button("Cancel", {
-                                    let mut mt = wifi_modal_target;
-                                    move || mt.set(None)
-                                }))
-                                .child(if connecting {
-                                    secondary_button("Connecting…", || {}).into_element()
-                                } else {
-                                    primary_button("Connect", {
-                                        let mt = wifi_modal_target;
-                                        let mut conn = wifi_connecting;
-                                        let mut err_st = wifi_error;
-                                        let ns = net_state;
-                                        let ld = loading;
-                                        let target_c = s_target.clone();
-                                        let cssid_st = custom_ssid;
-                                        let pwd_st = wifi_password;
-                                        move || {
-                                            conn.set(true);
-                                            err_st.set(None);
-                                            let final_ssid = if target_c.is_manual {
-                                                cssid_st.read().trim().to_string()
-                                            } else {
-                                                target_c.ssid.clone()
-                                            };
-                                            let pwd = pwd_st.read().trim().to_string();
-                                            let is_man = target_c.is_manual;
-                                            let mut mt = mt;
-                                            let mut conn = conn;
-                                            let mut err_st = err_st;
-                                            let mut ns = ns;
-                                            let mut ld = ld;
-                                            freya::prelude::spawn(async move {
-                                                let final_ssid_t = final_ssid.clone();
-                                                let pwd_opt = if pwd.is_empty() { None } else { Some(pwd) };
-                                                let res = tokio::task::spawn_blocking(move || {
-                                                    system::HyprlandBackend.connect_wifi_with_password(
-                                                        &final_ssid_t,
-                                                        pwd_opt.as_deref(),
-                                                        is_man,
-                                                    )
-                                                }).await.unwrap_or(Err("Task failed".to_string()));
-                                                match res {
-                                                    Ok(()) => {
-                                                        mt.set(None);
-                                                        conn.set(false);
-                                                        let updated = tokio::task::spawn_blocking(fetch_network_info).await.unwrap_or_default();
-                                                        ns.set(Some(updated));
-                                                        ld.set(false);
+                                    .padding((6., 10.))
+                                    .corner_radius(6.)
+                                    .background(Color::from_argb(35, 235, 80, 80))
+                                    .child(label().font_size(12.).color(Color::from_rgb(235, 80, 80)).text(err))
+                            }))
+                            .child(
+                                rect()
+                                    .horizontal()
+                                    .spacing(10.)
+                                    .main_align(Alignment::End)
+                                    .content(Content::Flex)
+                                    .child(secondary_button("Cancel", {
+                                        let mut mt = wifi_modal_target;
+                                        move || mt.set(None)
+                                    }))
+                                    .child(if connecting {
+                                        secondary_button("Connecting…", || {}).into_element()
+                                    } else {
+                                        primary_button("Connect", {
+                                            let mt = wifi_modal_target;
+                                            let mut conn = wifi_connecting;
+                                            let mut err_st = wifi_error;
+                                            let ns = net_state;
+                                            let ld = loading;
+                                            let target_c = s_target.clone();
+                                            let cssid_st = custom_ssid;
+                                            let pwd_st = wifi_password;
+                                            move || {
+                                                conn.set(true);
+                                                err_st.set(None);
+                                                let final_ssid = if target_c.is_manual {
+                                                    cssid_st.read().trim().to_string()
+                                                } else {
+                                                    target_c.ssid.clone()
+                                                };
+                                                let pwd = pwd_st.read().trim().to_string();
+                                                let is_man = target_c.is_manual;
+                                                let mut mt = mt;
+                                                let mut conn = conn;
+                                                let mut err_st = err_st;
+                                                let mut ns = ns;
+                                                let mut ld = ld;
+                                                freya::prelude::spawn(async move {
+                                                    let final_ssid_t = final_ssid.clone();
+                                                    let pwd_opt = if pwd.is_empty() { None } else { Some(pwd) };
+                                                    let res = tokio::task::spawn_blocking(move || {
+                                                        system::HyprlandBackend.connect_wifi_with_password(
+                                                            &final_ssid_t,
+                                                            pwd_opt.as_deref(),
+                                                            is_man,
+                                                        )
+                                                    })
+                                                    .await
+                                                    .unwrap_or(Err("Task failed".to_string()));
+                                                    match res {
+                                                        Ok(()) => {
+                                                            mt.set(None);
+                                                            conn.set(false);
+                                                            let updated = tokio::task::spawn_blocking(fetch_network_info)
+                                                                .await
+                                                                .unwrap_or_default();
+                                                            ns.set(Some(updated));
+                                                            ld.set(false);
+                                                        }
+                                                        Err(e) => {
+                                                            conn.set(false);
+                                                            err_st.set(Some(e));
+                                                        }
                                                     }
-                                                    Err(e) => {
-                                                        conn.set(false);
-                                                        err_st.set(Some(e));
-                                                    }
-                                                }
-                                            });
-                                        }
-                                    }).into_element()
-                                }),
-                        ),
-                )
-                .into_element()
-        } else {
-            rect().into_element()
-        };
+                                                });
+                                            }
+                                        })
+                                        .into_element()
+                                    }),
+                            ),
+                    )
+                    .into_element()
+            } else {
+                rect().into_element()
+            };
 
         rect()
             .width(Size::fill())
@@ -708,169 +683,168 @@ impl Component for WifiDetailPage {
                                         .cross_align(Alignment::Center)
                                         .spacing(8.)
                                         .maybe_child(wifi_lock.as_ref().map(|l| lock_badge(l)))
-                                        .child(
-                                            rect()
-                                                .opacity(if is_wifi_locked { 0.45 } else { 1.0 })
-                                                .child({
-                                                    let store = store;
-                                                    pill_switch(wifi_on, move |v| {
-                                                        if !is_wifi_locked {
-                                                            store.set(SettingKey::WifiEnabled, v);
-                                                        }
-                                                    })
-                                                }),
-                                        ),
+                                        .child(rect().opacity(if is_wifi_locked { 0.45 } else { 1.0 }).child({
+                                            let store = store;
+                                            pill_switch(wifi_on, move |v| {
+                                                if !is_wifi_locked {
+                                                    store.set(SettingKey::WifiEnabled, v);
+                                                }
+                                            })
+                                        })),
                                 ),
                             ))
                             .child(setting_row(
                                 active_label,
                                 active_sub,
                                 false,
-                                label().font_size(12.).color(t.accent).text(if wifi_on && net.active_ssid.is_some() { "Connected" } else { "" }),
-                            ))
-                            .child(setting_row("IP address", None::<String>, true, label().font_size(12.).color(t.text_dim).text(net.primary_ip.clone())))
-                            .child(setting_row("Security", None::<String>, true, label().font_size(12.).color(t.text_dim).text(sec_label))),
-                    )
-                    .child(
-                        tile()
-                            .child(tile_head(None, "Nearby networks", None::<String>))
-                            .child({
-                                let mut base = rect().width(Size::fill()).vertical();
-                                if *loading.read() {
-                                    base = base.child(tile_sub("Scanning for nearby networks…"));
-                                } else if net.available_networks.is_empty() {
-                                    base = base.child(tile_sub("No nearby networks found"));
+                                label().font_size(12.).color(t.accent).text(if wifi_on && net.active_ssid.is_some() {
+                                    "Connected"
                                 } else {
-                                    for nw in net.available_networks.iter().take(8) {
-                                        let ssid = nw.ssid.clone();
-                                        let is_conn = nw.connected || Some(&ssid) == net.active_ssid.as_ref();
-                                        let nw_clone = nw.clone();
+                                    ""
+                                }),
+                            ))
+                            .child(setting_row(
+                                "IP address",
+                                None::<String>,
+                                true,
+                                label().font_size(12.).color(t.text_dim).text(net.primary_ip.clone()),
+                            ))
+                            .child(setting_row(
+                                "Security",
+                                None::<String>,
+                                true,
+                                label().font_size(12.).color(t.text_dim).text(sec_label),
+                            )),
+                    )
+                    .child(tile().child(tile_head(None, "Nearby networks", None::<String>)).child({
+                        let mut base = rect().width(Size::fill()).vertical();
+                        if *loading.read() {
+                            base = base.child(tile_sub("Scanning for nearby networks…"));
+                        } else if net.available_networks.is_empty() {
+                            base = base.child(tile_sub("No nearby networks found"));
+                        } else {
+                            for nw in net.available_networks.iter().take(8) {
+                                let ssid = nw.ssid.clone();
+                                let is_conn = nw.connected || Some(&ssid) == net.active_ssid.as_ref();
+                                let nw_clone = nw.clone();
+                                let mut mt = wifi_modal_target;
+                                let mut wp = wifi_password;
+                                let mut we = wifi_error;
+                                let mut wc = wifi_connecting;
+                                base = base.child(setting_row(
+                                    ssid,
+                                    Some(format!("Signal {}% · {}", nw.signal, nw.security)),
+                                    false,
+                                    if is_conn {
+                                        status_chip("Connected", true, None).into_element()
+                                    } else {
+                                        secondary_button("Connect", move || {
+                                            if nw_clone.security.eq_ignore_ascii_case("Open") || nw_clone.security.is_empty()
+                                            {
+                                                let s = nw_clone.ssid.clone();
+                                                std::thread::spawn(move || {
+                                                    system::HyprlandBackend.connect_wifi(&s);
+                                                });
+                                            } else {
+                                                wp.set(String::new());
+                                                we.set(None);
+                                                wc.set(false);
+                                                mt.set(Some(WifiModalData {
+                                                    ssid: nw_clone.ssid.clone(),
+                                                    security: nw_clone.security.clone(),
+                                                    signal: nw_clone.signal,
+                                                    is_manual: false,
+                                                }));
+                                            }
+                                        })
+                                        .into_element()
+                                    },
+                                ));
+                            }
+                            base = base.child(
+                                rect()
+                                    .margin((8., 0., 0., 0.))
+                                    .horizontal()
+                                    .main_align(Alignment::End)
+                                    .content(Content::Flex)
+                                    .child(secondary_button("Join other network…", {
                                         let mut mt = wifi_modal_target;
+                                        let mut cs = custom_ssid;
                                         let mut wp = wifi_password;
                                         let mut we = wifi_error;
                                         let mut wc = wifi_connecting;
-                                        base = base.child(setting_row(
-                                            ssid,
-                                            Some(format!("Signal {}% · {}", nw.signal, nw.security)),
-                                            false,
-                                            if is_conn {
-                                                status_chip("Connected", true, None).into_element()
-                                            } else {
-                                                secondary_button("Connect", move || {
-                                                    if nw_clone.security.eq_ignore_ascii_case("Open") || nw_clone.security.is_empty() {
-                                                        let s = nw_clone.ssid.clone();
-                                                        std::thread::spawn(move || {
-                                                            system::HyprlandBackend.connect_wifi(&s);
-                                                        });
-                                                    } else {
-                                                        wp.set(String::new());
-                                                        we.set(None);
-                                                        wc.set(false);
-                                                        mt.set(Some(WifiModalData {
-                                                            ssid: nw_clone.ssid.clone(),
-                                                            security: nw_clone.security.clone(),
-                                                            signal: nw_clone.signal,
-                                                            is_manual: false,
-                                                        }));
-                                                    }
-                                                }).into_element()
-                                            },
-                                        ));
-                                    }
-                                    base = base.child(
-                                        rect()
-                                            .margin((8., 0., 0., 0.))
-                                            .horizontal()
-                                            .main_align(Alignment::End)
-                                            .content(Content::Flex)
-                                            .child(secondary_button("Join other network…", {
-                                                let mut mt = wifi_modal_target;
-                                                let mut cs = custom_ssid;
-                                                let mut wp = wifi_password;
-                                                let mut we = wifi_error;
-                                                let mut wc = wifi_connecting;
-                                                move || {
-                                                    cs.set(String::new());
-                                                    wp.set(String::new());
-                                                    we.set(None);
-                                                    wc.set(false);
-                                                    mt.set(Some(WifiModalData {
-                                                        ssid: String::new(),
-                                                        security: "WPA2/WPA3".to_string(),
-                                                        signal: 100,
-                                                        is_manual: true,
-                                                    }));
-                                                }
-                                            })),
-                                    );
-                                }
-                                base
-                            }),
-                    )
-                    .child(
-                        grid2([
-                            rect()
-                                .width(Size::flex(1.))
-                                .child({
-                                    let mut known = tile().child(tile_head(None, "Known networks", None::<String>));
-                                    if *loading.read() {
-                                        known = known.child(tile_sub("Scanning…"));
-                                    } else if net.known_networks.is_empty() {
-                                        known = known.child(tile_sub("No saved networks"));
-                                    } else {
-                                        for kn in net.known_networks.iter().take(5) {
-                                            let is_conn = Some(&kn.ssid) == net.active_ssid.as_ref();
-                                            known = known.child(setting_row(
-                                                kn.ssid.clone(),
-                                                Some(kn.security.clone()),
-                                                false,
-                                                if is_conn { status_chip("Connected", true, None).into_element() } else { status_chip("Saved", false, None).into_element() },
-                                            ));
+                                        move || {
+                                            cs.set(String::new());
+                                            wp.set(String::new());
+                                            we.set(None);
+                                            wc.set(false);
+                                            mt.set(Some(WifiModalData {
+                                                ssid: String::new(),
+                                                security: "WPA2/WPA3".to_string(),
+                                                signal: 100,
+                                                is_manual: true,
+                                            }));
                                         }
-                                    }
-                                    known
-                                }),
-                            rect()
-                                .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Preferences", None::<String>))
-                                    .child(setting_row_locked(
-                                        "Ask to join networks",
-                                        None::<String>,
+                                    })),
+                            );
+                        }
+                        base
+                    }))
+                    .child(grid2([
+                        rect().width(Size::flex(1.)).child({
+                            let mut known = tile().child(tile_head(None, "Known networks", None::<String>));
+                            if *loading.read() {
+                                known = known.child(tile_sub("Scanning…"));
+                            } else if net.known_networks.is_empty() {
+                                known = known.child(tile_sub("No saved networks"));
+                            } else {
+                                for kn in net.known_networks.iter().take(5) {
+                                    let is_conn = Some(&kn.ssid) == net.active_ssid.as_ref();
+                                    known = known.child(setting_row(
+                                        kn.ssid.clone(),
+                                        Some(kn.security.clone()),
                                         false,
-                                        store.lock_label(&SettingKey::WifiNetwork),
-                                        {
-                                            let store = store;
-                                            let is_locked = store.is_locked(&SettingKey::WifiNetwork);
-                                            let val = *store.ask_to_join.read();
-                                            pill_switch(val, move |v| {
-                                                if !is_locked {
-                                                    store.set(SettingKey::WifiNetwork, v);
-                                                }
-                                            })
+                                        if is_conn {
+                                            status_chip("Connected", true, None).into_element()
+                                        } else {
+                                            status_chip("Saved", false, None).into_element()
                                         },
-                                    ))
-                                    .child(setting_row(
-                                        "Limit IP address tracking",
-                                        None::<String>,
-                                        true,
-                                        {
-                                            let mut lt = store.limit_tracking;
-                                            pill_switch(*store.limit_tracking.read(), move |v| lt.set(v))
-                                        },
-                                    )),
-                            ),
-                    ]),
-                ),
+                                    ));
+                                }
+                            }
+                            known
+                        }),
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Preferences", None::<String>))
+                                .child(setting_row_locked(
+                                    "Ask to join networks",
+                                    None::<String>,
+                                    false,
+                                    store.lock_label(&SettingKey::WifiNetwork),
+                                    {
+                                        let store = store;
+                                        let is_locked = store.is_locked(&SettingKey::WifiNetwork);
+                                        let val = *store.ask_to_join.read();
+                                        pill_switch(val, move |v| {
+                                            if !is_locked {
+                                                store.set(SettingKey::WifiNetwork, v);
+                                            }
+                                        })
+                                    },
+                                ))
+                                .child(setting_row("Limit IP address tracking", None::<String>, true, {
+                                    let mut lt = store.limit_tracking;
+                                    pill_switch(*store.limit_tracking.read(), move |v| lt.set(v))
+                                })),
+                        ),
+                    ])),
             )
             .child(modal_el)
     }
 }
 
-pub fn wifi_detail_page(store: SettingsStore) -> WifiDetailPage {
-    WifiDetailPage { store }
-}
+pub fn wifi_detail_page(store: SettingsStore) -> WifiDetailPage { WifiDetailPage { store } }
 
 #[derive(PartialEq)]
 pub struct BluetoothDetailPage {
@@ -912,37 +886,51 @@ impl Component for BluetoothDetailPage {
                     let out = std::process::Command::new("bluetoothctl").args(["devices"]).output().ok();
                     if let Some(o) = out {
                         let s = String::from_utf8_lossy(&o.stdout).to_string();
-                        s.lines().filter_map(|line| {
-                            let parts: Vec<&str> = line.splitn(3, ' ').collect();
-                            if parts.len() >= 3 {
-                                let mac = parts[1].to_string();
-                                let raw_name = parts[2].trim().to_string();
-                                let clean = raw_name.replace([':', '-'], "");
-                                let is_mac_name = raw_name.is_empty() || (clean.len() == 12 && clean.chars().all(|c| c.is_ascii_hexdigit()));
-                                let name = if is_mac_name {
-                                    std::process::Command::new("bluetoothctl").args(["info", &mac]).output().ok().and_then(|info_o| {
-                                        let is = String::from_utf8_lossy(&info_o.stdout);
-                                        let mut alias = None;
-                                        let mut n = None;
-                                        for l in is.lines() {
-                                            let t = l.trim();
-                                            if let Some(rest) = t.strip_prefix("Alias:") { alias = Some(rest.trim().to_string()); }
-                                            if let Some(rest) = t.strip_prefix("Name:") { n = Some(rest.trim().to_string()); }
-                                        }
-                                        alias.or(n)
-                                    }).unwrap_or_else(|| format!("Device ({})", &mac[..mac.len().min(8)]))
+                        s.lines()
+                            .filter_map(|line| {
+                                let parts: Vec<&str> = line.splitn(3, ' ').collect();
+                                if parts.len() >= 3 {
+                                    let mac = parts[1].to_string();
+                                    let raw_name = parts[2].trim().to_string();
+                                    let clean = raw_name.replace([':', '-'], "");
+                                    let is_mac_name = raw_name.is_empty()
+                                        || (clean.len() == 12 && clean.chars().all(|c| c.is_ascii_hexdigit()));
+                                    let name = if is_mac_name {
+                                        std::process::Command::new("bluetoothctl")
+                                            .args(["info", &mac])
+                                            .output()
+                                            .ok()
+                                            .and_then(|info_o| {
+                                                let is = String::from_utf8_lossy(&info_o.stdout);
+                                                let mut alias = None;
+                                                let mut n = None;
+                                                for l in is.lines() {
+                                                    let t = l.trim();
+                                                    if let Some(rest) = t.strip_prefix("Alias:") {
+                                                        alias = Some(rest.trim().to_string());
+                                                    }
+                                                    if let Some(rest) = t.strip_prefix("Name:") {
+                                                        n = Some(rest.trim().to_string());
+                                                    }
+                                                }
+                                                alias.or(n)
+                                            })
+                                            .unwrap_or_else(|| format!("Device ({})", &mac[..mac.len().min(8)]))
+                                    } else {
+                                        raw_name
+                                    };
+                                    Some(system::BluetoothDevice { name, mac, connected: false })
                                 } else {
-                                    raw_name
-                                };
-                                Some(system::BluetoothDevice {
-                                    name,
-                                    mac,
-                                    connected: false,
-                                    })
-                            } else { None }
-                        }).collect::<Vec<_>>()
-                    } else { Vec::new() }
-                }).await.unwrap_or_default();
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
+                    }
+                })
+                .await
+                .unwrap_or_default();
                 let paired_macs: std::collections::HashSet<String> = paired.iter().map(|d| d.mac.clone()).collect();
                 let nearby_only: Vec<_> = all_known.into_iter().filter(|d| !paired_macs.contains(&d.mac)).collect();
                 dev.set(paired);
@@ -955,169 +943,151 @@ impl Component for BluetoothDetailPage {
         let nearby_devices = scan_nearby.read().clone();
         let is_loading = *loading.read();
 
-        let bt_modal_el = if let Some(target) = bt_modal_target.read().clone() {
-            let s_target = target.clone();
-            let is_manual = target.is_manual;
-            let pairing = *bt_pairing.read();
-            let err_opt = bt_error.read().clone();
+        let bt_modal_el =
+            if let Some(target) = bt_modal_target.read().clone() {
+                let s_target = target.clone();
+                let is_manual = target.is_manual;
+                let pairing = *bt_pairing.read();
+                let err_opt = bt_error.read().clone();
 
-            rect()
-                .position(Position::new_global().top(0.).left(0.))
-                .width(Size::fill())
-                .height(Size::fill())
-                .background(Color::from_argb(140, 0, 0, 0))
-                .center()
-                .content(Content::Flex)
-                .child(
-                    rect()
-                        .width(Size::px(380.))
-                        .padding(20.)
-                        .corner_radius(16.)
-                        .background(t.bg_card)
-                        .border(Border::new().width(1.).fill(t.border_card))
-                        .spacing(14.)
-                        .child(
-                            rect()
-                                .horizontal()
-                                .main_align(Alignment::SpaceBetween)
-                                .cross_align(Alignment::Center)
-                                .width(Size::fill())
-                                .content(Content::Flex)
-                                .child(
-                                    label()
-                                        .font_size(16.)
-                                        .font_weight(FontWeight::BOLD)
-                                        .color(t.text_primary)
-                                        .text(if is_manual {
-                                            "Pair Bluetooth Device".to_string()
-                                        } else {
-                                            format!("Pair “{}”", target.name)
-                                        }),
-                                )
-                                .child(
-                                    rect()
-                                        .cursor(CursorIcon::Pointer)
-                                        .on_press({
-                                            let mut mt = bt_modal_target;
-                                            move |_| mt.set(None)
-                                        })
-                                        .child(label().font_size(14.).color(t.text_dim).text("✕")),
-                                ),
-                        )
-                        .maybe(!is_manual, |el| {
-                            el.child(
+                rect()
+                    .position(Position::new_global().top(0.).left(0.))
+                    .width(Size::fill())
+                    .height(Size::fill())
+                    .background(Color::from_argb(140, 0, 0, 0))
+                    .center()
+                    .content(Content::Flex)
+                    .child(
+                        dialog_card(380.)
+                            .spacing(14.)
+                            .child(
                                 rect()
                                     .horizontal()
-                                    .spacing(8.)
-                                    .child(
-                                        label()
-                                            .font_size(12.)
-                                            .color(t.text_dim)
-                                            .text(format!("Device address: {}", target.mac)),
-                                    ),
+                                    .main_align(Alignment::SpaceBetween)
+                                    .cross_align(Alignment::Center)
+                                    .width(Size::fill())
+                                    .content(Content::Flex)
+                                    .child(label().font_size(16.).font_weight(FontWeight::BOLD).color(t.text).text(
+                                        if is_manual {
+                                            "Pair Bluetooth device".to_string()
+                                        } else {
+                                            format!("Pair “{}”", target.name)
+                                        },
+                                    ))
+                                    .child({
+                                        let mut mt = bt_modal_target;
+                                        small_close_button(move || mt.set(None))
+                                    }),
                             )
-                        })
-                        .maybe(is_manual, |el| {
-                            el.child(
+                            .maybe(!is_manual, |el| {
+                                el.child(rect().horizontal().spacing(8.).child(
+                                    label().font_size(12.).color(t.text_dim).text(format!("Device address: {}", target.mac)),
+                                ))
+                            })
+                            .maybe(is_manual, |el| {
+                                el.child(
+                                    rect()
+                                        .vertical()
+                                        .spacing(6.)
+                                        .child(field_label("Device MAC Address"))
+                                        .child(Input::new(custom_mac).width(Size::fill()).placeholder("XX:XX:XX:XX:XX:XX")),
+                                )
+                            })
+                            .child(rect().vertical().spacing(6.).child(field_label("PIN / Pairing Code")).child(
+                                Input::new(bt_pin).width(Size::fill()).placeholder("e.g. 0000, 1234, or leave empty"),
+                            ))
+                            .child(label().font_size(11.).color(t.text_dim).text(
+                                "Most modern Bluetooth devices (earphones, mice) do not require a PIN code. If requested, \
+                                 enter it above.",
+                            ))
+                            .maybe_child(err_opt.map(|err| {
                                 rect()
-                                    .vertical()
-                                    .spacing(6.)
-                                    .child(field_label("Device MAC Address"))
-                                    .child(Input::new(custom_mac).width(Size::fill()).placeholder("XX:XX:XX:XX:XX:XX")),
-                            )
-                        })
-                        .child(
-                            rect()
-                                .vertical()
-                                .spacing(6.)
-                                .child(field_label("PIN / Pairing Code"))
-                                .child(Input::new(bt_pin).width(Size::fill()).placeholder("e.g. 0000, 1234, or leave empty")),
-                        )
-                        .child(
-                            label()
-                                .font_size(11.)
-                                .color(t.text_dim)
-                                .text("Most modern Bluetooth devices (earphones, mice) do not require a PIN code. If requested, enter it above.")
-                        )
-                        .maybe_child(err_opt.map(|err| {
-                            rect()
-                                .padding((6., 10.))
-                                .corner_radius(6.)
-                                .background(Color::from_argb(35, 235, 80, 80))
-                                .child(label().font_size(12.).color(Color::from_rgb(235, 80, 80)).text(err))
-                        }))
-                        .child(
-                            rect()
-                                .horizontal()
-                                .spacing(10.)
-                                .main_align(Alignment::End)
-                                .content(Content::Flex)
-                                .child(secondary_button("Cancel", {
-                                    let mut mt = bt_modal_target;
-                                    move || mt.set(None)
-                                }))
-                                .child(if pairing {
-                                    secondary_button("Pairing…", || {}).into_element()
-                                } else {
-                                    primary_button("Pair Device", {
-                                        let mt = bt_modal_target;
-                                        let mut pr = bt_pairing;
-                                        let mut err_st = bt_error;
-                                        let dev_st = devices;
-                                        let near_st = scan_nearby;
-                                        let target_c = s_target.clone();
-                                        let cmac_st = custom_mac;
-                                        let pin_st = bt_pin;
-                                        move || {
-                                            pr.set(true);
-                                            err_st.set(None);
-                                            let mac = if target_c.is_manual {
-                                                cmac_st.read().trim().to_string()
-                                            } else {
-                                                target_c.mac.clone()
-                                            };
-                                            let pin_raw = pin_st.read().trim().to_string();
-                                            let pin_opt = if pin_raw.is_empty() { None } else { Some(pin_raw) };
-                                            let mut mt = mt;
-                                            let mut pr = pr;
-                                            let mut err_st = err_st;
-                                            let mut dev_st = dev_st;
-                                            let mut near_st = near_st;
-                                            freya::prelude::spawn(async move {
-                                                let mac_for_task = mac.clone();
-                                                let res = tokio::task::spawn_blocking(move || {
-                                                    system::HyprlandBackend.pair_bluetooth_device(
-                                                        &mac_for_task,
-                                                        pin_opt.as_deref(),
-                                                    )
-                                                }).await.unwrap_or(Err("Task failed".to_string()));
-                                                match res {
-                                                    Ok(()) => {
-                                                        mt.set(None);
-                                                        pr.set(false);
-                                                        let paired = tokio::task::spawn_blocking(|| {
-                                                            system::HyprlandBackend.get_paired_bluetooth_devices()
-                                                        }).await.unwrap_or_default();
-                                                        let paired_macs: std::collections::HashSet<String> = paired.iter().map(|d| d.mac.clone()).collect();
-                                                        let remaining_nearby: Vec<_> = near_st.read().clone().into_iter().filter(|d| !paired_macs.contains(&d.mac)).collect();
-                                                        dev_st.set(paired);
-                                                        near_st.set(remaining_nearby);
+                                    .padding((6., 10.))
+                                    .corner_radius(6.)
+                                    .background(Color::from_argb(35, 235, 80, 80))
+                                    .child(label().font_size(12.).color(Color::from_rgb(235, 80, 80)).text(err))
+                            }))
+                            .child(
+                                rect()
+                                    .horizontal()
+                                    .spacing(10.)
+                                    .main_align(Alignment::End)
+                                    .content(Content::Flex)
+                                    .child(secondary_button("Cancel", {
+                                        let mut mt = bt_modal_target;
+                                        move || mt.set(None)
+                                    }))
+                                    .child(if pairing {
+                                        secondary_button("Pairing…", || {}).into_element()
+                                    } else {
+                                        primary_button("Pair Device", {
+                                            let mt = bt_modal_target;
+                                            let mut pr = bt_pairing;
+                                            let mut err_st = bt_error;
+                                            let dev_st = devices;
+                                            let near_st = scan_nearby;
+                                            let target_c = s_target.clone();
+                                            let cmac_st = custom_mac;
+                                            let pin_st = bt_pin;
+                                            move || {
+                                                pr.set(true);
+                                                err_st.set(None);
+                                                let mac = if target_c.is_manual {
+                                                    cmac_st.read().trim().to_string()
+                                                } else {
+                                                    target_c.mac.clone()
+                                                };
+                                                let pin_raw = pin_st.read().trim().to_string();
+                                                let pin_opt = if pin_raw.is_empty() { None } else { Some(pin_raw) };
+                                                let mut mt = mt;
+                                                let mut pr = pr;
+                                                let mut err_st = err_st;
+                                                let mut dev_st = dev_st;
+                                                let mut near_st = near_st;
+                                                freya::prelude::spawn(async move {
+                                                    let mac_for_task = mac.clone();
+                                                    let res = tokio::task::spawn_blocking(move || {
+                                                        system::HyprlandBackend
+                                                            .pair_bluetooth_device(&mac_for_task, pin_opt.as_deref())
+                                                    })
+                                                    .await
+                                                    .unwrap_or(Err("Task failed".to_string()));
+                                                    match res {
+                                                        Ok(()) => {
+                                                            mt.set(None);
+                                                            pr.set(false);
+                                                            let paired = tokio::task::spawn_blocking(|| {
+                                                                system::HyprlandBackend.get_paired_bluetooth_devices()
+                                                            })
+                                                            .await
+                                                            .unwrap_or_default();
+                                                            let paired_macs: std::collections::HashSet<String> =
+                                                                paired.iter().map(|d| d.mac.clone()).collect();
+                                                            let remaining_nearby: Vec<_> = near_st
+                                                                .read()
+                                                                .clone()
+                                                                .into_iter()
+                                                                .filter(|d| !paired_macs.contains(&d.mac))
+                                                                .collect();
+                                                            dev_st.set(paired);
+                                                            near_st.set(remaining_nearby);
+                                                        }
+                                                        Err(e) => {
+                                                            pr.set(false);
+                                                            err_st.set(Some(e));
+                                                        }
                                                     }
-                                                    Err(e) => {
-                                                        pr.set(false);
-                                                        err_st.set(Some(e));
-                                                    }
-                                                }
-                                            });
-                                        }
-                                    }).into_element()
-                                }),
-                        ),
-                )
-                .into_element()
-        } else {
-            rect().into_element()
-        };
+                                                });
+                                            }
+                                        })
+                                        .into_element()
+                                    }),
+                            ),
+                    )
+                    .into_element()
+            } else {
+                rect().into_element()
+            };
 
         rect()
             .width(Size::fill())
@@ -1139,21 +1109,17 @@ impl Component for BluetoothDetailPage {
                                         .cross_align(Alignment::Center)
                                         .spacing(8.)
                                         .maybe_child(bt_lock.as_ref().map(|l| lock_badge(l)))
-                                        .child(
-                                            rect()
-                                                .opacity(if is_bt_locked { 0.45 } else { 1.0 })
-                                                .child({
-                                                    let store = store;
-                                                    pill_switch(bt_on, move |v| {
-                                                        if !is_bt_locked {
-                                                            store.set(SettingKey::BluetoothEnabled, v);
-                                                            std::thread::spawn(move || {
-                                                                system::HyprlandBackend.set_bluetooth_status(v);
-                                                            });
-                                                        }
-                                                    })
-                                                }),
-                                        ),
+                                        .child(rect().opacity(if is_bt_locked { 0.45 } else { 1.0 }).child({
+                                            let store = store;
+                                            pill_switch(bt_on, move |v| {
+                                                if !is_bt_locked {
+                                                    store.set(SettingKey::BluetoothEnabled, v);
+                                                    std::thread::spawn(move || {
+                                                        system::HyprlandBackend.set_bluetooth_status(v);
+                                                    });
+                                                }
+                                            })
+                                        })),
                                 ),
                             ))
                             .child(setting_row("Discoverable", None::<String>, false, {
@@ -1166,126 +1132,124 @@ impl Component for BluetoothDetailPage {
                                 "Turn on Bluetooth to connect to devices"
                             })),
                     )
-                    .child(
-                        grid2([
-                            rect().width(Size::flex(1.)).child({
-                                let mut base = tile().child(tile_head(None, "My devices", None::<String>));
-                                if is_loading {
-                                    base = base.child(tile_sub("Loading paired devices…"));
-                                } else if paired.is_empty() {
-                                    base = base.child(tile_sub("No paired devices — scanning…"));
-                                } else {
-                                    for dev in paired.iter().take(6) {
-                                        let mac = dev.mac.clone();
-                                        let name = dev.name.clone();
-                                        let is_conn = dev.connected;
-                                        let subtitle = if is_conn {
-                                            format!("Connected · {}", mac)
-                                        } else {
-                                            mac.clone()
-                                        };
-                                        let mac_for_action = mac.clone();
-                                        base = base.child(
-                                            rect()
-                                                .width(Size::fill())
-                                                .horizontal()
-                                                .cross_align(Alignment::Center)
-                                                .main_align(Alignment::SpaceBetween)
-                                                .content(Content::Flex)
-                                                .padding((8., 12.))
-                                                .margin((2., 0.))
-                                                .corner_radius(8.)
-                                                .cursor(CursorIcon::Pointer)
-                                                .background(t.bg_card)
-                                                .border(Border::new().width(1.).fill(t.border))
-                                                .on_press(move |_| {
-                                                    let m = mac_for_action.clone();
-                                                    let c = is_conn;
-                                                    std::thread::spawn(move || {
-                                                        if c {
-                                                            system::HyprlandBackend.disconnect_bluetooth_device(&m);
-                                                        } else {
-                                                            system::HyprlandBackend.connect_bluetooth_device(&m);
-                                                        }
-                                                    });
-                                                })
-                                                .child(
-                                                    rect().vertical().spacing(2.)
-                                                        .child(label().font_size(12.).color(t.text).text(name))
-                                                        .child(label().font_size(10.).color(if is_conn { t.accent } else { t.text_dim }).text(subtitle))
-                                                )
-                                        );
-                                    }
-                                }
-                                base
-                            }),
-                            rect().width(Size::flex(1.)).child({
-                                let mut base = tile().child(tile_head(None, "Nearby", None::<String>));
-                                if is_loading {
-                                    base = base.child(tile_sub("Scanning…"));
-                                } else if nearby_devices.is_empty() {
-                                    base = base.child(tile_sub("No nearby devices found — scanning…"));
-                                } else {
-                                    for dev in nearby_devices.iter().take(5) {
-                                        let mac = dev.mac.clone();
-                                        let name = dev.name.clone();
-                                        let mac_c = mac.clone();
-                                        let name_c = name.clone();
-                                        base = base.child(setting_row(
-                                            name,
-                                            Some(mac),
-                                            false,
-                                            secondary_button("Pair", {
-                                                let mut bmt = bt_modal_target;
-                                                let mut bpin = bt_pin;
-                                                let mut berr = bt_error;
-                                                let dev_name = name_c.clone();
-                                                let dev_mac = mac_c.clone();
-                                                move || {
-                                                    bpin.set(String::new());
-                                                    berr.set(None);
-                                                    bmt.set(Some(BtModalData {
-                                                        name: dev_name.clone(),
-                                                        mac: dev_mac.clone(),
-                                                        is_manual: false,
-                                                    }));
-                                                }
-                                            }),
-                                        ));
-                                    }
+                    .child(grid2([
+                        rect().width(Size::flex(1.)).child({
+                            let mut base = tile().child(tile_head(None, "My devices", None::<String>));
+                            if is_loading {
+                                base = base.child(tile_sub("Loading paired devices…"));
+                            } else if paired.is_empty() {
+                                base = base.child(tile_sub("No paired devices — scanning…"));
+                            } else {
+                                for dev in paired.iter().take(6) {
+                                    let mac = dev.mac.clone();
+                                    let name = dev.name.clone();
+                                    let is_conn = dev.connected;
+                                    let subtitle = if is_conn { format!("Connected · {}", mac) } else { mac.clone() };
+                                    let mac_for_action = mac.clone();
                                     base = base.child(
                                         rect()
-                                            .margin((10., 0., 0., 0.))
-                                            .child(ghost_button("Pair device by address…", {
-                                                let mut bmt = bt_modal_target;
-                                                let mut bpin = bt_pin;
-                                                let mut berr = bt_error;
-                                                let mut cmac = custom_mac;
-                                                move || {
-                                                    bpin.set(String::new());
-                                                    berr.set(None);
-                                                    cmac.set(String::new());
-                                                    bmt.set(Some(BtModalData {
-                                                        name: "Device".to_string(),
-                                                        mac: String::new(),
-                                                        is_manual: true,
-                                                    }));
-                                                }
-                                            }))
+                                            .width(Size::fill())
+                                            .horizontal()
+                                            .cross_align(Alignment::Center)
+                                            .main_align(Alignment::SpaceBetween)
+                                            .content(Content::Flex)
+                                            .padding((8., 12.))
+                                            .margin((2., 0.))
+                                            .corner_radius(8.)
+                                            .cursor(CursorIcon::Pointer)
+                                            .background(t.panel)
+                                            .border(Border::new().width(1.).fill(t.border))
+                                            .on_press(move |_| {
+                                                let m = mac_for_action.clone();
+                                                let c = is_conn;
+                                                std::thread::spawn(move || {
+                                                    if c {
+                                                        system::HyprlandBackend.disconnect_bluetooth_device(&m);
+                                                    } else {
+                                                        system::HyprlandBackend.connect_bluetooth_device(&m);
+                                                    }
+                                                });
+                                            })
+                                            .child(
+                                                rect()
+                                                    .vertical()
+                                                    .spacing(2.)
+                                                    .child(label().font_size(12.).color(t.text).text(name))
+                                                    .child(
+                                                        label()
+                                                            .font_size(10.)
+                                                            .color(if is_conn { t.accent } else { t.text_dim })
+                                                            .text(subtitle),
+                                                    ),
+                                            ),
                                     );
                                 }
-                                base
-                            }),
-                        ]),
-                    ),
+                            }
+                            base
+                        }),
+                        rect().width(Size::flex(1.)).child({
+                            let mut base = tile().child(tile_head(None, "Nearby", None::<String>));
+                            if is_loading {
+                                base = base.child(tile_sub("Scanning…"));
+                            } else if nearby_devices.is_empty() {
+                                base = base.child(tile_sub("No nearby devices found — scanning…"));
+                            } else {
+                                for dev in nearby_devices.iter().take(5) {
+                                    let mac = dev.mac.clone();
+                                    let name = dev.name.clone();
+                                    let mac_c = mac.clone();
+                                    let name_c = name.clone();
+                                    base = base.child(setting_row(
+                                        name,
+                                        Some(mac),
+                                        false,
+                                        secondary_button("Pair", {
+                                            let mut bmt = bt_modal_target;
+                                            let mut bpin = bt_pin;
+                                            let mut berr = bt_error;
+                                            let dev_name = name_c.clone();
+                                            let dev_mac = mac_c.clone();
+                                            move || {
+                                                bpin.set(String::new());
+                                                berr.set(None);
+                                                bmt.set(Some(BtModalData {
+                                                    name: dev_name.clone(),
+                                                    mac: dev_mac.clone(),
+                                                    is_manual: false,
+                                                }));
+                                            }
+                                        }),
+                                    ));
+                                }
+                                base = base.child(rect().margin((10., 0., 0., 0.)).child(ghost_button(
+                                    "Pair device by address…",
+                                    {
+                                        let mut bmt = bt_modal_target;
+                                        let mut bpin = bt_pin;
+                                        let mut berr = bt_error;
+                                        let mut cmac = custom_mac;
+                                        move || {
+                                            bpin.set(String::new());
+                                            berr.set(None);
+                                            cmac.set(String::new());
+                                            bmt.set(Some(BtModalData {
+                                                name: "Device".to_string(),
+                                                mac: String::new(),
+                                                is_manual: true,
+                                            }));
+                                        }
+                                    },
+                                )));
+                            }
+                            base
+                        }),
+                    ])),
             )
             .child(bt_modal_el)
     }
 }
 
-pub fn bluetooth_detail_page(store: SettingsStore) -> BluetoothDetailPage {
-    BluetoothDetailPage { store }
-}
+pub fn bluetooth_detail_page(store: SettingsStore) -> BluetoothDetailPage { BluetoothDetailPage { store } }
 
 #[derive(PartialEq)]
 pub struct DisplayDetailPage {
@@ -1301,14 +1265,12 @@ impl Component for DisplayDetailPage {
         let dragged_name: State<Option<String>> = use_state(|| None);
         let order_status: State<Option<Result<String, String>>> = use_state(|| None);
         let identify_active: State<bool> = use_state(|| false);
-        let position_offsets: State<std::collections::HashMap<String, (i32,i32)>> = use_state(Default::default);
+        let position_offsets: State<std::collections::HashMap<String, (i32, i32)>> = use_state(Default::default);
         let local_color_temp: State<f64> = use_state(|| *store.color_temp.read());
-        let ct_gen: State<std::sync::Arc<std::sync::atomic::AtomicU64>> = use_state(|| {
-            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0))
-        });
-        let ct_last_apply_ms: State<std::sync::Arc<std::sync::atomic::AtomicU64>> = use_state(|| {
-            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0))
-        });
+        let ct_gen: State<std::sync::Arc<std::sync::atomic::AtomicU64>> =
+            use_state(|| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
+        let ct_last_apply_ms: State<std::sync::Arc<std::sync::atomic::AtomicU64>> =
+            use_state(|| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
         let t = use_app_theme();
 
         let br_lock = store.lock_label(&SettingKey::DisplayBrightness);
@@ -1335,10 +1297,8 @@ impl Component for DisplayDetailPage {
             }
         };
 
-        let selected_display: Option<DisplayInfo> = displays_list
-            .iter()
-            .find(|d| Some(&d.name) == cur_selected_name.as_ref())
-            .cloned();
+        let selected_display: Option<DisplayInfo> =
+            displays_list.iter().find(|d| Some(&d.name) == cur_selected_name.as_ref()).cloned();
 
         let status_chip_text: Option<Element> = match &*order_status.read() {
             Some(Ok(msg)) => Some(status_chip(msg.clone(), false, None).into_element()),
@@ -1360,11 +1320,9 @@ impl Component for DisplayDetailPage {
                 .on_press(move |_| {
                     status.set(None);
                     freya::prelude::spawn(async move {
-                        let d = tokio::task::spawn_blocking(move || {
-                            system::HyprlandBackend.get_displays()
-                        })
-                        .await
-                        .unwrap_or_default();
+                        let d = tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays())
+                            .await
+                            .unwrap_or_default();
                         ds.set(d);
                     });
                 })
@@ -1385,8 +1343,11 @@ impl Component for DisplayDetailPage {
                     let mut s = status;
                     freya::prelude::spawn(async move {
                         let _ = tokio::task::spawn_blocking(|| {
-                            let _ = std::process::Command::new("hyprctl").args(["dispatch", "exec", "notify-send 'Display Identify' 'Overlay shown'"]).output();
-                        }).await;
+                            let _ = std::process::Command::new("hyprctl")
+                                .args(["dispatch", "exec", "notify-send 'Display Identify' 'Overlay shown'"])
+                                .output();
+                        })
+                        .await;
                         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                         a.set(false);
                         s.set(Some(Ok("Identify finished".to_string())));
@@ -1396,12 +1357,8 @@ impl Component for DisplayDetailPage {
         };
         let header_right: Option<Element> = {
             let lock = res_lock.clone().map(|l| lock_badge(l).into_element());
-            let mut right_row = rect()
-                .horizontal()
-                .cross_align(Alignment::Center)
-                .spacing(8.)
-                .child(refresh_btn)
-                .child(identify_btn);
+            let mut right_row =
+                rect().horizontal().cross_align(Alignment::Center).spacing(8.).child(refresh_btn).child(identify_btn);
             if let Some(l) = lock {
                 right_row = right_row.child(l);
             }
@@ -1446,10 +1403,12 @@ impl Component for DisplayDetailPage {
                             let (ox, oy) = offsets.get(&d.name).cloned().unwrap_or((d.x, d.y));
                             let (raw_w, raw_h) = system::parse_display_dimensions(&d.resolution);
                             let sc: f64 = d.scale.parse().unwrap_or(1.0);
-                            let sc = if sc <= 0.0 {1.0} else {sc};
+                            let sc = if sc <= 0.0 { 1.0 } else { sc };
                             let mut lw = (raw_w as f64 / sc).round() as i32;
                             let mut lh = (raw_h as f64 / sc).round() as i32;
-                            if d.transform == 1 || d.transform == 3 { std::mem::swap(&mut lw, &mut lh); }
+                            if d.transform == 1 || d.transform == 3 {
+                                std::mem::swap(&mut lw, &mut lh);
+                            }
                             DisplayMockItem {
                                 name: d.name.clone(),
                                 description: d.description.clone(),
@@ -1504,18 +1463,32 @@ impl Component for DisplayDetailPage {
                             let offs = offs_state.read().clone();
                             let has_free = !offs.is_empty();
                             if has_free {
-                                let positions: Vec<(String,i32,i32)> = displays_state.read().iter().map(|d| {
-                                    if let Some((nx,ny)) = offs.get(&d.name) { (d.name.clone(), *nx, *ny) } else { (d.name.clone(), d.x, d.y) }
-                                }).collect();
+                                let positions: Vec<(String, i32, i32)> = displays_state
+                                    .read()
+                                    .iter()
+                                    .map(|d| {
+                                        if let Some((nx, ny)) = offs.get(&d.name) {
+                                            (d.name.clone(), *nx, *ny)
+                                        } else {
+                                            (d.name.clone(), d.x, d.y)
+                                        }
+                                    })
+                                    .collect();
                                 status_state.set(None);
                                 freya::prelude::spawn(async move {
                                     let res = tokio::task::spawn_blocking(move || {
                                         system::HyprlandBackend.set_display_positions(&positions)
-                                    }).await;
+                                    })
+                                    .await;
                                     match res {
                                         Ok(Ok(())) => {
-                                            let updated = tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays()).await.unwrap_or_default();
-                                            if !updated.is_empty() { displays_state.set(updated); }
+                                            let updated =
+                                                tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays())
+                                                    .await
+                                                    .unwrap_or_default();
+                                            if !updated.is_empty() {
+                                                displays_state.set(updated);
+                                            }
                                             offs_state.set(Default::default());
                                             status_state.set(Some(Ok("Positions saved".to_string())));
                                         }
@@ -1529,11 +1502,17 @@ impl Component for DisplayDetailPage {
                                 freya::prelude::spawn(async move {
                                     let res = tokio::task::spawn_blocking(move || {
                                         system::HyprlandBackend.set_display_order(&names)
-                                    }).await;
+                                    })
+                                    .await;
                                     match res {
                                         Ok(Ok(())) => {
-                                            let updated = tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays()).await.unwrap_or_default();
-                                            if !updated.is_empty() { displays_state.set(updated); }
+                                            let updated =
+                                                tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays())
+                                                    .await
+                                                    .unwrap_or_default();
+                                            if !updated.is_empty() {
+                                                displays_state.set(updated);
+                                            }
                                             status_state.set(Some(Ok("Arrangement saved".to_string())));
                                         }
                                         Ok(Err(e)) => status_state.set(Some(Err(e))),
@@ -1547,46 +1526,67 @@ impl Component for DisplayDetailPage {
                     let on_position = {
                         let mut offs = position_offsets;
                         let mut displays_state = displays;
-                        EventHandler::new(move |(name, nx, ny): (String,i32,i32)| {
+                        EventHandler::new(move |(name, nx, ny): (String, i32, i32)| {
                             let list_snapshot = displays_state.read().clone();
-                            let self_info = list_snapshot.iter().find(|d| d.name==name);
+                            let self_info = list_snapshot.iter().find(|d| d.name == name);
                             let (sw, sh) = if let Some(d) = self_info {
                                 let (rw, rh) = system::parse_display_dimensions(&d.resolution);
                                 let sc: f64 = d.scale.parse().unwrap_or(1.0);
-                                let sc = if sc <= 0.0 {1.0} else {sc};
+                                let sc = if sc <= 0.0 { 1.0 } else { sc };
                                 let mut w = (rw as f64 / sc).round() as i32;
                                 let mut h = (rh as f64 / sc).round() as i32;
-                                if d.transform==1||d.transform==3 { std::mem::swap(&mut w, &mut h); }
+                                if d.transform == 1 || d.transform == 3 {
+                                    std::mem::swap(&mut w, &mut h);
+                                }
                                 (w, h)
-                            } else {(1920,1080)};
+                            } else {
+                                (1920, 1080)
+                            };
                             let (mut snap_x, mut snap_y) = (nx, ny);
                             if list_snapshot.len() > 1 {
-                                let mut best: Option<(i32,i32,i32)> = None;
+                                let mut best: Option<(i32, i32, i32)> = None;
                                 for d in &list_snapshot {
-                                    if d.name == name { continue; }
+                                    if d.name == name {
+                                        continue;
+                                    }
                                     let (ox, oy) = (d.x, d.y);
                                     let (rw, rh) = system::parse_display_dimensions(&d.resolution);
                                     let sc: f64 = d.scale.parse().unwrap_or(1.0);
-                                    let sc = if sc <= 0.0 {1.0} else {sc};
+                                    let sc = if sc <= 0.0 { 1.0 } else { sc };
                                     let mut ow = (rw as f64 / sc).round() as i32;
                                     let mut oh = (rh as f64 / sc).round() as i32;
-                                    if d.transform==1||d.transform==3 { std::mem::swap(&mut ow, &mut oh); }
-                                    for (cx, cy) in [(ox+ow, oy), (ox - sw, oy), (ox, oy+oh), (ox, oy - sh)] {
+                                    if d.transform == 1 || d.transform == 3 {
+                                        std::mem::swap(&mut ow, &mut oh);
+                                    }
+                                    for (cx, cy) in [(ox + ow, oy), (ox - sw, oy), (ox, oy + oh), (ox, oy - sh)] {
                                         let dx = nx - cx;
                                         let dy = ny - cy;
-                                        let dist = dx*dx + dy*dy;
-                                        if best.is_none() || dist < best.unwrap().0 { best = Some((dist, cx, cy)); }
+                                        let dist = dx * dx + dy * dy;
+                                        if best.is_none() || dist < best.unwrap().0 {
+                                            best = Some((dist, cx, cy));
+                                        }
                                     }
                                 }
-                                if let Some((_, bx, by)) = best { snap_x = bx; snap_y = by; }
-                            } else { snap_x = 0; snap_y = 0; }
+                                if let Some((_, bx, by)) = best {
+                                    snap_x = bx;
+                                    snap_y = by;
+                                }
+                            } else {
+                                snap_x = 0;
+                                snap_y = 0;
+                            }
                             snap_x = snap_x.clamp(-3000, 3000);
                             snap_y = snap_y.clamp(-2000, 2000);
                             let mut map = offs.read().clone();
                             map.insert(name.clone(), (snap_x, snap_y));
                             offs.set(map.clone());
                             let mut list = displays_state.read().clone();
-                            for d in list.iter_mut() { if d.name == name { d.x = snap_x; d.y = snap_y; } }
+                            for d in list.iter_mut() {
+                                if d.name == name {
+                                    d.x = snap_x;
+                                    d.y = snap_y;
+                                }
+                            }
                             displays_state.set(list);
                         })
                     };
@@ -1630,21 +1630,13 @@ impl Component for DisplayDetailPage {
                 }
             }
             if distinct_resolutions.is_empty() {
-                distinct_resolutions = vec![
-                    "1920x1080".to_string(),
-                    "1600x900".to_string(),
-                    "1280x1024".to_string(),
-                    "1280x720".to_string(),
-                ];
+                distinct_resolutions =
+                    vec!["1920x1080".to_string(), "1600x900".to_string(), "1280x1024".to_string(), "1280x720".to_string()];
             }
             let top_resolutions: Vec<String> = distinct_resolutions.into_iter().take(5).collect();
 
-            let rotation_items = vec![
-                ("Standard (0°)", 0u8),
-                ("90° Portrait", 1u8),
-                ("180° Inverted", 2u8),
-                ("270° Portrait", 3u8),
-            ];
+            let rotation_items =
+                vec![("Standard (0°)", 0u8), ("90° Portrait", 1u8), ("180° Inverted", 2u8), ("270° Portrait", 3u8)];
             let cur_transform = selected.transform;
 
             let rotation_control = {
@@ -1653,47 +1645,37 @@ impl Component for DisplayDetailPage {
                 let mut sel = selected_name;
                 let sel_n = sel_name.clone();
                 let locked = is_res_locked;
-                segmented_control(
-                    rotation_items,
-                    cur_transform,
-                    move |new_tf: u8| {
-                        if locked {
-                            return;
-                        }
-                        status_state.set(None);
-                        let name = sel_n.clone();
-                        sel.set(Some(name.clone()));
-                        freya::prelude::spawn(async move {
-                            let res = tokio::task::spawn_blocking(move || {
-                                system::HyprlandBackend.set_display_config(&name, None, Some(new_tf))
-                            })
-                            .await;
-                            match res {
-                                Ok(Ok(())) => {
-                                    let updated = tokio::task::spawn_blocking(move || {
-                                        system::HyprlandBackend.get_displays()
-                                    })
+                segmented_control(rotation_items, cur_transform, move |new_tf: u8| {
+                    if locked {
+                        return;
+                    }
+                    status_state.set(None);
+                    let name = sel_n.clone();
+                    sel.set(Some(name.clone()));
+                    freya::prelude::spawn(async move {
+                        let res = tokio::task::spawn_blocking(move || {
+                            system::HyprlandBackend.set_display_config(&name, None, Some(new_tf))
+                        })
+                        .await;
+                        match res {
+                            Ok(Ok(())) => {
+                                let updated = tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays())
                                     .await
                                     .unwrap_or_default();
-                                    if !updated.is_empty() {
-                                        ds.set(updated);
-                                    }
-                                    status_state.set(Some(Ok("Rotation applied".to_string())));
+                                if !updated.is_empty() {
+                                    ds.set(updated);
                                 }
-                                Ok(Err(e)) => status_state.set(Some(Err(e))),
-                                Err(e) => {
-                                    status_state.set(Some(Err(format!("join error: {e}"))))
-                                }
+                                status_state.set(Some(Ok("Rotation applied".to_string())));
                             }
-                        });
-                    },
-                )
+                            Ok(Err(e)) => status_state.set(Some(Err(e))),
+                            Err(e) => status_state.set(Some(Err(format!("join error: {e}")))),
+                        }
+                    });
+                })
             };
 
-            let res_items: Vec<(String, String)> = top_resolutions
-                .iter()
-                .map(|r| (r.replace('x', " × "), r.clone()))
-                .collect();
+            let res_items: Vec<(String, String)> =
+                top_resolutions.iter().map(|r| (r.replace('x', " × "), r.clone())).collect();
             let cur_res_choice = sel_res.clone();
 
             let resolution_control = {
@@ -1703,63 +1685,45 @@ impl Component for DisplayDetailPage {
                 let sel_n = sel_name.clone();
                 let locked = is_res_locked;
                 let modes = selected.available_modes.clone();
-                segmented_control_dynamic(
-                    res_items,
-                    cur_res_choice,
-                    move |chosen_res: String| {
-                        if locked {
-                            return;
-                        }
-                        status_state.set(None);
-                        let name = sel_n.clone();
-                        sel.set(Some(name.clone()));
-                        let target_mode = modes
-                            .iter()
-                            .find(|m| m.starts_with(&chosen_res))
-                            .cloned()
-                            .unwrap_or_else(|| chosen_res.clone());
+                segmented_control_dynamic(res_items, cur_res_choice, move |chosen_res: String| {
+                    if locked {
+                        return;
+                    }
+                    status_state.set(None);
+                    let name = sel_n.clone();
+                    sel.set(Some(name.clone()));
+                    let target_mode =
+                        modes.iter().find(|m| m.starts_with(&chosen_res)).cloned().unwrap_or_else(|| chosen_res.clone());
 
-                        freya::prelude::spawn(async move {
-                            let res = tokio::task::spawn_blocking(move || {
-                                system::HyprlandBackend.set_display_config(&name, Some(&target_mode), None)
-                            })
-                            .await;
-                            match res {
-                                Ok(Ok(())) => {
-                                    let updated = tokio::task::spawn_blocking(move || {
-                                        system::HyprlandBackend.get_displays()
-                                    })
+                    freya::prelude::spawn(async move {
+                        let res = tokio::task::spawn_blocking(move || {
+                            system::HyprlandBackend.set_display_config(&name, Some(&target_mode), None)
+                        })
+                        .await;
+                        match res {
+                            Ok(Ok(())) => {
+                                let updated = tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays())
                                     .await
                                     .unwrap_or_default();
-                                    if !updated.is_empty() {
-                                        ds.set(updated);
-                                    }
-                                    status_state.set(Some(Ok("Resolution applied".to_string())));
+                                if !updated.is_empty() {
+                                    ds.set(updated);
                                 }
-                                Ok(Err(e)) => status_state.set(Some(Err(e))),
-                                Err(e) => {
-                                    status_state.set(Some(Err(format!("join error: {e}"))))
-                                }
+                                status_state.set(Some(Ok("Resolution applied".to_string())));
                             }
-                        });
-                    },
-                )
+                            Ok(Err(e)) => status_state.set(Some(Err(e))),
+                            Err(e) => status_state.set(Some(Err(format!("join error: {e}")))),
+                        }
+                    });
+                })
             };
 
             tile()
-                .child(tile_head(
-                    None,
-                    format!("Display Settings — {sel_desc}"),
-                    res_lock.as_ref().map(|l| lock_badge(l)),
-                ))
+                .child(tile_head(None, format!("Display Settings — {sel_desc}"), res_lock.as_ref().map(|l| lock_badge(l))))
                 .child(setting_row(
                     "Current mode",
                     None::<String>,
                     false,
-                    label()
-                        .font_size(12.)
-                        .color(t.text_dim)
-                        .text(format!("{sel_res} @ {sel_hz}")),
+                    label().font_size(12.).color(t.text_dim).text(format!("{sel_res} @ {sel_hz}")),
                 ))
                 .child(
                     rect()
@@ -1769,11 +1733,7 @@ impl Component for DisplayDetailPage {
                         .spacing(8.)
                         .child(field_label("Resolution")),
                 )
-                .child(
-                    rect()
-                        .opacity(if is_res_locked { 0.45 } else { 1.0 })
-                        .child(resolution_control),
-                )
+                .child(rect().opacity(if is_res_locked { 0.45 } else { 1.0 }).child(resolution_control))
                 .child(
                     rect()
                         .margin((16., 0., 4., 0.))
@@ -1782,11 +1742,7 @@ impl Component for DisplayDetailPage {
                         .spacing(8.)
                         .child(field_label("Orientation / Rotation")),
                 )
-                .child(
-                    rect()
-                        .opacity(if is_res_locked { 0.45 } else { 1.0 })
-                        .child(rotation_control),
-                )
+                .child(rect().opacity(if is_res_locked { 0.45 } else { 1.0 }).child(rotation_control))
                 .into_element()
         } else {
             rect().into_element()
@@ -1811,38 +1767,24 @@ impl Component for DisplayDetailPage {
                         has_backlight.then(|| {
                             let opacity = if is_br_locked { 0.45 } else { 1.0 };
                             tile()
-                                .child(tile_head(
-                                    None,
-                                    "Brightness",
-                                    br_lock.as_ref().map(|l| lock_badge(l)),
-                                ))
-                                .child(
-                                    rect()
-                                        .opacity(opacity)
-                                        .child({
-                                            let store = store;
-                                            slider_row(Some(SUN), *store.brightness.read(), move |v| {
-                                                if !is_br_locked {
-                                                    store.set(SettingKey::DisplayBrightness, v);
-                                                    std::thread::spawn(move || system::HyprlandBackend.set_brightness(v as u32));
-                                                }
-                                            })
-                                        }),
-                                )
-                                .child(setting_row_locked(
-                                    "Auto-brightness",
-                                    None::<String>,
-                                    false,
-                                    auto_br_lock,
-                                    {
-                                        let store = store;
-                                        pill_switch(*store.auto_brightness.read(), move |v| {
-                                            if !is_auto_br_locked {
-                                                store.set(SettingKey::DisplayAutoBrightness, v);
-                                            }
-                                        })
-                                    },
-                                ))
+                                .child(tile_head(None, "Brightness", br_lock.as_ref().map(|l| lock_badge(l))))
+                                .child(rect().opacity(opacity).child({
+                                    let store = store;
+                                    slider_row(Some(SUN), *store.brightness.read(), move |v| {
+                                        if !is_br_locked {
+                                            store.set(SettingKey::DisplayBrightness, v);
+                                            std::thread::spawn(move || system::HyprlandBackend.set_brightness(v as u32));
+                                        }
+                                    })
+                                }))
+                                .child(setting_row_locked("Auto-brightness", None::<String>, false, auto_br_lock, {
+                                    let store = store;
+                                    pill_switch(*store.auto_brightness.read(), move |v| {
+                                        if !is_auto_br_locked {
+                                            store.set(SettingKey::DisplayAutoBrightness, v);
+                                        }
+                                    })
+                                }))
                         })
                     })
                     // Wide: Night Shift (wired, resolution removed — per-display controls above are functional)
@@ -1857,23 +1799,19 @@ impl Component for DisplayDetailPage {
                                         .cross_align(Alignment::Center)
                                         .spacing(8.)
                                         .maybe_child(ns_lock.as_ref().map(|l| lock_badge(l)))
-                                        .child(
-                                            rect()
-                                                .opacity(if is_ns_locked { 0.45 } else { 1.0 })
-                                                .child({
-                                                    let store = store;
-                                                    let local_ct = local_color_temp;
-                                                    pill_switch(*store.night_shift.read(), move |v| {
-                                                        if !is_ns_locked {
-                                                            store.set(SettingKey::DisplayNightShift, v);
-                                                            let ct = *local_ct.read() as f32;
-                                                            std::thread::spawn(move || {
-                                                                let _ = system::HyprlandBackend.set_night_shift(v, ct);
-                                                            });
-                                                        }
-                                                    })
-                                                }),
-                                        ),
+                                        .child(rect().opacity(if is_ns_locked { 0.45 } else { 1.0 }).child({
+                                            let store = store;
+                                            let local_ct = local_color_temp;
+                                            pill_switch(*store.night_shift.read(), move |v| {
+                                                if !is_ns_locked {
+                                                    store.set(SettingKey::DisplayNightShift, v);
+                                                    let ct = *local_ct.read() as f32;
+                                                    std::thread::spawn(move || {
+                                                        let _ = system::HyprlandBackend.set_night_shift(v, ct);
+                                                    });
+                                                }
+                                            })
+                                        })),
                                 ),
                             ))
                             .child({
@@ -1897,64 +1835,59 @@ impl Component for DisplayDetailPage {
                                     .child(field_label("Colour temperature"))
                                     .maybe_child(ct_lock.as_ref().map(|l| lock_badge(l))),
                             )
-                            .child(
-                                rect()
-                                    .opacity(if is_ct_locked { 0.45 } else { 1.0 })
-                                    .child({
+                            .child(rect().opacity(if is_ct_locked { 0.45 } else { 1.0 }).child({
+                                let store = store;
+                                let mut local_ct = local_color_temp;
+                                let is_ns_active = *store.night_shift.read();
+                                let gen_arc = ct_gen.read().clone();
+                                let last_apply_arc = ct_last_apply_ms.read().clone();
+                                slider_row(None, *local_color_temp.read(), move |v| {
+                                    if !is_ct_locked {
+                                        local_ct.set(v);
+
+                                        let next_gen = gen_arc.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                                        let now_ms = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .map(|d| d.as_millis() as u64)
+                                            .unwrap_or(0);
+                                        let prev_ms = last_apply_arc.load(std::sync::atomic::Ordering::Relaxed);
+
+                                        // Live preview throttle: apply screen shader at most once per 60ms during dragging
+                                        if is_ns_active && (now_ms.saturating_sub(prev_ms) >= 60) {
+                                            last_apply_arc.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+                                            freya::prelude::spawn(async move {
+                                                let _ = tokio::task::spawn_blocking(move || {
+                                                    let _ = system::HyprlandBackend.set_night_shift(true, v as f32);
+                                                })
+                                                .await;
+                                            });
+                                        }
+
+                                        // Trailing debounce (70ms): apply final shader state and persist to store
+                                        let gen_check = gen_arc.clone();
                                         let store = store;
-                                        let mut local_ct = local_color_temp;
-                                        let is_ns_active = *store.night_shift.read();
-                                        let gen_arc = ct_gen.read().clone();
-                                        let last_apply_arc = ct_last_apply_ms.read().clone();
-                                        slider_row(None, *local_color_temp.read(), move |v| {
-                                            if !is_ct_locked {
-                                                local_ct.set(v);
-
-                                                let next_gen = gen_arc.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-                                                let now_ms = std::time::SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .map(|d| d.as_millis() as u64)
-                                                    .unwrap_or(0);
-                                                let prev_ms = last_apply_arc.load(std::sync::atomic::Ordering::Relaxed);
-
-                                                // Live preview throttle: apply screen shader at most once per 60ms during dragging
-                                                if is_ns_active && (now_ms.saturating_sub(prev_ms) >= 60) {
-                                                    last_apply_arc.store(now_ms, std::sync::atomic::Ordering::Relaxed);
-                                                    freya::prelude::spawn(async move {
-                                                        let _ = tokio::task::spawn_blocking(move || {
-                                                            let _ = system::HyprlandBackend.set_night_shift(true, v as f32);
-                                                        }).await;
-                                                    });
+                                        freya::prelude::spawn(async move {
+                                            tokio::time::sleep(std::time::Duration::from_millis(70)).await;
+                                            if gen_check.load(std::sync::atomic::Ordering::SeqCst) == next_gen {
+                                                if is_ns_active {
+                                                    let _ = tokio::task::spawn_blocking(move || {
+                                                        system::HyprlandBackend.set_night_shift(true, v as f32)
+                                                    })
+                                                    .await;
                                                 }
-
-                                                // Trailing debounce (70ms): apply final shader state and persist to store
-                                                let gen_check = gen_arc.clone();
-                                                let store = store;
-                                                freya::prelude::spawn(async move {
-                                                    tokio::time::sleep(std::time::Duration::from_millis(70)).await;
-                                                    if gen_check.load(std::sync::atomic::Ordering::SeqCst) == next_gen {
-                                                        if is_ns_active {
-                                                            let _ = tokio::task::spawn_blocking(move || {
-                                                                system::HyprlandBackend.set_night_shift(true, v as f32)
-                                                            }).await;
-                                                        }
-                                                        store.set(SettingKey::DisplayColorTemp, v);
-                                                    }
-                                                });
+                                                store.set(SettingKey::DisplayColorTemp, v);
                                             }
-                                        })
-                                    }),
-                            ),
+                                        });
+                                    }
+                                })
+                            })),
                     ),
             )
     }
 }
 
 /// Display detail page helper returning DisplayDetailPage component
-pub fn display_detail_page(
-    store: SettingsStore,
-    displays: State<Vec<DisplayInfo>>,
-) -> DisplayDetailPage {
+pub fn display_detail_page(store: SettingsStore, displays: State<Vec<DisplayInfo>>) -> DisplayDetailPage {
     DisplayDetailPage { store, displays }
 }
 
@@ -2001,11 +1934,7 @@ impl Component for SoundDetailPage {
         let sink_name = store.default_sink.read().clone();
         let source_name = store.default_source.read().clone();
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(SOUND, "Sound", "Output, input and alert sounds"))
-        .child(
+        rect().width(Size::fill()).vertical().child(page_head(SOUND, "Sound", "Output, input and alert sounds")).child(
             rect()
                 .width(Size::fill())
                 .vertical()
@@ -2022,129 +1951,145 @@ impl Component for SoundDetailPage {
                                     .spacing(8.)
                                     .maybe_child(vol_lock.as_ref().map(|l| lock_badge(l)))
                                     .maybe_child(mute_lock.as_ref().map(|l| lock_badge(l)))
-                                    .child(tile_sub(if sink_name.is_empty() { "Studio Speakers".to_string() } else { sink_name.clone() })),
+                                    .child(tile_sub(if sink_name.is_empty() {
+                                        "Studio Speakers".to_string()
+                                    } else {
+                                        sink_name.clone()
+                                    })),
                             ),
                         ))
-                        .child(
-                            rect()
-                                .opacity(if is_vol_locked && is_mute_locked { 0.45 } else { 1.0 })
-                                .child({
-                                    let store = store;
-                                    let muted = *store.is_mute.read();
-                                    let vol = *store.volume.read();
-                                    slider_row_with_mute(
-                                        Some(SOUND),
-                                        vol,
-                                        muted,
-                                        move |v| {
-                                            if !is_vol_locked {
-                                                store.set(SettingKey::AudioVolume, v as i64);
-                                                std::thread::spawn(move || system::HyprlandBackend.set_volume(v as i32));
-                                            }
-                                        },
-                                        move |m| {
-                                            if !is_mute_locked {
-                                                store.set(SettingKey::AudioMuted, m);
-                                                std::thread::spawn(move || system::HyprlandBackend.set_mute(m));
-                                            }
-                                        },
-                                    )
-                                }),
-                        )
+                        .child(rect().opacity(if is_vol_locked && is_mute_locked { 0.45 } else { 1.0 }).child({
+                            let store = store;
+                            let muted = *store.is_mute.read();
+                            let vol = *store.volume.read();
+                            slider_row_with_mute(
+                                Some(SOUND),
+                                vol,
+                                muted,
+                                move |v| {
+                                    if !is_vol_locked {
+                                        store.set(SettingKey::AudioVolume, v as i64);
+                                        std::thread::spawn(move || system::HyprlandBackend.set_volume(v as i32));
+                                    }
+                                },
+                                move |m| {
+                                    if !is_mute_locked {
+                                        store.set(SettingKey::AudioMuted, m);
+                                        std::thread::spawn(move || system::HyprlandBackend.set_mute(m));
+                                    }
+                                },
+                            )
+                        }))
                         .child({
                             let opts: Vec<ui::DropdownOption> = if sinks.is_empty() {
                                 vec![ui::DropdownOption { label: sink_name.clone(), value: sink_name.clone() }]
                             } else {
-                                sinks.iter().map(|d| ui::DropdownOption { label: d.name.clone(), value: d.id.clone() }).collect()
+                                sinks
+                                    .iter()
+                                    .map(|d| ui::DropdownOption { label: d.name.clone(), value: d.id.clone() })
+                                    .collect()
                             };
                             let cur_sink = if sink_name.is_empty() {
                                 sinks.first().map(|s| s.name.clone()).unwrap_or_else(|| "Studio Speakers".to_string())
                             } else {
                                 sink_name.clone()
                             };
-                            dropdown_select(cur_sink, opts, EventHandler::new(move |id: String| {
-                                let store = store;
-                                store.set(SettingKey::AudioDefaultSink, id.clone());
-                                std::thread::spawn(move || { system::HyprlandBackend.set_default_audio_sink(&id); });
-                            }))
+                            dropdown_select(
+                                cur_sink,
+                                opts,
+                                EventHandler::new(move |id: String| {
+                                    let store = store;
+                                    store.set(SettingKey::AudioDefaultSink, id.clone());
+                                    std::thread::spawn(move || {
+                                        system::HyprlandBackend.set_default_audio_sink(&id);
+                                    });
+                                }),
+                            )
                         }),
                 )
-                .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Input", None::<String>))
-                                    .child(
-                                        rect()
-                                            .margin((6., 0., 10., 0.))
-                                            .child(InputLevelMeter),
-                                    )
-                                    .child({
-                                        let opts2: Vec<ui::DropdownOption> = if sources.is_empty() {
-                                            vec![ui::DropdownOption { label: source_name.clone(), value: source_name.clone() }]
-                                        } else {
-                                            sources.iter().map(|d| ui::DropdownOption { label: d.name.clone(), value: d.id.clone() }).collect()
-                                        };
-                                        let cur_source = if source_name.is_empty() {
-                                            sources.first().map(|s| s.name.clone()).unwrap_or_else(|| "Internal Microphone".to_string())
-                                        } else {
-                                            source_name.clone()
-                                        };
-                                        dropdown_select(cur_source, opts2, EventHandler::new(move |id: String| {
-                                            let store = store;
-                                            store.set(SettingKey::Custom("audio.default_source".to_string()), id.clone());
-                                            std::thread::spawn(move || {
-                                                let _ = std::process::Command::new("wpctl").args(["set-default", &id]).output()
-                                                    .or_else(|_| std::process::Command::new("pactl").args(["set-default-source", &id]).output());
-                                            });
-                                        }))
+                .child(grid2([
+                    rect().width(Size::flex(1.)).child(
+                        tile()
+                            .child(tile_head(None, "Input", None::<String>))
+                            .child(rect().margin((6., 0., 10., 0.)).child(InputLevelMeter))
+                            .child({
+                                let opts2: Vec<ui::DropdownOption> = if sources.is_empty() {
+                                    vec![ui::DropdownOption { label: source_name.clone(), value: source_name.clone() }]
+                                } else {
+                                    sources
+                                        .iter()
+                                        .map(|d| ui::DropdownOption { label: d.name.clone(), value: d.id.clone() })
+                                        .collect()
+                                };
+                                let cur_source = if source_name.is_empty() {
+                                    sources
+                                        .first()
+                                        .map(|s| s.name.clone())
+                                        .unwrap_or_else(|| "Internal Microphone".to_string())
+                                } else {
+                                    source_name.clone()
+                                };
+                                dropdown_select(
+                                    cur_source,
+                                    opts2,
+                                    EventHandler::new(move |id: String| {
+                                        let store = store;
+                                        store.set(SettingKey::Custom("audio.default_source".to_string()), id.clone());
+                                        std::thread::spawn(move || {
+                                            let _ = std::process::Command::new("wpctl")
+                                                .args(["set-default", &id])
+                                                .output()
+                                                .or_else(|_| {
+                                                    std::process::Command::new("pactl")
+                                                        .args(["set-default-source", &id])
+                                                        .output()
+                                                });
+                                        });
                                     }),
-                            ),
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Sound effects", None::<String>))
-                                    .child({
-                                        let alert_cur = alert_sound.read().clone();
-                                        dropdown_select(
-                                            alert_cur,
-                                            vec![
-                                                ui::DropdownOption { label: "Tri-tone".to_string(), value: "Tri-tone".to_string() },
-                                                ui::DropdownOption { label: "Ping".to_string(), value: "Ping".to_string() },
-                                                ui::DropdownOption { label: "Chime".to_string(), value: "Chime".to_string() },
-                                            ],
-                                            EventHandler::new({
-                                                let mut alert = alert_sound;
-                                                move |v: String| {
-                                                    alert.set(v);
-                                                    std::thread::spawn(|| {
-                                                        let _ = std::process::Command::new("canberra-gtk-play").args(["-i", "bell"]).output();
-                                                    });
-                                                }
-                                            }),
-                                        )
-                                    })
-                                    .child(
-                                        rect()
-                                            .margin((14., 0., 0., 0.))
-                                            .child(setting_row("Feedback on volume change", None::<String>, true, {
-                                                let mut fc = store.feedback_on_change;
-                                                pill_switch(*store.feedback_on_change.read(), move |v| fc.set(v))
-                                            })),
-                                    ),
-                            ),
-                    ]),
-                ),
+                                )
+                            }),
+                    ),
+                    rect().width(Size::flex(1.)).child(
+                        tile()
+                            .child(tile_head(None, "Sound effects", None::<String>))
+                            .child({
+                                let alert_cur = alert_sound.read().clone();
+                                dropdown_select(
+                                    alert_cur,
+                                    vec![
+                                        ui::DropdownOption { label: "Tri-tone".to_string(), value: "Tri-tone".to_string() },
+                                        ui::DropdownOption { label: "Ping".to_string(), value: "Ping".to_string() },
+                                        ui::DropdownOption { label: "Chime".to_string(), value: "Chime".to_string() },
+                                    ],
+                                    EventHandler::new({
+                                        let mut alert = alert_sound;
+                                        move |v: String| {
+                                            alert.set(v);
+                                            std::thread::spawn(|| {
+                                                let _ = std::process::Command::new("canberra-gtk-play")
+                                                    .args(["-i", "bell"])
+                                                    .output();
+                                            });
+                                        }
+                                    }),
+                                )
+                            })
+                            .child(rect().margin((14., 0., 0., 0.)).child(setting_row(
+                                "Feedback on volume change",
+                                None::<String>,
+                                true,
+                                {
+                                    let mut fc = store.feedback_on_change;
+                                    pill_switch(*store.feedback_on_change.read(), move |v| fc.set(v))
+                                },
+                            ))),
+                    ),
+                ])),
         )
     }
 }
 
-pub fn sound_detail_page(store: SettingsStore) -> SoundDetailPage {
-    SoundDetailPage { store }
-}
+pub fn sound_detail_page(store: SettingsStore) -> SoundDetailPage { SoundDetailPage { store } }
 
 #[derive(PartialEq)]
 pub struct FocusDetailPage {
@@ -2165,24 +2110,18 @@ impl Component for FocusDetailPage {
         let dnd_lock = store.lock_label(&SettingKey::DoNotDisturb);
         let is_dnd_locked = dnd_lock.is_some();
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(FOCUS, "Focus", "Silence notifications and reduce distractions"))
-        .child(
-            rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                // Wide: Focus mode selector
-                .child(
-                    tile()
-                        .child(tile_head(
-                            None,
-                            "Focus mode",
-                            dnd_lock.as_ref().map(|l| lock_badge(l)),
-                        ))
-                        .child(
+        rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(FOCUS, "Focus", "Silence notifications and reduce distractions"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    // Wide: Focus mode selector
+                    .child(
+                        tile().child(tile_head(None, "Focus mode", dnd_lock.as_ref().map(|l| lock_badge(l)))).child(
                             rect()
                                 .width(Size::fill())
                                 .horizontal()
@@ -2222,38 +2161,34 @@ impl Component for FocusDetailPage {
                                     })
                                 }),
                         ),
-                )
-                .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child({
-                                tile()
-                                    .child(tile_head(
-                                        None,
-                                        "Schedule",
-                                        Some({
-                                            let mut sm = show_modal;
-                                            rect()
-                                                .cursor(CursorIcon::Pointer)
-                                                .on_press(move |_| sm.set(true))
-                                                .child(ghost_button("Add Schedule", {
-                                                    let mut sm2 = show_modal;
-                                                    move || sm2.set(true)
-                                                }))
-                                        }),
-                                    ))
-                                    .child(setting_row("Work", Some("Weekdays · 09:00–17:00"), false, {
-                                        let mut ws = work_sched;
-                                        pill_switch(*work_sched.read(), move |v| ws.set(v))
-                                    }))
-                                    .child(setting_row("Sleep", Some("Daily · 23:00–07:00"), true, {
-                                        let mut ss = sleep_sched;
-                                        pill_switch(*sleep_sched.read(), move |v| ss.set(v))
-                                    }))
-                                    .maybe_child((*show_modal.read()).then({
-                                        let t = t;
-                                        move || {
+                    )
+                    .child(grid2([
+                        rect().width(Size::flex(1.)).child({
+                            tile()
+                                .child(tile_head(
+                                    None,
+                                    "Schedule",
+                                    Some({
+                                        let mut sm = show_modal;
+                                        rect().cursor(CursorIcon::Pointer).on_press(move |_| sm.set(true)).child(
+                                            ghost_button("Add Schedule", {
+                                                let mut sm2 = show_modal;
+                                                move || sm2.set(true)
+                                            }),
+                                        )
+                                    }),
+                                ))
+                                .child(setting_row("Work", Some("Weekdays · 09:00–17:00"), false, {
+                                    let mut ws = work_sched;
+                                    pill_switch(*work_sched.read(), move |v| ws.set(v))
+                                }))
+                                .child(setting_row("Sleep", Some("Daily · 23:00–07:00"), true, {
+                                    let mut ss = sleep_sched;
+                                    pill_switch(*sleep_sched.read(), move |v| ss.set(v))
+                                }))
+                                .maybe_child((*show_modal.read()).then({
+                                    let t = t;
+                                    move || {
                                         let mut sm = show_modal;
                                         rect()
                                             .width(Size::fill())
@@ -2268,9 +2203,18 @@ impl Component for FocusDetailPage {
                                                 rect()
                                                     .horizontal()
                                                     .main_align(Alignment::SpaceBetween)
-                                                    .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text("Add Schedule"))
                                                     .child(
-                                                        rect().cursor(CursorIcon::Pointer).on_press(move |_| sm.set(false)).child(label().font_size(12.).color(t.text_dim).text("✕")),
+                                                        label()
+                                                            .font_size(13.)
+                                                            .font_weight(FontWeight::SEMI_BOLD)
+                                                            .color(t.text)
+                                                            .text("Add Schedule"),
+                                                    )
+                                                    .child(
+                                                        rect()
+                                                            .cursor(CursorIcon::Pointer)
+                                                            .on_press(move |_| sm.set(false))
+                                                            .child(label().font_size(12.).color(t.text_dim).text("✕")),
                                                     ),
                                             )
                                             .child(field_label("Name"))
@@ -2281,7 +2225,9 @@ impl Component for FocusDetailPage {
                                                     .background(t.panel)
                                                     .border(Border::new().width(1.).fill(t.border))
                                                     .corner_radius(8.)
-                                                    .child(label().font_size(12.).color(t.text_dim).text("e.g. Evening focus")),
+                                                    .child(
+                                                        label().font_size(12.).color(t.text_dim).text("e.g. Evening focus"),
+                                                    ),
                                             )
                                             .child(
                                                 rect()
@@ -2305,23 +2251,25 @@ impl Component for FocusDetailPage {
                                                     })),
                                             )
                                             .into_element()
-                                        }
-                                    }))
-                            }),
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Allowed", None::<String>))
-                                    .child(setting_row("Share across devices", None::<String>, false, {
-                                        let mut sd = share_devices;
-                                        pill_switch(*share_devices.read(), move |v| sd.set(v))
-                                    }))
-                                    .child(setting_row("Allow notifications from", None::<String>, true, status_chip("Favourites", false, None))),
-                            ),
-                    ]),
-                ),
-        )
+                                    }
+                                }))
+                        }),
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Allowed", None::<String>))
+                                .child(setting_row("Share across devices", None::<String>, false, {
+                                    let mut sd = share_devices;
+                                    pill_switch(*share_devices.read(), move |v| sd.set(v))
+                                }))
+                                .child(setting_row(
+                                    "Allow notifications from",
+                                    None::<String>,
+                                    true,
+                                    status_chip("Favourites", false, None),
+                                )),
+                        ),
+                    ])),
+            )
     }
 }
 
@@ -2352,101 +2300,88 @@ impl Component for NotificationsDetailPage {
             .width(Size::fill())
             .vertical()
             .child(page_head(NOTIFICATIONS, "Notifications", "Choose how apps notify you"))
-        .child(
-            rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                // Wide: Allow notifications
-                .child(
-                    tile()
-                        .child(tile_head(
-                            None,
-                            "Allow notifications",
-                            Some(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .spacing(8.)
-                                    .maybe_child(notif_lock.as_ref().map(|l| lock_badge(l)))
-                                    .child(
-                                        rect()
-                                            .opacity(if is_notif_locked { 0.45 } else { 1.0 })
-                                            .child({
-                                                let store = store;
-                                                pill_switch(*store.allow_notif.read(), move |v| {
-                                                    if !is_notif_locked {
-                                                        store.set(SettingKey::NotificationBanners, v);
-                                                    }
-                                                })
-                                            }),
-                                    ),
-                            ),
-                        ))
-                        .child({
-                            let mut ns = store.notif_style;
-                            segmented_control(
-                                vec![("Banners", 0), ("Alerts", 1)],
-                                *store.notif_style.read(),
-                                move |idx| ns.set(idx),
-                            )
-                        }),
-                )
-                // 2-Column: App alerts & Do Not Disturb
-                .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "App alerts", None::<String>))
-                                    .child(setting_row("Messages", Some("Badges, Sounds, Banners"), false, {
-                                        let mut m = store.notif_messages;
-                                        pill_switch(*store.notif_messages.read(), move |v| m.set(v))
-                                    }))
-                                    .child(setting_row("Calendar", Some("Badges, Sounds, Alerts"), true, {
-                                        let mut c = store.notif_calendar;
-                                        pill_switch(*store.notif_calendar.read(), move |v| c.set(v))
-                                    }))
-                                    .child(setting_row("Mail", Some("Badges only"), true, {
-                                        let mut ml = store.notif_mail;
-                                        pill_switch(*store.notif_mail.read(), move |v| ml.set(v))
-                                    }))
-                                    .child(setting_row("Photos", Some("Memories and shared albums"), true, {
-                                        let mut p = store.notif_photos;
-                                        pill_switch(*store.notif_photos.read(), move |v| p.set(v))
-                                    })),
-                            ),
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Do Not Disturb", None::<String>))
-                                    .child(setting_row_locked(
-                                        "Silence during sleep",
-                                        None::<String>,
-                                        false,
-                                        silence_lock,
-                                        {
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    // Wide: Allow notifications
+                    .child(
+                        tile()
+                            .child(tile_head(
+                                None,
+                                "Allow notifications",
+                                Some(
+                                    rect()
+                                        .horizontal()
+                                        .cross_align(Alignment::Center)
+                                        .spacing(8.)
+                                        .maybe_child(notif_lock.as_ref().map(|l| lock_badge(l)))
+                                        .child(rect().opacity(if is_notif_locked { 0.45 } else { 1.0 }).child({
                                             let store = store;
-                                            pill_switch(*store.silence_sleep.read(), move |v| {
-                                                if !is_silence_locked {
-                                                    store.set(SettingKey::NotificationSounds, v);
+                                            pill_switch(*store.allow_notif.read(), move |v| {
+                                                if !is_notif_locked {
+                                                    store.set(SettingKey::NotificationBanners, v);
                                                 }
                                             })
-                                        },
-                                    ))
-                                    .child(setting_row("Schedule", None::<String>, true, label().font_size(12.).color(t.text_dim).text("22:00–07:00"))),
-                            ),
-                    ]),
-                ),
-        )
+                                        })),
+                                ),
+                            ))
+                            .child({
+                                let mut ns = store.notif_style;
+                                segmented_control(
+                                    vec![("Banners", 0), ("Alerts", 1)],
+                                    *store.notif_style.read(),
+                                    move |idx| ns.set(idx),
+                                )
+                            }),
+                    )
+                    // 2-Column: App alerts & Do Not Disturb
+                    .child(grid2([
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "App alerts", None::<String>))
+                                .child(setting_row("Messages", Some("Badges, Sounds, Banners"), false, {
+                                    let mut m = store.notif_messages;
+                                    pill_switch(*store.notif_messages.read(), move |v| m.set(v))
+                                }))
+                                .child(setting_row("Calendar", Some("Badges, Sounds, Alerts"), true, {
+                                    let mut c = store.notif_calendar;
+                                    pill_switch(*store.notif_calendar.read(), move |v| c.set(v))
+                                }))
+                                .child(setting_row("Mail", Some("Badges only"), true, {
+                                    let mut ml = store.notif_mail;
+                                    pill_switch(*store.notif_mail.read(), move |v| ml.set(v))
+                                }))
+                                .child(setting_row("Photos", Some("Memories and shared albums"), true, {
+                                    let mut p = store.notif_photos;
+                                    pill_switch(*store.notif_photos.read(), move |v| p.set(v))
+                                })),
+                        ),
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Do Not Disturb", None::<String>))
+                                .child(setting_row_locked("Silence during sleep", None::<String>, false, silence_lock, {
+                                    let store = store;
+                                    pill_switch(*store.silence_sleep.read(), move |v| {
+                                        if !is_silence_locked {
+                                            store.set(SettingKey::NotificationSounds, v);
+                                        }
+                                    })
+                                }))
+                                .child(setting_row(
+                                    "Schedule",
+                                    None::<String>,
+                                    true,
+                                    label().font_size(12.).color(t.text_dim).text("22:00–07:00"),
+                                )),
+                        ),
+                    ])),
+            )
     }
 }
 
-pub fn notifications_detail_page(store: SettingsStore) -> NotificationsDetailPage {
-    NotificationsDetailPage { store }
-}
+pub fn notifications_detail_page(store: SettingsStore) -> NotificationsDetailPage { NotificationsDetailPage { store } }
 
 #[derive(PartialEq)]
 pub struct GeneralDetailPage {
@@ -2457,81 +2392,66 @@ impl Component for GeneralDetailPage {
     fn render(&self) -> impl IntoElement {
         let store = self.store;
         let t = use_app_theme();
-    let t24_lock = store.lock_label(&SettingKey::TimeFormat24h);
-    let is_t24_locked = t24_lock.is_some();
-    let updates_lock = store.lock_label(&SettingKey::SystemAutoUpdates);
-    let is_updates_locked = updates_lock.is_some();
+        let t24_lock = store.lock_label(&SettingKey::TimeFormat24h);
+        let is_t24_locked = t24_lock.is_some();
+        let updates_lock = store.lock_label(&SettingKey::SystemAutoUpdates);
+        let is_updates_locked = updates_lock.is_some();
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(GENERAL, "General", "Language, region and system-wide preferences"))
-        .child(
-            rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                // Wide: Language & Region
-                .child(
-                    tile()
-                        .child(tile_head(None, "Language & region", None::<String>))
-                        .child(select_row("Language · English (Australia)", None))
-                        .child(select_row("Region · Australia", None)),
-                )
-                // 2-Column: Date & Time & Software Update
-                .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Date & time", None::<String>))
-                                    .child(setting_row_locked(
-                                        "24-hour time",
-                                        None::<String>,
-                                        false,
-                                        t24_lock,
-                                        {
-                                            let store = store;
-                                            pill_switch(*store.time_24h.read(), move |v| {
-                                                if !is_t24_locked {
-                                                    store.set(SettingKey::TimeFormat24h, v);
-                                                }
-                                            })
-                                        },
-                                    ))
-                                    .child(setting_row("Time zone", None::<String>, true, label().font_size(12.).color(t.text_dim).text("Melbourne (GMT+10)"))),
-                            ),
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Software update", Some(status_chip("Up to date", false, None))))
-                                    .child(setting_row_locked(
-                                        "Automatic updates",
-                                        None::<String>,
-                                        false,
-                                        updates_lock,
-                                        {
-                                            let store = store;
-                                            pill_switch(*store.auto_updates.read(), move |v| {
-                                                if !is_updates_locked {
-                                                    store.set(SettingKey::SystemAutoUpdates, v);
-                                                }
-                                            })
-                                        },
-                                    ))
-                                    .child(rect().margin((10., 0., 0., 0.)).child(ghost_button("Check for updates", || {}))),
-                            ),
-                    ]),
-                ),
-        )
+        rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(GENERAL, "General", "Language, region and system-wide preferences"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    // Wide: Language & Region
+                    .child(
+                        tile()
+                            .child(tile_head(None, "Language & region", None::<String>))
+                            .child(select_row("Language · English (Australia)", None))
+                            .child(select_row("Region · Australia", None)),
+                    )
+                    // 2-Column: Date & Time & Software Update
+                    .child(grid2([
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Date & time", None::<String>))
+                                .child(setting_row_locked("24-hour time", None::<String>, false, t24_lock, {
+                                    let store = store;
+                                    pill_switch(*store.time_24h.read(), move |v| {
+                                        if !is_t24_locked {
+                                            store.set(SettingKey::TimeFormat24h, v);
+                                        }
+                                    })
+                                }))
+                                .child(setting_row(
+                                    "Time zone",
+                                    None::<String>,
+                                    true,
+                                    label().font_size(12.).color(t.text_dim).text("Melbourne (GMT+10)"),
+                                )),
+                        ),
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Software update", Some(status_chip("Up to date", false, None))))
+                                .child(setting_row_locked("Automatic updates", None::<String>, false, updates_lock, {
+                                    let store = store;
+                                    pill_switch(*store.auto_updates.read(), move |v| {
+                                        if !is_updates_locked {
+                                            store.set(SettingKey::SystemAutoUpdates, v);
+                                        }
+                                    })
+                                }))
+                                .child(rect().margin((10., 0., 0., 0.)).child(ghost_button("Check for updates", || {}))),
+                        ),
+                    ])),
+            )
     }
 }
 
-pub fn general_detail_page(store: SettingsStore) -> GeneralDetailPage {
-    GeneralDetailPage { store }
-}
+pub fn general_detail_page(store: SettingsStore) -> GeneralDetailPage { GeneralDetailPage { store } }
 
 #[derive(Clone, PartialEq)]
 struct StorageStats {
@@ -2577,11 +2497,11 @@ fn query_storage_stats() -> StorageStats {
         if let Ok(out) = std::process::Command::new("sqlite3")
             .args([
                 db_path.to_str().unwrap_or(""),
-                "SELECT \
-                 COALESCE(SUM(CASE WHEN desktop = 1 OR executable = 1 THEN size ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN is_dir = 0 AND (name LIKE '%.png' OR name LIKE '%.jpg' OR name LIKE '%.jpeg' OR name LIKE '%.webp' OR name LIKE '%.gif') THEN size ELSE 0 END), 0), \
-                 COALESCE(SUM(CASE WHEN is_dir = 0 AND (name LIKE '%.pdf' OR name LIKE '%.txt' OR name LIKE '%.md' OR name LIKE '%.doc%' OR name LIKE '%.docx') THEN size ELSE 0 END), 0) \
-                 FROM files;"
+                "SELECT COALESCE(SUM(CASE WHEN desktop = 1 OR executable = 1 THEN size ELSE 0 END), 0), COALESCE(SUM(CASE \
+                 WHEN is_dir = 0 AND (name LIKE '%.png' OR name LIKE '%.jpg' OR name LIKE '%.jpeg' OR name LIKE '%.webp' \
+                 OR name LIKE '%.gif') THEN size ELSE 0 END), 0), COALESCE(SUM(CASE WHEN is_dir = 0 AND (name LIKE '%.pdf' \
+                 OR name LIKE '%.txt' OR name LIKE '%.md' OR name LIKE '%.doc%' OR name LIKE '%.docx') THEN size ELSE 0 \
+                 END), 0) FROM files;",
             ])
             .output()
         {
@@ -2658,7 +2578,11 @@ impl Component for StorageDetailPage {
                     .spacing(GAP)
                     .child(
                         tile()
-                            .child(tile_head(None, format!("{} drive", stats.total), Some(tile_sub(format!("{} used · {} available", stats.used, stats.available)))))
+                            .child(tile_head(
+                                None,
+                                format!("{} drive", stats.total),
+                                Some(tile_sub(format!("{} used · {} available", stats.used, stats.available))),
+                            ))
                             .child(multi_segment_bar(
                                 vec![
                                     (stats.percentages.get(0).copied().unwrap_or(38.), t.accent),
@@ -2675,47 +2599,57 @@ impl Component for StorageDetailPage {
                                 StorageLegendItem { label: "System", value: stats.system.clone(), color: t.track },
                             ])),
                     )
-                    .child(
-                        grid2([
-                            rect()
-                                .width(Size::flex(1.))
-                                .child(
-                                    tile()
-                                        .child(tile_head(None, "Recommendations", None::<String>))
-                                        .child(setting_row_locked(
-                                            "Empty Trash automatically",
-                                            None::<String>,
-                                            false,
-                                            trash_lock,
-                                            {
-                                                let store = store;
-                                                pill_switch(*store.empty_trash_auto.read(), move |v| {
-                                                    if !is_trash_locked {
-                                                        store.set(SettingKey::StorageEmptyTrashAuto, v);
-                                                    }
-                                                })
-                                            },
-                                        )),
-                                ),
-                            rect()
-                                .width(Size::flex(1.))
-                                .child(
-                                    tile()
-                                        .child(tile_head(None, "Categories", None::<String>))
-                                        .child(setting_row("Applications", None::<String>, false, label().font_size(12.).color(t.text_dim).text(stats.apps)))
-                                        .child(setting_row("Photos", None::<String>, true, label().font_size(12.).color(t.text_dim).text(stats.photos)))
-                                        .child(setting_row("Documents", None::<String>, true, label().font_size(12.).color(t.text_dim).text(stats.docs)))
-                                        .child(setting_row("System", None::<String>, true, label().font_size(12.).color(t.text_dim).text(stats.system))),
-                                ),
-                        ]),
-                    ),
+                    .child(grid2([
+                        rect().width(Size::flex(1.)).child(
+                            tile().child(tile_head(None, "Recommendations", None::<String>)).child(setting_row_locked(
+                                "Empty Trash automatically",
+                                None::<String>,
+                                false,
+                                trash_lock,
+                                {
+                                    let store = store;
+                                    pill_switch(*store.empty_trash_auto.read(), move |v| {
+                                        if !is_trash_locked {
+                                            store.set(SettingKey::StorageEmptyTrashAuto, v);
+                                        }
+                                    })
+                                },
+                            )),
+                        ),
+                        rect().width(Size::flex(1.)).child(
+                            tile()
+                                .child(tile_head(None, "Categories", None::<String>))
+                                .child(setting_row(
+                                    "Applications",
+                                    None::<String>,
+                                    false,
+                                    label().font_size(12.).color(t.text_dim).text(stats.apps),
+                                ))
+                                .child(setting_row(
+                                    "Photos",
+                                    None::<String>,
+                                    true,
+                                    label().font_size(12.).color(t.text_dim).text(stats.photos),
+                                ))
+                                .child(setting_row(
+                                    "Documents",
+                                    None::<String>,
+                                    true,
+                                    label().font_size(12.).color(t.text_dim).text(stats.docs),
+                                ))
+                                .child(setting_row(
+                                    "System",
+                                    None::<String>,
+                                    true,
+                                    label().font_size(12.).color(t.text_dim).text(stats.system),
+                                )),
+                        ),
+                    ])),
             )
     }
 }
 
-pub fn storage_detail_page(store: SettingsStore) -> StorageDetailPage {
-    StorageDetailPage { store }
-}
+pub fn storage_detail_page(store: SettingsStore) -> StorageDetailPage { StorageDetailPage { store } }
 
 #[derive(PartialEq)]
 pub struct BatteryDetailPage {
@@ -2734,90 +2668,89 @@ impl Component for BatteryDetailPage {
         let status = power.status.clone();
         let health = power.health_percent.map(|h| format!("{h}%")).unwrap_or_else(|| "91%".to_string());
 
-    if !has_battery {
-        return rect()
-            .width(Size::fill())
-            .vertical()
-            .child(page_head(BATTERY, "Battery", "Usage, health and power mode"))
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .vertical()
-                    .spacing(GAP)
-                    .child(
-                        tile()
-                            .child(tile_head(None, "Power", Some(tile_sub("No battery — plugged in"))))
-                            .child(tile_sub("This device is running on AC power. Showing system power usage instead."))
-                            .child(
-                                rect()
-                                    .margin((12., 0., 0., 0.))
-                                    .child(mini_bar_chart([42., 58., 35., 62., 48., 55., 60.], ["M", "T", "W", "T", "F", "S", "S"])),
-                            )
-                            .child(
-                                rect()
-                                    .margin((10., 0., 0., 0.))
-                                    .horizontal()
-                                    .spacing(8.)
-                                    .child(status_chip("AC Power", false, None))
-                                    .child(label().font_size(12.).color(t.text_dim).text(status)),
-                            ),
-                    )
-                    .child(
-                        grid2([
-                            rect()
-                                .width(Size::flex(1.))
+        if !has_battery {
+            return rect()
+                .width(Size::fill())
+                .vertical()
+                .child(page_head(BATTERY, "Battery", "Usage, health and power mode"))
+                .child(
+                    rect()
+                        .width(Size::fill())
+                        .vertical()
+                        .spacing(GAP)
+                        .child(
+                            tile()
+                                .child(tile_head(None, "Power", Some(tile_sub("No battery — plugged in"))))
+                                .child(tile_sub("This device is running on AC power. Showing system power usage instead."))
                                 .child(
-                                    tile()
-                                        .child(tile_head(None, "Power mode", pwr_lock.as_ref().map(|l| lock_badge(l))))
-                                        .child(
-                                            rect()
-                                                .opacity(if is_pwr_locked { 0.45 } else { 1.0 })
-                                                .child({
-                                                    let store = store;
-                                                    let cur_mode = match *store.battery_mode.read() {
-                                                        "low" | "power-saver" => "low",
-                                                        "high" | "performance" => "high",
+                                    rect()
+                                        .margin((12., 0., 0., 0.))
+                                        .child(mini_bar_chart([42., 58., 35., 62., 48., 55., 60.], [
+                                            "M", "T", "W", "T", "F", "S", "S",
+                                        ])),
+                                )
+                                .child(
+                                    rect()
+                                        .margin((10., 0., 0., 0.))
+                                        .horizontal()
+                                        .spacing(8.)
+                                        .child(status_chip("AC Power", false, None))
+                                        .child(label().font_size(12.).color(t.text_dim).text(status)),
+                                ),
+                        )
+                        .child(grid2([
+                            rect().width(Size::flex(1.)).child(
+                                tile().child(tile_head(None, "Power mode", pwr_lock.as_ref().map(|l| lock_badge(l)))).child(
+                                    rect().opacity(if is_pwr_locked { 0.45 } else { 1.0 }).child({
+                                        let store = store;
+                                        let cur_mode = match *store.battery_mode.read() {
+                                            "low" | "power-saver" => "low",
+                                            "high" | "performance" => "high",
+                                            _ => "balanced",
+                                        };
+                                        segmented_control(
+                                            vec![
+                                                ("Low Power", "low"),
+                                                ("Balanced", "balanced"),
+                                                ("High Performance", "high"),
+                                            ],
+                                            cur_mode,
+                                            move |m| {
+                                                if !is_pwr_locked {
+                                                    store.set(SettingKey::PowerProfile, m);
+                                                    let profile = match m {
+                                                        "low" => "power-saver",
+                                                        "high" => "performance",
                                                         _ => "balanced",
                                                     };
-                                                    segmented_control(
-                                                        vec![("Low Power", "low"), ("Balanced", "balanced"), ("High Performance", "high")],
-                                                        cur_mode,
-                                                        move |m| {
-                                                            if !is_pwr_locked {
-                                                                store.set(SettingKey::PowerProfile, m);
-                                                                let profile = match m {
-                                                                    "low" => "power-saver",
-                                                                    "high" => "performance",
-                                                                    _ => "balanced",
-                                                                };
-                                                                let _ = std::process::Command::new("powerprofilesctl").args(["set", profile]).output();
-                                                            }
-                                                        },
-                                                    )
-                                                }),
-                                        ),
+                                                    let _ = std::process::Command::new("powerprofilesctl")
+                                                        .args(["set", profile])
+                                                        .output();
+                                                }
+                                            },
+                                        )
+                                    }),
                                 ),
-                            rect()
-                                .width(Size::flex(1.))
-                                .child(
-                                    tile()
-                                        .child(tile_head(None, "System power", None::<String>))
-                                        .child(setting_row("Source", None::<String>, false, label().font_size(12.).color(t.text_dim).text("Mains")))
-                                        .child(setting_row("Up time", None::<String>, true, {
-                                            let up = system::HyprlandBackend.get_host_info().uptime;
-                                            label().font_size(12.).color(t.text_dim).text(up)
-                                        })),
-                                ),
-                        ]),
-                    ),
-            );
-    }
+                            ),
+                            rect().width(Size::flex(1.)).child(
+                                tile()
+                                    .child(tile_head(None, "System power", None::<String>))
+                                    .child(setting_row(
+                                        "Source",
+                                        None::<String>,
+                                        false,
+                                        label().font_size(12.).color(t.text_dim).text("Mains"),
+                                    ))
+                                    .child(setting_row("Up time", None::<String>, true, {
+                                        let up = system::HyprlandBackend.get_host_info().uptime;
+                                        label().font_size(12.).color(t.text_dim).text(up)
+                                    })),
+                            ),
+                        ])),
+                );
+        }
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(BATTERY, "Battery", "Usage, health and power mode"))
-        .child(
+        rect().width(Size::fill()).vertical().child(page_head(BATTERY, "Battery", "Usage, health and power mode")).child(
             rect()
                 .width(Size::fill())
                 .vertical()
@@ -2843,64 +2776,59 @@ impl Component for BatteryDetailPage {
                                 .cross_align(Alignment::Center)
                                 .spacing(16.)
                                 .child(battery_ring(*store.battery_pct.read(), true))
-                                .child(
-                                    rect()
-                                        .opacity(if is_pwr_locked { 0.45 } else { 1.0 })
-                                        .child({
-                                            let store = store;
-                                            let cur_mode = match *store.battery_mode.read() {
-                                                "low" | "power-saver" => "low",
-                                                "high" | "performance" => "high",
-                                                _ => "balanced",
-                                            };
-                                            segmented_control(
-                                                vec![("Low Power", "low"), ("Balanced", "balanced"), ("High Performance", "high")],
-                                                cur_mode,
-                                                move |m| {
-                                                    if !is_pwr_locked {
-                                                        store.set(SettingKey::PowerProfile, m);
-                                                        let profile = match m {
-                                                            "low" => "power-saver",
-                                                            "high" => "performance",
-                                                            _ => "balanced",
-                                                        };
-                                                        let _ = std::process::Command::new("powerprofilesctl").args(["set", profile]).output();
-                                                    }
-                                                },
-                                            )
-                                        }),
-                                ),
+                                .child(rect().opacity(if is_pwr_locked { 0.45 } else { 1.0 }).child({
+                                    let store = store;
+                                    let cur_mode = match *store.battery_mode.read() {
+                                        "low" | "power-saver" => "low",
+                                        "high" | "performance" => "high",
+                                        _ => "balanced",
+                                    };
+                                    segmented_control(
+                                        vec![("Low Power", "low"), ("Balanced", "balanced"), ("High Performance", "high")],
+                                        cur_mode,
+                                        move |m| {
+                                            if !is_pwr_locked {
+                                                store.set(SettingKey::PowerProfile, m);
+                                                let profile = match m {
+                                                    "low" => "power-saver",
+                                                    "high" => "performance",
+                                                    _ => "balanced",
+                                                };
+                                                let _ = std::process::Command::new("powerprofilesctl")
+                                                    .args(["set", profile])
+                                                    .output();
+                                            }
+                                        },
+                                    )
+                                })),
                         ),
                 )
-                .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Past 7 days", None::<String>))
-                                    .child(mini_bar_chart([52., 70., 38., 85., 60., 44., 78.], ["M", "T", "W", "T", "F", "S", "S"])),
-                            ),
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Battery health", Some(status_chip("Normal", false, None))))
-                                    .child(setting_row("Maximum capacity", None::<String>, false, label().font_size(12.).color(t.text_dim).text(health)))
-                                    .child(setting_row("Optimised charging", None::<String>, true, {
-                                        let mut oc = store.opt_charging;
-                                        pill_switch(*store.opt_charging.read(), move |v| oc.set(v))
-                                    })),
-                            ),
-                    ]),
-                ),
+                .child(grid2([
+                    rect().width(Size::flex(1.)).child(
+                        tile()
+                            .child(tile_head(None, "Past 7 days", None::<String>))
+                            .child(mini_bar_chart([52., 70., 38., 85., 60., 44., 78.], ["M", "T", "W", "T", "F", "S", "S"])),
+                    ),
+                    rect().width(Size::flex(1.)).child(
+                        tile()
+                            .child(tile_head(None, "Battery health", Some(status_chip("Normal", false, None))))
+                            .child(setting_row(
+                                "Maximum capacity",
+                                None::<String>,
+                                false,
+                                label().font_size(12.).color(t.text_dim).text(health),
+                            ))
+                            .child(setting_row("Optimised charging", None::<String>, true, {
+                                let mut oc = store.opt_charging;
+                                pill_switch(*store.opt_charging.read(), move |v| oc.set(v))
+                            })),
+                    ),
+                ])),
         )
     }
 }
 
-pub fn battery_detail_page(store: SettingsStore) -> BatteryDetailPage {
-    BatteryDetailPage { store }
-}
+pub fn battery_detail_page(store: SettingsStore) -> BatteryDetailPage { BatteryDetailPage { store } }
 
 #[derive(PartialEq)]
 pub struct AccessibilityDetailPage {
@@ -2913,126 +2841,131 @@ impl Component for AccessibilityDetailPage {
         let t = use_app_theme();
         let preview_font_size = 13.0 + (*store.text_size.read() as f32 / 100.0) * 11.0;
 
-    let txt_lock = store.lock_label(&SettingKey::AccessibilityTextSize);
-    let is_txt_locked = txt_lock.is_some();
-    let motion_lock = store.lock_label(&SettingKey::AccessibilityReduceMotion);
-    let is_motion_locked = motion_lock.is_some();
-    let contrast_lock = store.lock_label(&SettingKey::AccessibilityIncreaseContrast);
-    let is_contrast_locked = contrast_lock.is_some();
-    let transp_lock = store.lock_label(&SettingKey::AccessibilityReduceTransparency);
-    let is_transp_locked = transp_lock.is_some();
+        let txt_lock = store.lock_label(&SettingKey::AccessibilityTextSize);
+        let is_txt_locked = txt_lock.is_some();
+        let motion_lock = store.lock_label(&SettingKey::AccessibilityReduceMotion);
+        let is_motion_locked = motion_lock.is_some();
+        let contrast_lock = store.lock_label(&SettingKey::AccessibilityIncreaseContrast);
+        let is_contrast_locked = contrast_lock.is_some();
+        let transp_lock = store.lock_label(&SettingKey::AccessibilityReduceTransparency);
+        let is_transp_locked = transp_lock.is_some();
 
-    {
-        let rm = *store.reduce_motion.read();
-        let ic = *store.increase_contrast.read();
-        let rt = *store.reduce_transparency.read();
-        let _ = (rm, ic, rt);
-    }
+        {
+            let rm = *store.reduce_motion.read();
+            let ic = *store.increase_contrast.read();
+            let rt = *store.reduce_transparency.read();
+            let _ = (rm, ic, rt);
+        }
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(ACCESSIBILITY, "Accessibility", "Make your device easier to see, hear and use"))
-        .child(
-            rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                .child(
-                    tile()
-                        .child(tile_head(None, "Text size", txt_lock.as_ref().map(|l| lock_badge(l))))
-                        .child(
-                            rect()
-                                .opacity(if is_txt_locked { 0.45 } else { 1.0 })
-                                .child({
-                                    let store = store;
-                                    slider_row(None, *store.text_size.read(), move |v| {
-                                        if !is_txt_locked {
-                                            store.set(SettingKey::AccessibilityTextSize, v);
-                                            if let Some(mut th) = try_consume_context::<State<AppTheme>>() {
-                                                let scale = 0.85 + (v as f32 / 100.0) * 0.3;
-                                                th.set(th.read().with_font_scale(scale));
-                                            }
+        rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(ACCESSIBILITY, "Accessibility", "Make your device easier to see, hear and use"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    .child(
+                        tile()
+                            .child(tile_head(None, "Text size", txt_lock.as_ref().map(|l| lock_badge(l))))
+                            .child(rect().opacity(if is_txt_locked { 0.45 } else { 1.0 }).child({
+                                let store = store;
+                                slider_row(None, *store.text_size.read(), move |v| {
+                                    if !is_txt_locked {
+                                        store.set(SettingKey::AccessibilityTextSize, v);
+                                        if let Some(mut th) = try_consume_context::<State<AppTheme>>() {
+                                            let scale = 0.85 + (v as f32 / 100.0) * 0.3;
+                                            th.set(th.read().with_font_scale(scale));
                                         }
-                                    })
-                                }),
-                        )
-                        .child(
-                            rect()
-                                .margin((14., 0., 0., 0.))
-                                .child(
+                                    }
+                                })
+                            }))
+                            .child(
+                                rect().margin((14., 0., 0., 0.)).child(
                                     label()
                                         .font_size(preview_font_size)
                                         .color(t.text_dim)
                                         .text("The quick brown fox jumps over the lazy dog."),
                                 ),
-                        ),
-                )
-                .child(
-                    tile()
-                        .child(tile_head(None, "Display", None::<String>))
-                        .child(setting_row_locked(
-                            "Reduce motion",
-                            Some("Disables animations system-wide"),
-                            false,
-                            motion_lock,
-                            {
-                                let store = store;
-                                pill_switch(*store.reduce_motion.read(), move |v| {
-                                    if !is_motion_locked {
-                                        store.set(SettingKey::AccessibilityReduceMotion, v);
-                                        store.set(SettingKey::Custom("accessibility.reduce_motion_applied".to_string()), v);
-                                        let _ = std::process::Command::new("hyprctl")
-                                            .args(["keyword", "animations:enabled", if v { "0" } else { "1" }])
-                                            .output();
-                                    }
-                                })
-                            },
-                        ))
-                        .child(setting_row_locked(
-                            "Increase contrast",
-                            Some("Stronger borders and text"),
-                            true,
-                            contrast_lock,
-                            {
-                                let store = store;
-                                pill_switch(*store.increase_contrast.read(), move |v| {
-                                    if !is_contrast_locked {
-                                        store.set(SettingKey::AccessibilityIncreaseContrast, v);
-                                        store.set(SettingKey::Custom("accessibility.increase_contrast_applied".to_string()), v);
-                                        if let Some(mut th) = try_consume_context::<State<AppTheme>>() {
-                                            th.set(th.read().with_contrast(v));
+                            ),
+                    )
+                    .child(
+                        tile()
+                            .child(tile_head(None, "Display", None::<String>))
+                            .child(setting_row_locked(
+                                "Reduce motion",
+                                Some("Disables animations system-wide"),
+                                false,
+                                motion_lock,
+                                {
+                                    let store = store;
+                                    pill_switch(*store.reduce_motion.read(), move |v| {
+                                        if !is_motion_locked {
+                                            store.set(SettingKey::AccessibilityReduceMotion, v);
+                                            store.set(
+                                                SettingKey::Custom("accessibility.reduce_motion_applied".to_string()),
+                                                v,
+                                            );
+                                            let _ = std::process::Command::new("hyprctl")
+                                                .args(["keyword", "animations:enabled", if v { "0" } else { "1" }])
+                                                .output();
                                         }
-                                    }
-                                })
-                            },
-                        ))
-                        .child(setting_row_locked(
-                            "Reduce transparency",
-                            Some("Opaque panels and blur disabled"),
-                            true,
-                            transp_lock,
-                            {
-                                let store = store;
-                                pill_switch(*store.reduce_transparency.read(), move |v| {
-                                    if !is_transp_locked {
-                                        store.set(SettingKey::AccessibilityReduceTransparency, v);
-                                        store.set(SettingKey::Custom("accessibility.reduce_transparency_applied".to_string()), v);
-                                        let _ = std::process::Command::new("hyprctl")
-                                            .args(["keyword", "decoration:blur:enabled", if v { "false" } else { "true" }])
-                                            .output();
-                                    }
-                                })
-                            },
-                        )),
-                ),
-        )
+                                    })
+                                },
+                            ))
+                            .child(setting_row_locked(
+                                "Increase contrast",
+                                Some("Stronger borders and text"),
+                                true,
+                                contrast_lock,
+                                {
+                                    let store = store;
+                                    pill_switch(*store.increase_contrast.read(), move |v| {
+                                        if !is_contrast_locked {
+                                            store.set(SettingKey::AccessibilityIncreaseContrast, v);
+                                            store.set(
+                                                SettingKey::Custom("accessibility.increase_contrast_applied".to_string()),
+                                                v,
+                                            );
+                                            if let Some(mut th) = try_consume_context::<State<AppTheme>>() {
+                                                th.set(th.read().with_contrast(v));
+                                            }
+                                        }
+                                    })
+                                },
+                            ))
+                            .child(setting_row_locked(
+                                "Reduce transparency",
+                                Some("Opaque panels and blur disabled"),
+                                true,
+                                transp_lock,
+                                {
+                                    let store = store;
+                                    pill_switch(*store.reduce_transparency.read(), move |v| {
+                                        if !is_transp_locked {
+                                            store.set(SettingKey::AccessibilityReduceTransparency, v);
+                                            store.set(
+                                                SettingKey::Custom("accessibility.reduce_transparency_applied".to_string()),
+                                                v,
+                                            );
+                                            let _ = std::process::Command::new("hyprctl")
+                                                .args([
+                                                    "keyword",
+                                                    "decoration:blur:enabled",
+                                                    if v { "false" } else { "true" },
+                                                ])
+                                                .output();
+                                        }
+                                    })
+                                },
+                            )),
+                    ),
+            )
     }
 }
 
-pub fn accessibility_detail_page(store: SettingsStore) -> AccessibilityDetailPage {
-    AccessibilityDetailPage { store }
-}
+pub fn accessibility_detail_page(store: SettingsStore) -> AccessibilityDetailPage { AccessibilityDetailPage { store } }
 
 #[derive(PartialEq)]
 pub struct ScreenTimeDetailPage {
@@ -3043,143 +2976,157 @@ impl Component for ScreenTimeDetailPage {
     fn render(&self) -> impl IntoElement {
         let store = self.store;
         let t = use_app_theme();
-    let st_lock = store.lock_label(&SettingKey::ScreenTimeEnabled);
-    let is_st_locked = st_lock.is_some();
-    let enabled = *store.screen_time_enabled.read();
-    let downtime_on = *store.downtime_enabled.read();
-    let app_limits_on = *store.app_limits_enabled.read();
-    let from = store.downtime_from.read().clone();
-    let to = store.downtime_to.read().clone();
+        let st_lock = store.lock_label(&SettingKey::ScreenTimeEnabled);
+        let is_st_locked = st_lock.is_some();
+        let enabled = *store.screen_time_enabled.read();
+        let downtime_on = *store.downtime_enabled.read();
+        let app_limits_on = *store.app_limits_enabled.read();
+        let from = store.downtime_from.read().clone();
+        let to = store.downtime_to.read().clone();
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(GENERAL, "Screen Time", "App usage limits, downtime and communication"))
-        .child(
-            rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                .child(
-                    tile()
-                        .child(tile_head(
-                            None,
-                            "Screen Time",
-                            Some(
+        rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(GENERAL, "Screen Time", "App usage limits, downtime and communication"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    .child(
+                        tile()
+                            .child(tile_head(
+                                None,
+                                "Screen Time",
+                                Some(
+                                    rect()
+                                        .horizontal()
+                                        .cross_align(Alignment::Center)
+                                        .spacing(8.)
+                                        .maybe_child(st_lock.as_ref().map(|l| lock_badge(l)))
+                                        .child(rect().opacity(if is_st_locked { 0.45 } else { 1.0 }).child({
+                                            let store = store;
+                                            pill_switch(enabled, move |v| {
+                                                if !is_st_locked {
+                                                    store.set(SettingKey::ScreenTimeEnabled, v);
+                                                }
+                                            })
+                                        })),
+                                ),
+                            ))
+                            .child(tile_sub(if enabled { "Limits and downtime are enforced" } else { "Screen Time is off" }))
+                            .child(
                                 rect()
+                                    .width(Size::fill())
+                                    .margin((12., 0., 0., 0.))
+                                    .opacity(if !enabled { 0.45 } else { 1.0 })
+                                    .child(mini_bar_chart([62., 48., 71., 55., 80., 44., 67.], [
+                                        "M", "T", "W", "T", "F", "S", "S",
+                                    ])),
+                            )
+                            .child(
+                                rect()
+                                    .width(Size::fill())
                                     .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .spacing(8.)
-                                    .maybe_child(st_lock.as_ref().map(|l| lock_badge(l)))
-                                    .child(
-                                        rect()
-                                            .opacity(if is_st_locked { 0.45 } else { 1.0 })
-                                            .child({
-                                                let store = store;
-                                                pill_switch(enabled, move |v| {
-                                                    if !is_st_locked {
-                                                        store.set(SettingKey::ScreenTimeEnabled, v);
-                                                    }
-                                                })
-                                            }),
-                                    ),
+                                    .main_align(Alignment::SpaceBetween)
+                                    .margin((8., 0., 0., 0.))
+                                    .child(label().font_size(11.).color(t.text_dim).text("Weekly average: 3h 42m / day"))
+                                    .child(label().font_size(11.).color(t.accent).text("See All Activity →")),
                             ),
-                        ))
-                        .child(tile_sub(if enabled {
-                            "Limits and downtime are enforced"
-                        } else {
-                            "Screen Time is off"
-                        }))
-                        .child(
-                            rect()
-                                .width(Size::fill())
-                                .margin((12., 0., 0., 0.))
-                                .opacity(if !enabled { 0.45 } else { 1.0 })
-                                .child(mini_bar_chart([62., 48., 71., 55., 80., 44., 67.], ["M", "T", "W", "T", "F", "S", "S"])),
-                        )
-                        .child(
-                            rect()
-                                .width(Size::fill())
-                                .horizontal()
-                                .main_align(Alignment::SpaceBetween)
-                                .margin((8., 0., 0., 0.))
-                                .child(label().font_size(11.).color(t.text_dim).text("Weekly average: 3h 42m / day"))
-                                .child(label().font_size(11.).color(t.accent).text("See All Activity →")),
-                        ),
-                )
-                .child(
-                    grid2([
+                    )
+                    .child(grid2([
                         rect().width(Size::flex(1.)).child(
-                            tile()
-                                .child(tile_head(None, "App Limits", st_lock.as_ref().map(|l| lock_badge(l))))
-                                .child(
-                                    rect()
-                                        .opacity(if !enabled { 0.45 } else { 1.0 })
-                                        .vertical()
-                                        .child(setting_row("Limits enabled", None::<String>, false, {
-                                            let store = store;
-                                            pill_switch(app_limits_on, move |v| {
-                                                if !is_st_locked {
-                                                    let mut s = store.app_limits_enabled;
-                                                    s.set(v);
-                                                }
-                                            })
-                                        }))
-                                        .child(setting_row("Social · 1h 30m", Some("Instagram, TikTok"), false, status_chip("1h 12m left", true, None)))
-                                        .child(setting_row("Games · 1h", Some("Steam, Minecraft"), true, status_chip("42m left", true, None)))
-                                        .child(setting_row("Browser · 2h", Some("Safari, Chrome"), true, ghost_button("Add Limit", || {}))),
-                                ),
+                            tile().child(tile_head(None, "App Limits", st_lock.as_ref().map(|l| lock_badge(l)))).child(
+                                rect()
+                                    .opacity(if !enabled { 0.45 } else { 1.0 })
+                                    .vertical()
+                                    .child(setting_row("Limits enabled", None::<String>, false, {
+                                        let store = store;
+                                        pill_switch(app_limits_on, move |v| {
+                                            if !is_st_locked {
+                                                let mut s = store.app_limits_enabled;
+                                                s.set(v);
+                                            }
+                                        })
+                                    }))
+                                    .child(setting_row(
+                                        "Social · 1h 30m",
+                                        Some("Instagram, TikTok"),
+                                        false,
+                                        status_chip("1h 12m left", true, None),
+                                    ))
+                                    .child(setting_row(
+                                        "Games · 1h",
+                                        Some("Steam, Minecraft"),
+                                        true,
+                                        status_chip("42m left", true, None),
+                                    ))
+                                    .child(setting_row(
+                                        "Browser · 2h",
+                                        Some("Safari, Chrome"),
+                                        true,
+                                        ghost_button("Add Limit", || {}),
+                                    )),
+                            ),
                         ),
                         rect().width(Size::flex(1.)).child(
-                            tile()
-                                .child(tile_head(None, "Downtime", st_lock.as_ref().map(|l| lock_badge(l))))
-                                .child(
-                                    rect()
-                                        .opacity(if !enabled { 0.45 } else { 1.0 })
-                                        .vertical()
-                                        .child(setting_row("Downtime", None::<String>, false, {
-                                            let store = store;
-                                            pill_switch(downtime_on, move |v| {
-                                                if !is_st_locked {
-                                                    let mut s = store.downtime_enabled;
-                                                    s.set(v);
-                                                }
-                                            })
-                                        }))
-                                        .child(setting_row(
-                                            "Schedule",
-                                            Some(format!("{from} — {to}")),
-                                            true,
-                                            ghost_button("Edit", || {}),
-                                        ))
-                                        .child(tile_sub("Only apps you allow and phone calls will be available")),
-                                ),
+                            tile().child(tile_head(None, "Downtime", st_lock.as_ref().map(|l| lock_badge(l)))).child(
+                                rect()
+                                    .opacity(if !enabled { 0.45 } else { 1.0 })
+                                    .vertical()
+                                    .child(setting_row("Downtime", None::<String>, false, {
+                                        let store = store;
+                                        pill_switch(downtime_on, move |v| {
+                                            if !is_st_locked {
+                                                let mut s = store.downtime_enabled;
+                                                s.set(v);
+                                            }
+                                        })
+                                    }))
+                                    .child(setting_row(
+                                        "Schedule",
+                                        Some(format!("{from} — {to}")),
+                                        true,
+                                        ghost_button("Edit", || {}),
+                                    ))
+                                    .child(tile_sub("Only apps you allow and phone calls will be available")),
+                            ),
                         ),
-                    ]),
-                )
-                .child(
-                    grid2([
+                    ]))
+                    .child(grid2([
                         rect().width(Size::flex(1.)).child(
                             tile()
                                 .child(tile_head(None, "Communication", None::<String>))
-                                .child(setting_row("During downtime", Some("Contacts only"), false, status_chip("Contacts", false, None)))
-                                .child(setting_row("During Screen Time", Some("Everyone"), true, ghost_button("Manage", || {}))),
+                                .child(setting_row(
+                                    "During downtime",
+                                    Some("Contacts only"),
+                                    false,
+                                    status_chip("Contacts", false, None),
+                                ))
+                                .child(setting_row(
+                                    "During Screen Time",
+                                    Some("Everyone"),
+                                    true,
+                                    ghost_button("Manage", || {}),
+                                )),
                         ),
                         rect().width(Size::flex(1.)).child(
                             tile()
                                 .child(tile_head(None, "Content & Privacy", st_lock.as_ref().map(|l| lock_badge(l))))
-                                .child(setting_row("Content restrictions", None::<String>, false, pill_switch(false, |_| {})))
+                                .child(setting_row(
+                                    "Content restrictions",
+                                    None::<String>,
+                                    false,
+                                    pill_switch(false, |_| {}),
+                                ))
                                 .child(setting_row("App installs", None::<String>, true, pill_switch(true, |_| {}))),
                         ),
-                    ]),
-                ),
-        )
+                    ])),
+            )
     }
 }
 
-pub fn screen_time_detail_page(store: SettingsStore) -> ScreenTimeDetailPage {
-    ScreenTimeDetailPage { store }
-}
+pub fn screen_time_detail_page(store: SettingsStore) -> ScreenTimeDetailPage { ScreenTimeDetailPage { store } }
 
 #[derive(PartialEq)]
 pub struct DesktopDetailPage {
@@ -3194,25 +3141,22 @@ impl Component for DesktopDetailPage {
         let layout = *store.window_layout.read();
         let gap = *store.workspace_gap.read();
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(LAYOUT_GRID, "Desktop", "Workspaces, window management and appearance"))
-        .child(
-            rect()
-                .width(Size::fill())
-                .vertical()
-                .spacing(GAP)
-                .child(
-                    tile()
-                        .child(tile_head(None, "Window Management", None::<String>))
-                        .child(field_label("Layout"))
-                        .child({
-                            let store = store;
-                            segmented_control(
-                                vec![("Master", 0), ("Dwindle", 1), ("Floating", 2)],
-                                layout,
-                                move |v| {
+        rect()
+            .width(Size::fill())
+            .vertical()
+            .child(page_head(LAYOUT_GRID, "Desktop", "Workspaces, window management and appearance"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .vertical()
+                    .spacing(GAP)
+                    .child(
+                        tile()
+                            .child(tile_head(None, "Window Management", None::<String>))
+                            .child(field_label("Layout"))
+                            .child({
+                                let store = store;
+                                segmented_control(vec![("Master", 0), ("Dwindle", 1), ("Floating", 2)], layout, move |v| {
                                     let mut s = store.window_layout;
                                     s.set(v);
                                     let val = match v {
@@ -3221,170 +3165,209 @@ impl Component for DesktopDetailPage {
                                         _ => "floating",
                                     };
                                     store.set(SettingKey::Custom("desktop.layout".to_string()), val);
-                                },
+                                })
+                            })
+                            .child(
+                                rect()
+                                    .margin((14., 0., 0., 0.))
+                                    .child(field_label(format!("Workspace gap · {} px", gap as i32))),
                             )
-                        })
-                        .child(
-                            rect()
-                                .margin((14., 0., 0., 0.))
-                                .child(field_label(format!("Workspace gap · {} px", gap as i32))),
-                        )
-                        .child({
-                            let store = store;
-                            slider_row(None, gap, move |v| {
-                                let mut s = store.workspace_gap;
-                                s.set(v);
-                                store.set(SettingKey::Custom("desktop.workspace_gap".to_string()), v);
-                                let _ = std::process::Command::new("hyprctl")
-                                    .args(["keyword", "general:gaps_out", &format!("{}", v as i32)])
-                                    .output();
+                            .child({
+                                let store = store;
+                                slider_row(None, gap, move |v| {
+                                    let mut s = store.workspace_gap;
+                                    s.set(v);
+                                    store.set(SettingKey::Custom("desktop.workspace_gap".to_string()), v);
+                                    let _ = std::process::Command::new("hyprctl")
+                                        .args(["keyword", "general:gaps_out", &format!("{}", v as i32)])
+                                        .output();
+                                })
                             })
-                        })
-                        .child(
-                            rect()
-                                .margin((14., 0., 0., 0.))
-                                .child(field_label(format!("Inner gap · {} px", *inner_gap.read() as i32))),
-                        )
-                        .child({
-                            let store = store;
-                            let mut ig = inner_gap;
-                            slider_row(None, *inner_gap.read(), move |v| {
-                                ig.set(v);
-                                store.set(SettingKey::Custom("desktop.inner_gap".to_string()), v);
-                                let _ = std::process::Command::new("hyprctl")
-                                    .args(["keyword", "general:gaps_in", &format!("{}", v as i32)])
-                                    .output();
+                            .child(
+                                rect()
+                                    .margin((14., 0., 0., 0.))
+                                    .child(field_label(format!("Inner gap · {} px", *inner_gap.read() as i32))),
+                            )
+                            .child({
+                                let store = store;
+                                let mut ig = inner_gap;
+                                slider_row(None, *inner_gap.read(), move |v| {
+                                    ig.set(v);
+                                    store.set(SettingKey::Custom("desktop.inner_gap".to_string()), v);
+                                    let _ = std::process::Command::new("hyprctl")
+                                        .args(["keyword", "general:gaps_in", &format!("{}", v as i32)])
+                                        .output();
+                                })
+                            }),
+                    )
+                    .child(
+                        tile()
+                            .child(tile_head(None, "Topbar UI", None::<String>))
+                            .child(field_label("Appearance"))
+                            .child({
+                                let store = store;
+                                let current = store.topbar_theme.read().clone();
+                                let label = match current.as_str() {
+                                    "light" => "Light",
+                                    "dark" => "Dark",
+                                    _ => "System",
+                                }
+                                .to_string();
+                                let opts: Vec<ui::DropdownOption> = vec![
+                                    ui::DropdownOption { label: "System".to_string(), value: "system".to_string() },
+                                    ui::DropdownOption { label: "Light".to_string(), value: "light".to_string() },
+                                    ui::DropdownOption { label: "Dark".to_string(), value: "dark".to_string() },
+                                ];
+                                dropdown_select(
+                                    label,
+                                    opts,
+                                    EventHandler::new(move |v: String| {
+                                        let normalized = match v.to_lowercase().as_str() {
+                                            "light" => "light",
+                                            "dark" => "dark",
+                                            _ => "system",
+                                        };
+                                        store.set(SettingKey::Custom("topbar.theme".to_string()), normalized);
+                                    }),
+                                )
                             })
-                        }),
-                )
-                
-                .child(
-                    tile()
-                        .child(tile_head(None, "Topbar UI", None::<String>))
-                        .child(field_label("Appearance"))
-                        .child({
-                            let store = store;
-                            let current = store.topbar_theme.read().clone();
-                            let label = match current.as_str() {
-                                "light" => "Light",
-                                "dark" => "Dark",
-                                _ => "System",
-                            }
-                            .to_string();
-                            let opts: Vec<ui::DropdownOption> = vec![
-                                ui::DropdownOption { label: "System".to_string(), value: "system".to_string() },
-                                ui::DropdownOption { label: "Light".to_string(), value: "light".to_string() },
-                                ui::DropdownOption { label: "Dark".to_string(), value: "dark".to_string() },
-                            ];
-                            dropdown_select(label, opts, EventHandler::new(move |v: String| {
-                                let normalized = match v.to_lowercase().as_str() {
-                                    "light" => "light",
-                                    "dark" => "dark",
-                                    _ => "system",
-                                };
-                                store.set(SettingKey::Custom("topbar.theme".to_string()), normalized);
+                            .child(
+                                rect()
+                                    .margin((10., 0., 0., 0.))
+                                    .child(field_label(format!("Text size · {} px", *store.topbar_text_size.read() as i32))),
+                            )
+                            .child({
+                                let store = store;
+                                slider_row(None, *store.topbar_text_size.read(), move |v| {
+                                    let v = v.clamp(10.0, 18.0);
+                                    let mut s = store.topbar_text_size;
+                                    s.set(v);
+                                    store.set(SettingKey::Custom("topbar.text_size".to_string()), v);
+                                })
+                            })
+                            .child(rect().margin((10., 0., 0., 0.)).child(field_label("Text colour")))
+                            .child({
+                                let store = store;
+                                let current = store.topbar_text_color.read().clone();
+                                let opts: Vec<ui::DropdownOption> = vec!["Default", "Accent", "Muted"]
+                                    .into_iter()
+                                    .map(|s| ui::DropdownOption { label: s.to_string(), value: s.to_string() })
+                                    .collect();
+                                dropdown_select(
+                                    current,
+                                    opts,
+                                    EventHandler::new(move |v: String| {
+                                        store.set(SettingKey::Custom("topbar.text_color".to_string()), v);
+                                    }),
+                                )
+                            })
+                            .child(rect().margin((10., 0., 0., 0.)).child(field_label("Light theme text")))
+                            .child({
+                                let store = store;
+                                let current = store.topbar_text_color_light.read().clone();
+                                let opts: Vec<ui::DropdownOption> = vec!["Inherit", "Default", "Accent", "Muted"]
+                                    .into_iter()
+                                    .map(|s| ui::DropdownOption { label: s.to_string(), value: s.to_string() })
+                                    .collect();
+                                dropdown_select(
+                                    current,
+                                    opts,
+                                    EventHandler::new(move |v: String| {
+                                        store.set(SettingKey::Custom("topbar.text_color_light".to_string()), v);
+                                    }),
+                                )
+                            })
+                            .child(rect().margin((10., 0., 0., 0.)).child(field_label("Dark theme text")))
+                            .child({
+                                let store = store;
+                                let current = store.topbar_text_color_dark.read().clone();
+                                let opts: Vec<ui::DropdownOption> = vec!["Inherit", "Default", "Accent", "Muted"]
+                                    .into_iter()
+                                    .map(|s| ui::DropdownOption { label: s.to_string(), value: s.to_string() })
+                                    .collect();
+                                dropdown_select(
+                                    current,
+                                    opts,
+                                    EventHandler::new(move |v: String| {
+                                        store.set(SettingKey::Custom("topbar.text_color_dark".to_string()), v);
+                                    }),
+                                )
+                            })
+                            .child(
+                                rect()
+                                    .margin((10., 0., 0., 0.))
+                                    .child(field_label(format!("Icon size · {} px", *store.topbar_icon_size.read() as i32))),
+                            )
+                            .child({
+                                let store = store;
+                                slider_row(None, *store.topbar_icon_size.read(), move |v| {
+                                    let v = v.clamp(12.0, 20.0);
+                                    let mut s = store.topbar_icon_size;
+                                    s.set(v);
+                                    store.set(SettingKey::Custom("topbar.icon_size".to_string()), v);
+                                })
+                            })
+                            .child(
+                                rect()
+                                    .margin((10., 0., 0., 0.))
+                                    .child(field_label(format!("Icon weight · {:.1}", *store.topbar_icon_stroke.read()))),
+                            )
+                            .child({
+                                let store = store;
+                                slider_row(None, *store.topbar_icon_stroke.read(), move |v| {
+                                    let v = v.clamp(1.0, 3.0);
+                                    let mut s = store.topbar_icon_stroke;
+                                    s.set(v);
+                                    store.set(SettingKey::Custom("topbar.icon_stroke".to_string()), v);
+                                })
+                            }),
+                    )
+                    .child(
+                        tile()
+                            .child(tile_head(None, "Topbar icons", None::<String>))
+                            .child(tile_sub("Choose which icons appear in the top bar"))
+                            .child(setting_row("Wi-Fi", None::<String>, false, {
+                                let store = store;
+                                let cur = *store.topbar_show_wifi.read();
+                                pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_wifi".to_string()), v))
                             }))
-                        })
-                        .child(rect().margin((10., 0., 0., 0.)).child(field_label(format!("Text size · {} px", *store.topbar_text_size.read() as i32))))
-                        .child({
-                            let store = store;
-                            slider_row(None, *store.topbar_text_size.read(), move |v| {
-                                let v = v.clamp(10.0, 18.0);
-                                let mut s = store.topbar_text_size;
-                                s.set(v);
-                                store.set(SettingKey::Custom("topbar.text_size".to_string()), v);
-                            })
-                        })
-                        .child(rect().margin((10., 0., 0., 0.)).child(field_label("Text colour")))
-                        .child({
-                            let store = store;
-                            let current = store.topbar_text_color.read().clone();
-                            let opts: Vec<ui::DropdownOption> = vec!["Default", "Accent", "Muted"].into_iter().map(|s| ui::DropdownOption { label: s.to_string(), value: s.to_string() }).collect();
-                            dropdown_select(current, opts, EventHandler::new(move |v: String| {
-                                store.set(SettingKey::Custom("topbar.text_color".to_string()), v);
+                            .child(setting_row("Wired", None::<String>, true, {
+                                let store = store;
+                                let cur = *store.topbar_show_wired.read();
+                                pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_wired".to_string()), v))
                             }))
-                        })
-                        .child(rect().margin((10., 0., 0., 0.)).child(field_label("Light theme text")))
-                        .child({
-                            let store = store;
-                            let current = store.topbar_text_color_light.read().clone();
-                            let opts: Vec<ui::DropdownOption> = vec!["Inherit", "Default", "Accent", "Muted"].into_iter().map(|s| ui::DropdownOption { label: s.to_string(), value: s.to_string() }).collect();
-                            dropdown_select(current, opts, EventHandler::new(move |v: String| {
-                                store.set(SettingKey::Custom("topbar.text_color_light".to_string()), v);
+                            .child(setting_row("Bluetooth", None::<String>, true, {
+                                let store = store;
+                                let cur = *store.topbar_show_bluetooth.read();
+                                pill_switch(cur, move |v| {
+                                    store.set(SettingKey::Custom("topbar.show_bluetooth".to_string()), v)
+                                })
                             }))
-                        })
-                        .child(rect().margin((10., 0., 0., 0.)).child(field_label("Dark theme text")))
-                        .child({
-                            let store = store;
-                            let current = store.topbar_text_color_dark.read().clone();
-                            let opts: Vec<ui::DropdownOption> = vec!["Inherit", "Default", "Accent", "Muted"].into_iter().map(|s| ui::DropdownOption { label: s.to_string(), value: s.to_string() }).collect();
-                            dropdown_select(current, opts, EventHandler::new(move |v: String| {
-                                store.set(SettingKey::Custom("topbar.text_color_dark".to_string()), v);
+                            .child(setting_row("Sound", None::<String>, true, {
+                                let store = store;
+                                let cur = *store.topbar_show_sound.read();
+                                pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_sound".to_string()), v))
                             }))
-                        })
-                        .child(rect().margin((10., 0., 0., 0.)).child(field_label(format!("Icon size · {} px", *store.topbar_icon_size.read() as i32))))
-                        .child({
-                            let store = store;
-                            slider_row(None, *store.topbar_icon_size.read(), move |v| {
-                                let v = v.clamp(12.0, 20.0);
-                                let mut s = store.topbar_icon_size;
-                                s.set(v);
-                                store.set(SettingKey::Custom("topbar.icon_size".to_string()), v);
-                            })
-                        })
-                        .child(rect().margin((10., 0., 0., 0.)).child(field_label(format!("Icon weight · {:.1}", *store.topbar_icon_stroke.read()))))
-                        .child({
-                            let store = store;
-                            slider_row(None, *store.topbar_icon_stroke.read(), move |v| {
-                                let v = v.clamp(1.0, 3.0);
-                                let mut s = store.topbar_icon_stroke;
-                                s.set(v);
-                                store.set(SettingKey::Custom("topbar.icon_stroke".to_string()), v);
-                            })
-                        }),
-                )
-                .child(
-                    tile()
-                        .child(tile_head(None, "Topbar icons", None::<String>))
-                        .child(tile_sub("Choose which icons appear in the top bar"))
-                        .child(setting_row("Wi-Fi", None::<String>, false, {
-                            let store = store;
-                            let cur = *store.topbar_show_wifi.read();
-                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_wifi".to_string()), v))
-                        }))
-                        .child(setting_row("Wired", None::<String>, true, {
-                            let store = store;
-                            let cur = *store.topbar_show_wired.read();
-                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_wired".to_string()), v))
-                        }))
-                        .child(setting_row("Bluetooth", None::<String>, true, {
-                            let store = store;
-                            let cur = *store.topbar_show_bluetooth.read();
-                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_bluetooth".to_string()), v))
-                        }))
-                        .child(setting_row("Sound", None::<String>, true, {
-                            let store = store;
-                            let cur = *store.topbar_show_sound.read();
-                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_sound".to_string()), v))
-                        }))
-                        .child(setting_row("Battery", None::<String>, true, {
-                            let store = store;
-                            let cur = *store.topbar_show_battery.read();
-                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_battery".to_string()), v))
-                        }))
-                        .child(setting_row("Notifications", None::<String>, true, {
-                            let store = store;
-                            let cur = *store.topbar_show_notifications.read();
-                            pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_notifications".to_string()), v))
-                        })),
-                ),
-        )
+                            .child(setting_row("Battery", None::<String>, true, {
+                                let store = store;
+                                let cur = *store.topbar_show_battery.read();
+                                pill_switch(cur, move |v| {
+                                    store.set(SettingKey::Custom("topbar.show_battery".to_string()), v)
+                                })
+                            }))
+                            .child(setting_row("Notifications", None::<String>, true, {
+                                let store = store;
+                                let cur = *store.topbar_show_notifications.read();
+                                pill_switch(cur, move |v| {
+                                    store.set(SettingKey::Custom("topbar.show_notifications".to_string()), v)
+                                })
+                            })),
+                    ),
+            )
     }
 }
 
-pub fn desktop_detail_page(store: SettingsStore) -> DesktopDetailPage {
-    DesktopDetailPage { store }
-}
+pub fn desktop_detail_page(store: SettingsStore) -> DesktopDetailPage { DesktopDetailPage { store } }
 
 #[derive(PartialEq)]
 pub struct AboutDetailPage;
@@ -3393,11 +3376,7 @@ impl Component for AboutDetailPage {
     fn render(&self) -> impl IntoElement {
         let t = use_app_theme();
 
-    rect()
-        .width(Size::fill())
-        .vertical()
-        .child(page_head(ABOUT, "About", "Device information and legal"))
-        .child(
+        rect().width(Size::fill()).vertical().child(page_head(ABOUT, "About", "Device information and legal")).child(
             rect()
                 .width(Size::fill())
                 .vertical()
@@ -3405,35 +3384,52 @@ impl Component for AboutDetailPage {
                 // Wide: Device info
                 .child(
                     tile()
-                        .child(setting_row("Name", None::<String>, false, label().font_size(12.).color(t.text_dim).text("Flora's Studio")))
-                        .child(setting_row("Version", None::<String>, true, label().font_size(12.).color(t.text_dim).text("14.6.1 (Finick OS)")))
-                        .child(setting_row("Processor", None::<String>, true, label().font_size(12.).color(t.text_dim).text("8-core")))
-                        .child(setting_row("Memory", None::<String>, true, label().font_size(12.).color(t.text_dim).text("32 GB")))
-                        .child(setting_row("Storage", None::<String>, true, label().font_size(12.).color(t.text_dim).text("1 TB"))),
+                        .child(setting_row(
+                            "Name",
+                            None::<String>,
+                            false,
+                            label().font_size(12.).color(t.text_dim).text("Flora's Studio"),
+                        ))
+                        .child(setting_row(
+                            "Version",
+                            None::<String>,
+                            true,
+                            label().font_size(12.).color(t.text_dim).text("14.6.1 (Finick OS)"),
+                        ))
+                        .child(setting_row(
+                            "Processor",
+                            None::<String>,
+                            true,
+                            label().font_size(12.).color(t.text_dim).text("8-core"),
+                        ))
+                        .child(setting_row(
+                            "Memory",
+                            None::<String>,
+                            true,
+                            label().font_size(12.).color(t.text_dim).text("32 GB"),
+                        ))
+                        .child(setting_row(
+                            "Storage",
+                            None::<String>,
+                            true,
+                            label().font_size(12.).color(t.text_dim).text("1 TB"),
+                        )),
                 )
                 // 2-Column: Software & Support
-                .child(
-                    grid2([
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Software", Some(status_chip("Up to date", false, None))))
-                                    .child(rect().margin((10., 0., 0., 0.)).child(ghost_button("Check for updates", || {}))),
-                            ),
-                        rect()
-                            .width(Size::flex(1.))
-                            .child(
-                                tile()
-                                    .child(tile_head(None, "Support", None::<String>))
-                                    .child(rect().margin((10., 0., 0., 0.)).child(ghost_button("Get help", || {}))),
-                            ),
-                    ]),
-                ),
+                .child(grid2([
+                    rect().width(Size::flex(1.)).child(
+                        tile()
+                            .child(tile_head(None, "Software", Some(status_chip("Up to date", false, None))))
+                            .child(rect().margin((10., 0., 0., 0.)).child(ghost_button("Check for updates", || {}))),
+                    ),
+                    rect().width(Size::flex(1.)).child(
+                        tile()
+                            .child(tile_head(None, "Support", None::<String>))
+                            .child(rect().margin((10., 0., 0., 0.)).child(ghost_button("Get help", || {}))),
+                    ),
+                ])),
         )
     }
 }
 
-pub fn about_detail_page() -> AboutDetailPage {
-    AboutDetailPage
-}
+pub fn about_detail_page() -> AboutDetailPage { AboutDetailPage }

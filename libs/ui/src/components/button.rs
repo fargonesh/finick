@@ -1,5 +1,7 @@
-use crate::theme::use_app_theme;
-use freya::prelude::*;
+use {
+    crate::theme::{RADIUS_PILL, use_app_theme},
+    freya::prelude::*,
+};
 
 /// A primary accent-styled action button.
 pub fn primary_button(text: impl Into<String>, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
@@ -20,6 +22,35 @@ pub fn secondary_button(text: impl Into<String>, mut on_press: impl FnMut() + 's
     let t = use_app_theme();
     let text_str = text.into();
     rect()
+        .padding((10., 16.))
+        .corner_radius(8.)
+        .background(t.bg_card)
+        .border(Border::new().width(1.).fill(t.border_card))
+        .center()
+        .cursor(CursorIcon::Pointer)
+        .on_press(move |_| on_press())
+        .child(label().font_size(14.).color(t.text_primary).text(text_str))
+}
+
+pub fn primary_button_full(text: impl Into<String>, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
+    let t = use_app_theme();
+    let text_str = text.into();
+    rect()
+        .width(Size::fill())
+        .padding((10., 16.))
+        .corner_radius(8.)
+        .background(t.primary_accent)
+        .center()
+        .cursor(CursorIcon::Pointer)
+        .on_press(move |_| on_press())
+        .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(text_str))
+}
+
+pub fn secondary_button_full(text: impl Into<String>, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
+    let t = use_app_theme();
+    let text_str = text.into();
+    rect()
+        .width(Size::fill())
         .padding((10., 16.))
         .corner_radius(8.)
         .background(t.bg_card)
@@ -72,21 +103,25 @@ pub fn ghost_button(text: impl Into<String>, mut on_press: impl FnMut() + 'stati
         .center()
         .cursor(CursorIcon::Pointer)
         .on_press(move |_| on_press())
-        .child(
-            label()
-                .font_size(12.)
-                .font_weight(FontWeight::MEDIUM)
-                .color(t.text)
-                .text(text_str),
-        )
+        .child(label().font_size(12.).font_weight(FontWeight::MEDIUM).color(t.text).text(text_str))
 }
 
 /// A focus pill button with indicator dot matching .focus-pill in ui_demo.html
-pub fn focus_pill(
-    label_text: impl Into<String>,
-    is_active: bool,
-    mut on_press: impl FnMut() + 'static,
-) -> impl IntoElement {
+pub fn small_close_button(mut on_press: impl FnMut() + 'static) -> impl IntoElement {
+    let t = use_app_theme();
+    rect()
+        .width(Size::px(28.))
+        .height(Size::px(28.))
+        .corner_radius(RADIUS_PILL)
+        .background(t.panel_raised)
+        .border(Border::new().width(1.).fill(t.border))
+        .center()
+        .cursor(CursorIcon::Pointer)
+        .on_press(move |_| on_press())
+        .child(label().font_size(14.).color(t.text_dim).text("×"))
+}
+
+pub fn focus_pill(label_text: impl Into<String>, is_active: bool, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
     let t = use_app_theme();
     let label_str = label_text.into();
     let border_color = if is_active { t.accent } else { t.border };
@@ -110,12 +145,5 @@ pub fn focus_pill(
                 .background(dot_color)
                 .margin((0., 6., 0., 0.)),
         )
-        .child(
-            label()
-                .font_size(12.5)
-                .font_weight(FontWeight::MEDIUM)
-                .color(text_color)
-                .text(label_str),
-        )
+        .child(label().font_size(12.5).font_weight(FontWeight::MEDIUM).color(text_color).text(label_str))
 }
-

@@ -1,5 +1,10 @@
-use freya::prelude::*;
-use crate::{icons::{icon, LOCK}, theme::{use_app_theme, RADIUS_PILL}};
+use {
+    crate::{
+        icons::{LOCK, icon},
+        theme::{RADIUS_PILL, use_app_theme},
+    },
+    freya::prelude::*,
+};
 
 /// A subtle lock badge indicating a setting is restricted (e.g. by NixOS or policy).
 pub fn lock_badge(text: impl Into<String>) -> impl IntoElement {
@@ -15,11 +20,7 @@ pub fn lock_badge(text: impl Into<String>) -> impl IntoElement {
         .border(Border::new().width(1.).fill(Color::from_af32rgb(0.35, 245, 158, 11)))
         .child(icon(LOCK, 10., Color::from_rgb(245, 158, 11)))
         .child(
-            label()
-                .font_size(10.5)
-                .font_weight(FontWeight::SEMI_BOLD)
-                .color(Color::from_rgb(245, 158, 11))
-                .text(label_text),
+            label().font_size(10.5).font_weight(FontWeight::SEMI_BOLD).color(Color::from_rgb(245, 158, 11)).text(label_text),
         )
 }
 
@@ -57,26 +58,45 @@ pub fn setting_row_locked(
         .main_align(Alignment::SpaceBetween)
         .maybe(has_top_border, |el| el.padding((9., 0., 9., 0.)))
         .maybe(!has_top_border, |el| el.padding((0., 0., 9., 0.)))
+        .child(rect().vertical().child(title_row).maybe_child(
+            meta_str.map(|m| rect().margin((1., 0., 0., 0.)).child(label().font_size(12.).color(t.text_dim).text(m))),
+        ))
+        .child(rect().opacity(if is_locked { 0.45 } else { 1.0 }).child(control))
+        .content(Content::Flex)
+}
+
+pub fn dot_status_row(
+    name: impl Into<String>,
+    meta: Option<impl Into<String>>,
+    is_on: bool,
+    control: impl IntoElement,
+) -> impl IntoElement {
+    let t = use_app_theme();
+    let name_str = name.into();
+    let meta_str = meta.map(|m| m.into());
+    let dot_color = if is_on { t.accent_green } else { t.track };
+
+    rect()
+        .width(Size::fill())
+        .horizontal()
+        .cross_align(Alignment::Center)
+        .main_align(Alignment::SpaceBetween)
         .child(
             rect()
-                .vertical()
-                .child(title_row)
-                .maybe_child(meta_str.map(|m| {
+                .horizontal()
+                .cross_align(Alignment::Center)
+                .spacing(10.)
+                .child(rect().width(Size::px(8.)).height(Size::px(8.)).corner_radius(RADIUS_PILL).background(dot_color))
+                .child(
                     rect()
-                        .margin((1., 0., 0., 0.))
-                        .child(
-                            label()
-                                .font_size(12.)
-                                .color(t.text_dim)
-                                .text(m),
-                        )
-                })),
+                        .vertical()
+                        .child(label().font_size(13.).font_weight(FontWeight::MEDIUM).color(t.text).text(name_str))
+                        .maybe_child(meta_str.map(|m| {
+                            rect().margin((1., 0., 0., 0.)).child(label().font_size(12.).color(t.text_dim).text(m))
+                        })),
+                ),
         )
-        .child(
-            rect()
-                .opacity(if is_locked { 0.45 } else { 1.0 })
-                .child(control),
-        )
+        .child(control)
         .content(Content::Flex)
 }
 
@@ -102,25 +122,12 @@ pub fn setting_row(
         .child(
             rect()
                 .vertical()
-                .child(
-                    label()
-                        .font_size(13.)
-                        .font_weight(FontWeight::MEDIUM)
-                        .color(t.text)
-                        .text(name_str),
-                )
-                .maybe_child(meta_str.map(|m| {
-                    rect()
-                        .margin((1., 0., 0., 0.))
-                        .child(
-                            label()
-                                .font_size(12.)
-                                .color(t.text_dim)
-                                .text(m),
-                        )
-                })),
+                .child(label().font_size(13.).font_weight(FontWeight::MEDIUM).color(t.text).text(name_str))
+                .maybe_child(
+                    meta_str
+                        .map(|m| rect().margin((1., 0., 0., 0.)).child(label().font_size(12.).color(t.text_dim).text(m))),
+                ),
         )
         .child(control)
-            .content(Content::Flex)
+        .content(Content::Flex)
 }
-

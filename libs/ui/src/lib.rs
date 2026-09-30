@@ -1,7 +1,8 @@
 pub mod components;
+pub mod motion;
 pub mod theme;
 
-pub use {components::*, theme::*};
+pub use {components::*, motion::*, theme::*};
 pub mod icons;
 pub use icons::*;
 pub mod theme_config;

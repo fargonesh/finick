@@ -1,21 +1,20 @@
 use std::process::Command;
 
-/// Resolves the locker binary: explicit env override, sibling of the
-/// current executable, well-known install locations, then PATH.
 pub fn locker_binary() -> Option<std::path::PathBuf> {
     if let Some(dir) = std::env::var_os("FINICK_LOCKER_BIN").map(std::path::PathBuf::from) {
-        let cand = if dir.is_file() { dir } else { dir.join("locker") };
+        if dir.is_file() {
+            return Some(dir);
+        }
+        let cand = dir.join("locker");
         if cand.is_file() {
             return Some(cand);
         }
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            for name in ["locker", "finick-locker"] {
-                let cand = dir.join(name);
-                if cand.is_file() {
-                    return Some(cand);
-                }
+            let cand = dir.join("locker");
+            if cand.is_file() {
+                return Some(cand);
             }
         }
     }
@@ -36,16 +35,13 @@ pub fn locker_binary() -> Option<std::path::PathBuf> {
             }
         }
     }
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .flat_map(|d| [d.join("locker"), d.join("finick-locker")])
-            .find(|p| p.is_file())
-    })
+    std::env::var_os("PATH")
+        .and_then(|paths| std::env::split_paths(&paths).map(|d| d.join("locker")).find(|p| p.is_file()))
 }
 
-pub fn trigger_lock() {
-    if let Some(exe) = locker_binary() {
-        match Command::new(&exe).spawn() {
+fn spawn_locker(locker: &Option<std::path::PathBuf>) {
+    if let Some(exe) = locker {
+        match Command::new(exe).spawn() {
             Ok(_) => return,
             Err(e) => eprintln!("[finick] failed to spawn locker at {}: {e}", exe.display()),
         }
@@ -57,16 +53,36 @@ pub fn trigger_lock() {
     } else {
         eprintln!("[finick] locker binary not found (set FINICK_LOCKER_BIN to override)");
     }
-    // Last resort: rely on PATH inside hyprland / the shell.
     let _ = Command::new("hyprctl").args(["dispatch", "exec", "--", "locker"]).spawn();
     if let Err(e) = Command::new("locker").spawn() {
         eprintln!("[finick] fallback locker spawn failed: {e}");
     }
 }
 
-/// Presence of this file means the session is locked.
+pub fn trigger_lock() {
+    if std::env::var("FINICK_LOCKER_DISABLED").is_ok() {
+        eprintln!("[finick] locker disabled via FINICK_LOCKER_DISABLED");
+        return;
+    }
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
+    if now.wrapping_sub(last) < 5 {
+        eprintln!("[finick] locker trigger debounced ({}s since last)", now.wrapping_sub(last));
+        return;
+    }
+    LAST.store(now, std::sync::atomic::Ordering::Relaxed);
+    if std::env::var("WAYLAND_DISPLAY").is_err() && std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_err() {
+        eprintln!("[finick] no wayland session, skipping lock");
+        return;
+    }
+    spawn_locker(&locker_binary());
+}
+
 pub fn locker_lockfile() -> std::path::PathBuf {
-    let base = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
     base.join("finick-locker.lock")
 }
 
@@ -74,7 +90,6 @@ pub fn locker_locked() -> bool {
     locker_lockfile().is_file()
 }
 
-/// True when the pid recorded in the lockfile still belongs to a locker process.
 pub fn locker_process_alive() -> bool {
     if let Ok(old) = std::fs::read_to_string(locker_lockfile()) {
         if let Ok(pid) = old.trim().parse::<i32>() {
