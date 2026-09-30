@@ -111,6 +111,9 @@
               set -e
               REPO="$HOME/Documents/Projects/finick"
               if [ ! -f "$REPO/Cargo.toml" ]; then
+                REPO="$HOME/Projects/finick"
+              fi
+              if [ ! -f "$REPO/Cargo.toml" ]; then
                 REPO="/home/flora.hill@rmhedge.com/Documents/Projects/finick"
               fi
               if [ ! -f "$REPO/Cargo.toml" ]; then

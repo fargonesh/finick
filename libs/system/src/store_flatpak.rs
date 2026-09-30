@@ -68,6 +68,42 @@ pub fn list_installed() -> Vec<FlatpakApp> {
         .collect()
 }
 
+fn parse_search_line(line: &str, installed_ids: &std::collections::HashSet<String>) -> Option<FlatpakApp> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with("Name\t") || line.starts_with("Application") {
+        return None;
+    }
+    // Column order matches the request: application, name, description, version, branch, remotes.
+    let parts: Vec<&str> = line.split('\t').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let (app_id, name, description, version, branch, origin) = if parts.len() >= 6 {
+        (
+            parts[0].trim(),
+            parts[1].trim(),
+            parts[2].trim(),
+            parts[3].trim(),
+            parts[4].trim(),
+            parts[5].trim(),
+        )
+    } else {
+        (parts[0].trim(), parts[0].trim(), parts.get(1).unwrap_or(&"").trim(), "", "stable", "flathub")
+    };
+    if app_id.is_empty() {
+        return None;
+    }
+    Some(FlatpakApp {
+        app_id: app_id.to_string(),
+        name: if name.is_empty() { app_id.to_string() } else { name.to_string() },
+        description: description.to_string(),
+        version: version.to_string(),
+        branch: branch.to_string(),
+        origin: origin.to_string(),
+        installed: installed_ids.contains(app_id),
+    })
+}
+
 pub fn search(query: &str) -> Vec<FlatpakApp> {
     let q = query.trim();
     if q.is_empty() || !flatpak_available() {
@@ -78,36 +114,7 @@ pub fn search(query: &str) -> Vec<FlatpakApp> {
     let Some(out) = run_flatpak(&["search", "--columns=application,name,description,version,branch,remotes", q]) else {
         return Vec::new();
     };
-    out.lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with("Name\t") || line.starts_with("Application") {
-                return None;
-            }
-            let parts: Vec<&str> = line.split('\t').collect();
-            if parts.len() < 2 {
-                return None;
-            }
-            let (app_id, name, description, version, branch, origin) = if parts.len() >= 6 {
-                (parts[2].trim(), parts[0].trim(), parts[1].trim(), parts[3].trim(), parts[4].trim(), parts[5].trim())
-            } else {
-                (parts[0].trim(), parts[0].trim(), parts.get(1).unwrap_or(&"").trim(), "", "stable", "flathub")
-            };
-            if app_id.is_empty() {
-                return None;
-            }
-            Some(FlatpakApp {
-                app_id: app_id.to_string(),
-                name: if name.is_empty() { app_id.to_string() } else { name.to_string() },
-                description: description.to_string(),
-                version: version.to_string(),
-                branch: branch.to_string(),
-                origin: origin.to_string(),
-                installed: installed_ids.contains(app_id),
-            })
-        })
-        .take(50)
-        .collect()
+    out.lines().filter_map(|line| parse_search_line(line, &installed_ids)).take(50).collect()
 }
 
 pub fn install(app_id: &str) -> Result<String, String> {
@@ -237,4 +244,26 @@ pub fn pending_updates() -> Vec<FlatpakApp> {
         })
         .collect();
     installed.into_iter().filter(|a| update_ids.contains(&a.app_id)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_search_line_column_order() {
+        let ids = std::collections::HashSet::new();
+        // Real `flatpak search --columns=application,name,description,version,branch,remotes` shape.
+        let app =
+            parse_search_line("org.mozilla.firefox\tFirefox\tFast, Private & Safe Web Browser\t156.0.1\tstable\tflathub", &ids)
+                .unwrap();
+        assert_eq!(app.app_id, "org.mozilla.firefox");
+        assert_eq!(app.name, "Firefox");
+        assert_eq!(app.description, "Fast, Private & Safe Web Browser");
+        assert_eq!(app.version, "156.0.1");
+        assert_eq!(app.branch, "stable");
+        assert_eq!(app.origin, "flathub");
+        assert!(parse_search_line("No matches found", &ids).is_none());
+        assert!(parse_search_line("", &ids).is_none());
+    }
 }

@@ -93,6 +93,249 @@ fn verify_via_shadow(username: &str, password: &str) -> bool {
 }
 
 pub fn pam_authenticate(service: &str, username: &str, password: &str) -> bool {
-    let _ = service;
+    // dlopened libpam (no link-time dep, same pattern as xkbcommon-dl):
+    // whatever the admin installed in this stack (password, fingerprint,
+    // face, u2f, smartcard...) runs here; text prompts are answered from
+    // the typed buffer, touch/presence modules need no conversation.
+    // Missing libpam degrades to false and the caller falls back.
+    if password.is_empty() {
+        return false;
+    }
+    pam_dlopen(service, username, password).unwrap_or(false)
+}
+
+const PAM_SUCCESS: libc::c_int = 0;
+const PAM_BUF_ERR: libc::c_int = 5;
+const PAM_CONV_ERR: libc::c_int = 6;
+const PAM_PROMPT_ECHO_OFF: libc::c_int = 2;
+const PAM_PROMPT_ECHO_ON: libc::c_int = 3;
+const PAM_ERROR_MSG: libc::c_int = 4;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct PamMessage {
+    msg_style: libc::c_int,
+    msg: *const libc::c_char,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct PamResponse {
+    resp: *mut libc::c_char,
+    resp_retcode: libc::c_int,
+}
+
+#[repr(C)]
+struct PamConv {
+    conv: Option<
+        unsafe extern "C" fn(
+            libc::c_int,
+            *const *const PamMessage,
+            *mut *mut PamResponse,
+            *mut libc::c_void,
+        ) -> libc::c_int,
+    >,
+    appdata_ptr: *mut libc::c_void,
+}
+
+struct Creds {
+    user: std::ffi::CString,
+    pass: std::ffi::CString,
+}
+
+unsafe extern "C" fn conv_cb(
+    num_msg: libc::c_int,
+    msgs: *const *const PamMessage,
+    resps: *mut *mut PamResponse,
+    appdata: *mut libc::c_void,
+) -> libc::c_int {
+    if msgs.is_null() || resps.is_null() || appdata.is_null() || num_msg <= 0 {
+        return PAM_CONV_ERR;
+    }
+    // SAFETY: PAM guarantees msgs/resps/appdata valid for the call; appdata
+    // is our Creds, alive on the caller's stack for the whole transaction.
+    unsafe {
+        conv_cb_inner(num_msg, msgs, resps, &*(appdata as *const Creds))
+    }
+}
+
+// SAFETY: caller guarantees msgs/resps point to num_msg valid entries and
+// creds outlives the call (PAM conversation contract).
+fn conv_cb_inner(
+    num_msg: libc::c_int,
+    msgs: *const *const PamMessage,
+    resps: *mut *mut PamResponse,
+    creds: &Creds,
+) -> libc::c_int {
+    unsafe {
+        let out = libc::malloc(std::mem::size_of::<PamResponse>() * num_msg as usize) as *mut PamResponse;
+        if out.is_null() {
+            return PAM_BUF_ERR;
+        }
+        for i in 0..num_msg as isize {
+            let m = *(*msgs.offset(i));
+            if m.msg_style == PAM_ERROR_MSG && !m.msg.is_null() {
+                eprintln!("finick: pam: {}", std::ffi::CStr::from_ptr(m.msg).to_string_lossy());
+            }
+            // PAM frees responses with free(), so they must come from malloc.
+            let src: &[u8] = match m.msg_style {
+                PAM_PROMPT_ECHO_OFF => creds.pass.as_bytes(),
+                PAM_PROMPT_ECHO_ON => creds.user.as_bytes(),
+                _ => &[],
+            };
+            let dst = libc::malloc(src.len() + 1) as *mut libc::c_char;
+            if dst.is_null() {
+                for j in 0..i {
+                    libc::free((*out.offset(j)).resp as *mut libc::c_void);
+                }
+                libc::free(out as *mut libc::c_void);
+                return PAM_BUF_ERR;
+            }
+            std::ptr::copy_nonoverlapping(src.as_ptr(), dst as *mut u8, src.len());
+            *dst.add(src.len()) = 0;
+            (*out.offset(i)).resp = dst;
+            (*out.offset(i)).resp_retcode = 0;
+        }
+        *resps = out;
+        PAM_SUCCESS
+    }
+}
+
+fn pam_dlopen(service: &str, username: &str, password: &str) -> Option<bool> {
+    use std::ffi::CString;
+    use std::os::raw::c_void;
+
+    if password.contains('\0') || username.contains('\0') || service.contains('\0') {
+        return Some(false);
+    }
+    unsafe {
+        let lib = {
+            let name = b"libpam.so.0\0";
+            let h = libc::dlopen(name.as_ptr() as *const libc::c_char, libc::RTLD_NOW | libc::RTLD_LOCAL);
+            if h.is_null() {
+                let name = b"libpam.so\0";
+                let h = libc::dlopen(name.as_ptr() as *const libc::c_char, libc::RTLD_NOW | libc::RTLD_LOCAL);
+                if h.is_null() {
+                    return None;
+                }
+                h
+            } else {
+                h
+            }
+        };
+        macro_rules! sym {
+            ($name:literal) => {{
+                let n = concat!($name, "\0");
+                let p = libc::dlsym(lib, n.as_ptr() as *const libc::c_char);
+                if p.is_null() {
+                    libc::dlclose(lib);
+                    return None;
+                }
+                p
+            }};
+        }
+        type PamStart =
+            unsafe extern "C" fn(*const libc::c_char, *const libc::c_char, *const PamConv, *mut *mut c_void) -> libc::c_int;
+        type PamSimple = unsafe extern "C" fn(*mut c_void, libc::c_int) -> libc::c_int;
+        let pam_start: PamStart = std::mem::transmute(sym!("pam_start"));
+        let pam_authenticate: PamSimple = std::mem::transmute(sym!("pam_authenticate"));
+        let pam_acct_mgmt: PamSimple = std::mem::transmute(sym!("pam_acct_mgmt"));
+        let pam_end: PamSimple = std::mem::transmute(sym!("pam_end"));
+
+        let creds = Creds {
+            user: CString::new(username).ok()?,
+            pass: CString::new(password).ok()?,
+        };
+        let conv = PamConv { conv: Some(conv_cb), appdata_ptr: &creds as *const Creds as *mut c_void };
+        let svc = CString::new(service).ok()?;
+        let mut handle: *mut c_void = std::ptr::null_mut();
+        let ok = pam_start(svc.as_ptr(), creds.user.as_ptr(), &conv, &mut handle) == PAM_SUCCESS
+            && !handle.is_null()
+            && pam_authenticate(handle, 0) == PAM_SUCCESS
+            && pam_acct_mgmt(handle, 0) == PAM_SUCCESS;
+        if !handle.is_null() {
+            pam_end(handle, if ok { PAM_SUCCESS } else { 7 /* PAM_AUTH_ERR */ });
+        }
+        libc::dlclose(lib);
+        // Keep the borrow checker honest: creds outlives the calls above.
+        std::hint::black_box(&creds);
+        Some(ok)
+    }
+}
+
+/// PAM service to try first: our own stack when the OS ships it (P3 packaging),
+/// otherwise the ubiquitous `login` stack. `None` when PAM is unusable here.
+pub fn pam_service_available() -> Option<String> {
+    for candidate in ["finick-lock", "login"] {
+        if std::path::Path::new(&format!("/etc/pam.d/{candidate}")).exists() {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+/// Full auth decision: dev backdoors, then PAM (whatever the admin installed:
+// password, fingerprint, face, u2f, smartcard...), then the legacy chain.
+pub fn authenticate_user(username: &str, password: &str) -> bool {
+    if password.is_empty() {
+        return false;
+    }
+    if std::env::var("FINICK_LOCKER_ALLOW_ANY").is_ok() {
+        return true;
+    }
+    if let Ok(allow) = std::env::var("FINICK_LOCKER_PASSWORD") {
+        return password == allow;
+    }
+    if let Some(service) = pam_service_available() {
+        if pam_authenticate(&service, username, password) {
+            return true;
+        }
+        // PAM denied: fall through to the legacy chain (e.g. minimal
+        // containers where the stack exists but can't backing-store auth).
+    }
     verify_password(username, password)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_authenticate_backdoors() {
+        // SAFETY: these vars are only touched by this test.
+        unsafe {
+            std::env::set_var("FINICK_LOCKER_PASSWORD", "s3cret");
+        }
+        assert!(authenticate_user("anyone", "s3cret"));
+        assert!(!authenticate_user("anyone", "nope"));
+        // SAFETY: same as above.
+        unsafe {
+            std::env::remove_var("FINICK_LOCKER_PASSWORD");
+        }
+        assert!(!authenticate_user("anyone", ""));
+        // SAFETY: same as above.
+        unsafe {
+            std::env::set_var("FINICK_LOCKER_ALLOW_ANY", "1");
+        }
+        assert!(authenticate_user("anyone", "whatever"));
+        // SAFETY: same as above.
+        unsafe {
+            std::env::remove_var("FINICK_LOCKER_ALLOW_ANY");
+        }
+    }
+
+    #[test]
+    fn test_pam_wrong_password_fails() {
+        // Real PAM stack, bogus user: must fail closed, not crash.
+        assert!(!pam_authenticate("login", "finick-nobody-test", "wrong"));
+        assert!(!pam_authenticate("login", "finick-nobody-test", ""));
+    }
+
+    #[test]
+    fn test_pam_service_selection_sane() {
+        if let Some(svc) = pam_service_available() {
+            assert!(std::path::Path::new(&format!("/etc/pam.d/{svc}")).exists());
+            assert!(svc == "finick-lock" || svc == "login");
+        }
+    }
 }

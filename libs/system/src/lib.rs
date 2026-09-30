@@ -14,13 +14,14 @@ pub use shortcuts::*;
 pub mod desktop_apps;
 pub use desktop_apps::*;
 pub mod auth;
-pub use auth::{current_username, verify_password};
+pub use auth::{authenticate_user, current_username, pam_authenticate, pam_service_available, verify_password};
 pub mod lock;
 pub use lock::{locker_binary, locker_locked, locker_lockfile, locker_process_alive, trigger_lock};
 pub mod store;
 pub mod store_flatpak;
 pub mod store_hm;
 pub mod store_nix;
+pub mod store_opts;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayInfo {

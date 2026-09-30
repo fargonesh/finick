@@ -67,6 +67,47 @@ the behavior is understood, not surprising.
 
 ## Phases
 
+Status 2026-09-29: **P0 done** in `services/session-lock` (bin `finick-lock`):
+lock → per-output lock surfaces → configure/ack/commit blank SHM →
+`locked` → `--timeout`/SIGINT/SIGTERM → `unlock_and_destroy` + `sync` wait,
+`finished` → exit 42 (Freya fallback), panic hook attempts unlock.
+`cargo check -p session-lock` clean; headless here so the TTY test below is
+still required before P1. Next: P1 input (keyboard + xkbcommon + verify).
+
+Status 2026-09-29: **P1 done** in `services/session-lock` (+ `src/finger.rs`):
+seat/keyboard via `wl_seat` capabilities, keymap fd → `xkbcommon-dl`
+(dlopen, no link-time dep; gracefully fingerprint-only if missing),
+password buffer with Enter/Backspace/Esc, Enter → `system::verify_password`
+on a thread → same unlock path; wrong password stays locked (red dots).
+Fingerprint via fprintd blocking-D-Bus thread (`Claim`/`VerifyStart`/
+`VerifyStatus`, rearm on no-match, `Release` on exit) → match unlocks;
+no device/enrolled/denied → password-only. Frame is bg + finger ring +
+password dots (shapes only, text waits for P2 fonts). Unit-tested painter.
+Still required: TTY test (lock → type → finger → kill -9 behavior).
+
+Status 2026-09-29: **other login methods via PAM** (`system::authenticate_user`,
+`devenv.nix` + `pkgs.linux-pam`): the locker now auths through the PAM stack
+first (`finick-lock` service when shipped, else `login`), so whatever the
+admin installed — password, pam_fprintd, face (howdy), u2f, smartcard,
+systemd-homed — works with no per-method code; text prompts are answered
+from the typed buffer, touch/presence modules need no conversation. Legacy
+sudo/su/shadow chain remains as fallback. Deliberately **no `pam` crate**:
+its bindgen step is flaky in this workspace (clang-sys runtime loader vs
+nix libclang versions); libpam is dlopened directly with `libc` (same
+pattern as xkbcommon-dl), missing lib → fallback. Unit-tested (backdoors,
+real-stack negative, service selection). P3 still owes `/etc/pam.d/finick-lock`
+packaging.
+
+Status 2026-09-29: **P2 done** (`services/session-lock/src/render.rs` + wiring):
+wallpaper from finick settings (file → cover-fit + dim, `preset:N`, `#hex`,
+solid fallback; `FINICK_LOCK_WALLPAPER` override), clock + date via runtime
+font discovery (system font dirs, scored sans-first, `ab_glyph` raster,
+shapes-only when absent) with minute-boundary refresh timer, per-output
+`wl_output` scale (buffer × scale + `set_buffer_scale`, redraw on change;
+hotplug was already covered). Hints under the dots (finger state /
+"Checking…"). Unit-tested (shapes, hex, cover-dim, font walk).
+Still required: TTY test with a real wallpaper + HiDPI output.
+
 | Phase | Work | Est |
 | ----- | ---- | --- |
 | P0 skeleton | crate, registry, lock → `locked` → `unlock_and_destroy` roundtrip, blank surfaces, sync-on-exit, `finished` fallback | 2–3 days |

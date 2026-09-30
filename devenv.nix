@@ -44,6 +44,7 @@
     pkgs.libv4l.dev
     pkgs.libxkbcommon
     pkgs.wayland
+    pkgs.linux-pam       # libpam headers/lib for the `pam` crate (system::pam_authenticate)
     pkgs.vulkan-loader
     pkgs.libglvnd
 
@@ -76,6 +77,7 @@
     LD_LIBRARY_PATH = lib.makeLibraryPath [
       pkgs.libxkbcommon
       pkgs.wayland
+      pkgs.linux-pam
       pkgs.vulkan-loader
       pkgs.libglvnd
     ];
@@ -84,7 +86,7 @@
   enterShell = ''
     export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
     export BINDGEN_EXTRA_CLANG_ARGS="-isystem ${pkgs.glibc.dev}/include -isystem ${pkgs.linuxHeaders}/include"
-    export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.libxkbcommon pkgs.wayland pkgs.vulkan-loader pkgs.libglvnd ]}:$LD_LIBRARY_PATH"
+    export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.libxkbcommon pkgs.wayland pkgs.linux-pam pkgs.vulkan-loader pkgs.libglvnd ]}:$LD_LIBRARY_PATH"
     echo ""
     echo "Rust toolchain: $(rustc --version)"
     echo ""
@@ -100,8 +102,15 @@
   scripts = {
     devtools.exec = "if [ ! -f ./.devenv/state/cargo-install/bin/freya-devtools-app ]; then cargo install --git https://github.com/marc2332/freya freya-devtools-app --root ./.devenv/state/cargo-install; fi; ./.devenv/state/cargo-install/bin/freya-devtools-app \"$@\"";
     settings.exec = "cargo run -p settings -- \"$@\"";
-    finickd.exec = "cargo run -p finickd -- \"$@\"";
     files.exec = "cargo run -p files -- \"$@\"";
+    launcher.exec = "cargo run -p launcher -- \"$@\"";
+    locker.exec = "cargo run -p locker -- \"$@\"";
+    overlay.exec = "cargo run -p overlay -- \"$@\"";
+    store.exec = "cargo run -p store -- \"$@\"";
+    finickd.exec = "cargo run -p finickd -- \"$@\"";
+    index.exec = "cargo run -p index -- \"$@\"";
+    polkit-agent.exec = "cargo run -p polkit-agent -- \"$@\"";
+    session-lock.exec = "cargo run -p session-lock -- \"$@\"";
     finickctl.exec = "cargo run -p finickctl -- \"$@\"";
     web.exec = ''
       set -e

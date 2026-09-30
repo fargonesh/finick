@@ -9,3 +9,4 @@ serde_json = { version = "1.0", features = ["raw_value"] }
 wl-clipboard-rs = "0.9.3"
 chrono = "0.4"
 libc = "0.2"
+ipsea = { path = "../ipc", package = "ipc" }

@@ -1,51 +1,20 @@
-use system::store::{self, StoreSource};
+use system::store::{self, StoreRequest, StoreResponse};
 
-#[derive(Clone, Debug)]
-pub enum StoreJob {
-    InstallNix(String),
-    RemoveNix(String),
-    InstallFlatpak(String),
-    RemoveFlatpak(String),
-    UpdateFlatpaks,
-    ApplyHomeManager,
-}
-
-pub fn describe(job: &StoreJob) -> String {
-    match job {
-        StoreJob::InstallNix(a) => format!("install nix {a}"),
-        StoreJob::RemoveNix(a) => format!("remove nix {a}"),
-        StoreJob::InstallFlatpak(id) => format!("install flatpak {id}"),
-        StoreJob::RemoveFlatpak(id) => format!("remove flatpak {id}"),
-        StoreJob::UpdateFlatpaks => "update flatpaks".to_string(),
-        StoreJob::ApplyHomeManager => "apply home-manager".to_string(),
-    }
-}
-
-pub fn run_job(job: StoreJob) -> Result<String, String> {
-    match job {
-        StoreJob::InstallNix(attr) => store::install_nix_reproducible(&attr),
-        StoreJob::RemoveNix(attr) => store::remove_nix_reproducible(&attr),
-        StoreJob::InstallFlatpak(id) => {
-            let msg = store::flatpak::install(&id)?;
-            let _ = store::hm::add_flatpak(&id);
-            Ok(msg)
+/// Serve one store request: forward Started/Log, run the job blocking
+/// (start_server already gives us a per-connection thread), send Finished.
+pub fn handle_store_request(req: StoreRequest, sender: std::sync::mpsc::Sender<StoreResponse>) {
+    let StoreRequest::Run { job } = req;
+    let mut sender_opt = Some(sender);
+    let res = store::run_job(job, &mut |ev| {
+        let resp = match ev {
+            store::StoreProgress::Started(job) => StoreResponse::Started { job },
+            store::StoreProgress::Log(line) => StoreResponse::Log(line),
+        };
+        if sender_opt.as_ref().is_some_and(|s| s.send(resp).is_err()) {
+            sender_opt = None;
         }
-        StoreJob::RemoveFlatpak(id) => {
-            let msg = store::flatpak::remove(&id)?;
-            let _ = store::hm::remove_flatpak(&id);
-            Ok(msg)
-        }
-        StoreJob::UpdateFlatpaks => store::flatpak::update_all(),
-        StoreJob::ApplyHomeManager => store::hm::apply_home_manager(),
-    }
-}
-
-pub fn job_source(job: &StoreJob) -> Option<StoreSource> {
-    match job {
-        StoreJob::InstallNix(_) | StoreJob::RemoveNix(_) => Some(StoreSource::Nixpkgs),
-        StoreJob::InstallFlatpak(_) | StoreJob::RemoveFlatpak(_) | StoreJob::UpdateFlatpaks => {
-            Some(StoreSource::Flathub)
-        }
-        StoreJob::ApplyHomeManager => None,
+    });
+    if let Some(sender) = sender_opt {
+        let _ = sender.send(StoreResponse::Finished { result: res });
     }
 }

@@ -1185,6 +1185,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     });
 
+    // 5. Store job server (progress IPC: Started/Log/Finished per job)
+    let store_socket = system::store::STORE_SOCKET_NAME;
+    println!("Binding Store IPC server on socket '{}'...", store_socket);
+
+    let store_ipc_task = tokio::task::spawn_blocking(move || {
+        start_server(store_socket, move |req: system::store::StoreRequest, sender: Sender<system::store::StoreResponse>| {
+            store_worker::handle_store_request(req, sender);
+        })
+    });
+
     // Locker supervisor: if the session is locked but no locker process is
     // alive (e.g. someone killed it from a stray terminal), bring it back
     // and keep the shell overlay hidden until unlock.
@@ -1213,6 +1223,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         res = notif_ipc_task => {
             if let Err(e) = res {
                 eprintln!("Notifications IPC task failed: {e}");
+            }
+        }
+        res = store_ipc_task => {
+            if let Err(e) = res {
+                eprintln!("Store IPC task failed: {e}");
             }
         }
     }
