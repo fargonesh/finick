@@ -25,11 +25,11 @@ impl Component for SessionMenu {
                                 .horizontal()
                                 .spacing(10.)
                                 .content(Content::Flex)
-                                .child(action_tile_flex("⎋", "Logout", false, move || {
+                                .child(action_tile_flex(LOG_OUT, "Logout", false, move || {
                                     power_action("logout");
                                     close();
                                 }))
-                                .child(action_tile_flex("↻", "Reboot", false, move || {
+                                .child(action_tile_flex(REFRESH_CW, "Reboot", false, move || {
                                     power_action("reboot");
                                     close();
                                 })),
@@ -40,11 +40,11 @@ impl Component for SessionMenu {
                                 .horizontal()
                                 .spacing(10.)
                                 .content(Content::Flex)
-                                .child(action_tile_flex("☾", "Sleep", false, move || {
+                                .child(action_tile_flex(MOON, "Sleep", false, move || {
                                     power_action("sleep");
                                     close();
                                 }))
-                                .child(action_tile_flex("⏻", "Shutdown", true, move || {
+                                .child(action_tile_flex(POWER, "Shutdown", true, move || {
                                     power_action("shutdown");
                                     close();
                                 })),

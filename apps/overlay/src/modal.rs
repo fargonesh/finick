@@ -20,6 +20,7 @@ impl Component for ModalApp {
         let t = use_app_theme();
         let password = use_state(String::new);
         let is_working = use_state(|| false);
+        let dismiss = use_state(|| false);
 
         let ctx_opt = GlobalContexts::get().try_get_context::<ModalState>();
         let Some(ctx) = ctx_opt else {
@@ -231,7 +232,7 @@ impl Component for ModalApp {
                 .background(Color::from_argb(120, 0, 0, 0))
                 .center()
                 .content(Content::Flex)
-                .child(FadeSlideIn::new().child(dialog_card(520.).child(crate::clipboard_manager::ClipboardManager)))
+                .child(FadeSlideIn::new().child(dialog_card(520.).child(crate::clipboard_manager::ClipboardManager { dismiss })))
                 .into_element(),
             ModalRequest::Screenshot => rect()
                 .width(Size::fill())
@@ -239,7 +240,7 @@ impl Component for ModalApp {
                 .background(Color::from_argb(120, 0, 0, 0))
                 .center()
                 .content(Content::Flex)
-                .child(FadeSlideIn::new().child(dialog_card(500.).child(crate::screenshot::ScreenshotUtility)))
+                .child(FadeSlideIn::new().child(dialog_card(500.).child(crate::screenshot::ScreenshotUtility { dismiss })))
                 .into_element(),
             _ => rect().into_element(),
         }

@@ -1,41 +1,116 @@
 use {freya::prelude::*, ipsea::notifications::Notification, std::path::PathBuf, ui::*};
 
+pub fn clean_notification_text(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut in_tag = false;
+    for c in raw.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    let mut s = out;
+    for (from, to) in [
+        ("&amp;", "&"),
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&quot;", "\""),
+        ("&apos;", "'"),
+        ("&#39;", "'"),
+        ("&#34;", "\""),
+        ("&nbsp;", " "),
+    ] {
+        s = s.replace(from, to);
+    }
+    s.split_whitespace().collect::<Vec<_>>().join(" ").trim().to_string()
+}
+
 /// Helper to render an icon for a notification.
 /// Handles SVGs, local image files, named icon aliases, and defaults to the notification bell icon.
 pub fn render_notification_icon(icon_str: &str, size: f32, color: Color) -> Element {
-    let trimmed = icon_str.trim();
+    let mut trimmed = icon_str.trim();
+    if let Some(stripped) = trimmed.strip_prefix("file://") {
+        trimmed = stripped;
+    }
 
     if trimmed.starts_with("<svg") {
         let bytes = Bytes::copy_from_slice(trimmed.as_bytes());
         return SvgViewer::new(bytes).width(Size::px(size)).height(Size::px(size)).color(color).into_element();
     }
 
-    if trimmed.ends_with(".png") || trimmed.ends_with(".jpg") || trimmed.ends_with(".jpeg") || trimmed.ends_with(".webp") {
-        return ImageViewer::new(PathBuf::from(trimmed)).width(Size::px(size)).height(Size::px(size)).into_element();
+    let lower_path = trimmed.to_lowercase();
+    let is_image_path = lower_path.ends_with(".png")
+        || lower_path.ends_with(".jpg")
+        || lower_path.ends_with(".jpeg")
+        || lower_path.ends_with(".webp")
+        || lower_path.ends_with(".bmp")
+        || lower_path.ends_with(".gif")
+        || lower_path.ends_with(".svg");
+    if is_image_path {
+        let path = PathBuf::from(trimmed);
+        if path.exists() {
+            if lower_path.ends_with(".svg") {
+                return SvgViewer::new(path).width(Size::px(size)).height(Size::px(size)).color(color).into_element();
+            }
+            return ImageViewer::new(path).width(Size::px(size)).height(Size::px(size)).into_element();
+        }
     }
 
-    if trimmed.ends_with(".svg") {
-        return SvgViewer::new(PathBuf::from(trimmed))
-            .width(Size::px(size))
-            .height(Size::px(size))
-            .color(color)
-            .into_element();
+    if trimmed.is_empty() {
+        return icon(NOTIFICATIONS, size, color).into_element();
     }
 
     let lower = trimmed.to_lowercase();
-    let svg_str = match lower.as_str() {
-        "sound" | "audio" | "volume" => SOUND,
-        "network" | "wifi" | "wireless" => WIFI,
+    let after_slash = lower.rsplit('/').next().unwrap_or(lower.as_str());
+    let base = after_slash.split('.').next().unwrap_or(after_slash);
+    let svg_str = match base {
+        "sound" | "audio" | "volume" | "music" => SOUND,
+        "network" | "wifi" | "wireless" | "connection" => WIFI,
         "wired" | "ethernet" => WIRED,
         "bluetooth" => BLUETOOTH,
         "battery" | "power" => BATTERY,
-        "display" | "screen" | "monitor" => DISPLAY,
+        "display" | "screen" | "monitor" | "video" => DISPLAY,
         "folder" => FOLDER,
         "file" | "document" => FILE,
         "download" => DOWNLOAD,
         "lock" | "security" => LOCK,
-        "info" | "information" | "dialog-information" | "about" => ABOUT,
+        "camera" | "screenshot" | "image" | "picture" | "photo" => CAMERA,
+        "clock" | "time" | "calendar" | "appointment" | "appointment-soon" => CLOCK_ICON,
+        "mail" | "message" | "chat" | "mail-unread" => MAIL,
         "moon" | "night" | "focus" => FOCUS,
+        _ if base.contains("sound") || base.contains("audio") || base.contains("volume") || base.contains("music") => {
+            SOUND
+        }
+        _ if base.contains("wifi")
+            || base.contains("wireless")
+            || base.contains("network")
+            || base.contains("connect") =>
+        {
+            WIFI
+        }
+        _ if base.contains("bluetooth") => BLUETOOTH,
+        _ if base.contains("battery") || base.contains("power") => BATTERY,
+        _ if base.contains("display") || base.contains("screen") || base.contains("monitor") => DISPLAY,
+        _ if base.contains("folder") => FOLDER,
+        _ if base.contains("download") => DOWNLOAD,
+        _ if base.contains("lock") || base.contains("secur") => LOCK,
+        _ if base.contains("camera") || base.contains("screenshot") || base.contains("photo") || base.contains("image") => {
+            CAMERA
+        }
+        _ if base.contains("clock")
+            || base.contains("time")
+            || base.contains("calendar")
+            || base.contains("appoint") =>
+        {
+            CLOCK_ICON
+        }
+        _ if base.contains("mail") || base.contains("message") || base.contains("chat") => MAIL,
+        _ if base.contains("info") || base.contains("dialog") || base.contains("about") || base.contains("help") => {
+            ABOUT
+        }
+        _ if base.contains("warn") || base.contains("error") || base.contains("critical") => ABOUT,
         _ => NOTIFICATIONS,
     };
 
@@ -180,10 +255,17 @@ impl Component for NotificationPopup {
         let mut close_h1 = close_hovered;
         let mut close_h2 = close_hovered;
 
-        let display_app = if !self.app_name.is_empty() { self.app_name.clone() } else { "Notification".to_string() };
+        let display_app = {
+            let a = clean_notification_text(&self.app_name);
+            if !a.is_empty() { a } else { "Notification".to_string() }
+        };
 
-        let title_text = self.title.clone();
-        let body_text = self.body.clone();
+        let title_text = {
+            let cleaned = clean_notification_text(&self.title);
+            if !cleaned.is_empty() { cleaned } else { display_app.clone() }
+        };
+        let body_text = clean_notification_text(&self.body);
+        let has_body = !body_text.is_empty();
         let icon_str = self.icon.clone();
         let on_close_handler = self.on_close.clone();
         let count = self.stack_count;
@@ -197,7 +279,7 @@ impl Component for NotificationPopup {
                 .corner_radius(16.)
                 .background(card_bg)
                 .border(Border::new().width(1.).fill(t.border))
-                .shadow(Shadow::new().color(Color::from_argb(45, 0, 0, 0)).blur(12.).spread(1.))
+                .shadow(Shadow::new().color(Color::from_argb(24, 0, 0, 0)).blur(8.).spread(0.))
                 .content(Content::Flex)
                 .on_pointer_enter(move |_| card_h1.set(true))
                 .on_pointer_leave(move |_| card_h2.set(false))
@@ -237,7 +319,8 @@ impl Component for NotificationPopup {
                                 .cursor(CursorIcon::Pointer)
                                 .on_pointer_enter(move |_| close_h1.set(true))
                                 .on_pointer_leave(move |_| close_h2.set(false))
-                                .on_press(move |_| {
+                                .on_press(move |e: Event<PressEventData>| {
+                                    e.stop_propagation();
                                     if let Some(ref h) = on_close_handler {
                                         h.call(id);
                                     }
@@ -270,9 +353,19 @@ impl Component for NotificationPopup {
                                 .spacing(3.)
                                 .content(Content::Flex)
                                 .child(
-                                    label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title_text),
+                                    paragraph()
+                                        .width(Size::fill())
+                                        .max_lines(2usize)
+                                        .span(Span::new(title_text).font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text)),
                                 )
-                                .child(label().font_size(12.).color(t.text_dim).text(body_text)),
+                                .maybe(has_body, |el| {
+                                    el.child(
+                                        paragraph()
+                                            .width(Size::fill())
+                                            .max_lines(6usize)
+                                            .span(Span::new(body_text.clone()).font_size(12.).color(t.text_dim)),
+                                    )
+                                }),
                         ),
                 ),
         )
@@ -314,6 +407,14 @@ mod tests {
         assert_eq!(popup.icon, "sound");
         assert_eq!(popup.timeout, 3000);
         assert_eq!(popup.width, Size::fill());
+    }
+
+    #[test]
+    fn test_clean_notification_text() {
+        assert_eq!(clean_notification_text("<b>Hello</b> &amp; goodbye"), "Hello & goodbye");
+        assert_eq!(clean_notification_text("  line1\nline2  "), "line1 line2");
+        assert_eq!(clean_notification_text(""), "");
+        assert_eq!(clean_notification_text("<img src=\"x\">"), "");
     }
 
     #[test]

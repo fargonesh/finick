@@ -88,7 +88,7 @@ pub fn section_label(text: impl Into<String>) -> impl IntoElement {
 }
 
 pub fn action_tile_flex(
-    icon_str: impl Into<String>,
+    icon_svg: &'static str,
     title: impl Into<String>,
     active: bool,
     mut on_press: impl FnMut() + 'static,
@@ -109,7 +109,7 @@ pub fn action_tile_flex(
         .spacing(GAP)
         .cursor(CursorIcon::Pointer)
         .on_press(move |_| on_press())
-        .child(label().font_size(18.).color(t.text).text(icon_str.into()))
+        .child(icon(icon_svg, 18., t.text))
         .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title.into()))
 }
 

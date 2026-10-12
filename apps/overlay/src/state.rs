@@ -4,6 +4,10 @@ use {
         SETTINGS_SOCKET_NAME, SettingEntry, SettingKey, SettingValue, SettingsEvent, SubscriptionFilter,
         get_all_settings, set_and_apply,
     },
+    std::{
+        sync::Mutex,
+        time::{Duration, Instant},
+    },
     system::{HyprlandBackend, SystemBackend},
 };
 
@@ -412,4 +416,124 @@ pub fn clear_notifications() {
     for n in notifs {
         dismiss_notification(n.id);
     }
+}
+
+#[derive(Clone, Copy)]
+struct TravelGuard {
+    panel_x: f64,
+    panel_y: f64,
+    panel_w: f64,
+    panel_h: f64,
+    anchor_x: f64,
+    anchor_y: f64,
+    deadline: Instant,
+}
+
+static TRAVEL_GUARD: Mutex<Option<TravelGuard>> = Mutex::new(None);
+
+pub fn arm_travel_guard(panel_x: f64, panel_y: f64, panel_w: f64, panel_h: f64, anchor_x: f64) {
+    if let Ok(mut g) = TRAVEL_GUARD.lock() {
+        *g = Some(TravelGuard {
+            panel_x,
+            panel_y,
+            panel_w,
+            panel_h,
+            anchor_x,
+            anchor_y: 18.0,
+            deadline: Instant::now() + Duration::from_millis(2500),
+        });
+    }
+}
+
+fn point_in_triangle(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64) -> bool {
+    let sign = |x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64| (x1 - x3) * (y2 - y3) - (x2 - x3) * (y1 - y3);
+    let d1 = sign(px, py, ax, ay, bx, by);
+    let d2 = sign(px, py, bx, by, cx, cy);
+    let d3 = sign(px, py, cx, cy, ax, ay);
+    let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+    let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+    !(has_neg && has_pos)
+}
+
+pub fn travel_guard_holds(cursor_x: f64, cursor_y: f64) -> bool {
+    let guard = TRAVEL_GUARD.lock().ok().and_then(|g| *g);
+    let Some(g) = guard else { return false };
+    if Instant::now() > g.deadline {
+        if let Ok(mut s) = TRAVEL_GUARD.lock() {
+            *s = None;
+        }
+        return false;
+    }
+    let pad = 10.0;
+    if cursor_x >= g.panel_x - pad
+        && cursor_x <= g.panel_x + g.panel_w + pad
+        && cursor_y >= g.panel_y - pad
+        && cursor_y <= g.panel_y + g.panel_h + pad
+    {
+        return true;
+    }
+    point_in_triangle(
+        cursor_x,
+        cursor_y,
+        g.anchor_x,
+        g.anchor_y,
+        g.panel_x - pad,
+        g.panel_y,
+        g.panel_x + g.panel_w + pad,
+        g.panel_y,
+    )
+}
+
+pub fn spawn_panel_focus_watcher(
+    keep_classes: &'static [&'static str],
+    own_title: &'static str,
+    mut dismiss: State<bool>,
+) {
+    spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let should_close = tokio::task::spawn_blocking(move || {
+                let out = std::process::Command::new("hyprctl").args(["activewindow", "-j"]).output();
+                if let Ok(o) = out {
+                    let s = String::from_utf8_lossy(&o.stdout).to_string();
+                    if s.trim().is_empty() || s.contains("\"class\": \"\"") {
+                        return false;
+                    }
+                    for c in keep_classes {
+                        if s.contains(&format!("\"class\": \"{c}\"")) {
+                            return false;
+                        }
+                    }
+                    if s.contains(&format!("\"title\": \"{own_title}\"")) {
+                        return false;
+                    }
+                    return true;
+                }
+                false
+            })
+            .await
+            .unwrap_or(false);
+            if should_close {
+                let travelling =
+                    tokio::task::spawn_blocking(cursor_in_travel_zone).await.unwrap_or(false);
+                if travelling {
+                    continue;
+                }
+                dismiss.set(true);
+                break;
+            }
+        }
+    });
+}
+
+pub fn cursor_pos_blocking() -> Option<(f64, f64)> {
+    let out = std::process::Command::new("hyprctl").args(["cursorpos"]).output().ok()?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    let (x, y) = s.trim().split_once(',')?;
+    Some((x.trim().parse::<f64>().ok()?, y.trim().parse::<f64>().ok()?))
+}
+
+pub fn cursor_in_travel_zone() -> bool {
+    let Some((x, y)) = cursor_pos_blocking() else { return false };
+    travel_guard_holds(x, y)
 }

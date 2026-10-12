@@ -109,6 +109,7 @@ pub fn control_panel_app() -> Element {
     let bt_pin: State<String> = use_state(String::new);
     let bt_pairing: State<bool> = use_state(|| false);
     let bt_error: State<Option<String>> = use_state(|| None);
+    let mut dismiss = use_state(|| false);
     use_hook(move || {
         load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
         subscribe_live(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
@@ -171,37 +172,13 @@ pub fn control_panel_app() -> Element {
         });
     });
     use_hook(|| {
-        let panel_id = Platform::window_id();
-        spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                let should_close = tokio::task::spawn_blocking(|| {
-                    let out = std::process::Command::new("hyprctl").args(["activewindow", "-j"]).output();
-                    if let Ok(o) = out {
-                        let s = String::from_utf8_lossy(&o.stdout).to_string();
-                        if s.trim().is_empty() || s.contains("\"class\": \"\"") {
-                            return false;
-                        }
-                        if s.contains("\"class\": \"overlay-panel\"")
-                            || s.contains("\"class\": \"overlay\"")
-                            || s.contains("\"class\": \"topbar-panel\"")
-                            || s.contains("\"class\": \"topbar\"")
-                        {
-                            return false;
-                        }
-                        return true;
-                    }
-                    false
-                })
-                .await
-                .unwrap_or(false);
-                if should_close {
-                    Platform::get().close_window(panel_id);
-                    break;
-                }
-            }
-        });
+        crate::state::spawn_panel_focus_watcher(
+            &["overlay-panel", "topbar-panel", "overlay", "topbar"],
+            "control-panel",
+            dismiss,
+        );
     });
+    let wid = Platform::window_id();
     let _wifi_on = *wifi.read();
     let _bt_on = *bt.read();
     let wired_info = wired.read().clone();
@@ -210,6 +187,30 @@ pub fn control_panel_app() -> Element {
     let has_battery = !bat_status.is_empty() && bat_status != "Unknown" && bat_pct > 0;
     let (current_wifi, available_networks) = wifi_details.read().clone();
     let bt_list = bt_devices.read().clone();
+    let wifi_row_count = if !*wifi.read() {
+        0
+    } else {
+        let n = available_networks
+            .iter()
+            .filter(|net| !(current_wifi.ssid.as_ref() == Some(&net.ssid) && net.is_connected))
+            .take(8)
+            .count();
+        if n == 0 && current_wifi.ssid.is_none() { 1 } else { n }
+    };
+    let bt_row_count = if !*bt.read() {
+        0
+    } else {
+        let connected_n = bt_list.iter().filter(|d| d.connected).count();
+        let other_n = bt_list.iter().filter(|d| !d.connected).take(8).count();
+        let mut n = (if connected_n == 0 { 1 } else { connected_n }) + other_n;
+        if bt_list.is_empty() {
+            n += 1;
+        }
+        n
+    };
+    let row1_list_h = ((wifi_row_count.min(5) as f32 * 30.0 + 8.0).clamp(40.0, 120.0))
+        .max((bt_row_count.min(5) as f32 * 32.0 + 8.0).clamp(40.0, 120.0));
+    let row2_h = if wired.read().clone().is_some_and(|i| !i.ip_address.is_empty()) { 108.0 } else { 92.0 };
 
     let wifi_card = {
         let wifi_on = *wifi.read();
@@ -340,7 +341,7 @@ pub fn control_panel_app() -> Element {
             if rows.is_empty() && current_wifi.ssid.is_none() {
                 rows.push(tile_sub("No networks found").into_element());
             }
-            let list_h = (rows.len().min(5) as f32 * 30.0 + 8.0).clamp(40.0, 120.0);
+            let list_h = row1_list_h;
             card = card.child(
                 ScrollView::new()
                     .width(Size::fill())
@@ -439,7 +440,7 @@ pub fn control_panel_app() -> Element {
             if bt_list.is_empty() {
                 rows.push(tile_sub("No devices found — scanning...").into_element());
             }
-            let list_h = (rows.len().min(5) as f32 * 32.0 + 8.0).clamp(40.0, 120.0);
+            let list_h = row1_list_h;
             card = card.child(
                 ScrollView::new()
                     .width(Size::fill())
@@ -450,8 +451,9 @@ pub fn control_panel_app() -> Element {
         }
         card
     };
-    let wired_card =
-        tile().child(tile_head(Some(WIRED), "Wired", None::<Element>)).child(if let Some(ref info) = wired_info {
+    let wired_card = tile()
+        .height(Size::px(row2_h))
+        .child(tile_head(Some(WIRED), "Wired", None::<Element>)).child(if let Some(ref info) = wired_info {
             if info.ip_address.is_empty() {
                 dot_status_row(
                     info.interface.clone(),
@@ -478,7 +480,7 @@ pub fn control_panel_app() -> Element {
             )
             .into_element()
         });
-    let focus_card = tile().child(tile_head(
+    let focus_card = tile().height(Size::px(row2_h)).child(tile_head(
         Some(FOCUS),
         "Focus",
         Some({
@@ -597,7 +599,10 @@ pub fn control_panel_app() -> Element {
                 )
                 .child(label().font_size(12.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text("Overlay")),
         )
-        .child(small_close_button(move || Platform::get().close_window(Platform::window_id())));
+        .child(small_close_button(move || dismiss.set(true)));
+    let stagger_total = if has_battery { 4 } else { 3 };
+    let stagger_last = stagger_total - 1;
+    let stagger_dr = dismiss.into_readable();
     let panel_inner_content = rect()
         .width(Size::fill())
         .vertical()
@@ -605,6 +610,7 @@ pub fn control_panel_app() -> Element {
         .content(Content::Flex)
         .child(header)
         .child(
+            StaggerRow::new(0, stagger_total, stagger_dr.clone()).child(
             rect()
                 .width(Size::fill())
                 .horizontal()
@@ -612,8 +618,9 @@ pub fn control_panel_app() -> Element {
                 .content(Content::Flex)
                 .child(rect().width(Size::flex(1.)).vertical().spacing(10.).child(wifi_card).child(wired_card))
                 .child(rect().width(Size::flex(1.)).vertical().spacing(10.).child(bt_card).child(focus_card)),
-        )
+        ))
         .child(
+            StaggerRow::new(1, stagger_total, stagger_dr.clone()).child(
             rect()
                 .width(Size::fill())
                 .horizontal()
@@ -625,9 +632,9 @@ pub fn control_panel_app() -> Element {
                         .supports_brightness()
                         .then(|| rect().width(Size::flex(1.)).child(brightness_card).into_element()),
                 ),
-        )
-        .maybe(has_battery, |el| el.child(battery_card))
-        .child(actions_row);
+        ))
+        .maybe(has_battery, |el| el.child(StaggerRow::new(2, stagger_total, stagger_dr.clone()).child(battery_card)))
+        .child(StaggerRow::new(stagger_last, stagger_total, stagger_dr.clone()).child(actions_row));
     let panel_inner = rect()
         .width(Size::fill())
         .vertical()
@@ -636,13 +643,19 @@ pub fn control_panel_app() -> Element {
         .content(Content::Flex)
         .corner_radius(20.)
         .border(Border::new().width(1.).fill(t.border))
-        .child(ScrollView::new().width(Size::fill()).height(Size::fill()).show_scrollbar(false).child(panel_inner_content));
+        .child(ScrollView::new().width(Size::fill()).height(Size::auto()).show_scrollbar(false).child(panel_inner_content));
     rect()
         .width(Size::fill())
         .height(Size::fill())
         .padding(6.)
         .background(Color::TRANSPARENT)
         .content(Content::Flex)
-        .child(panel_inner)
+        .child(
+            PanelShell::new(dismiss.into_readable())
+                .duration(300)
+                .scale_from(1.0)
+                .on_dismiss(EventHandler::new(move |()| Platform::get().close_window(wid)))
+                .child(panel_inner),
+        )
         .into_element()
 }

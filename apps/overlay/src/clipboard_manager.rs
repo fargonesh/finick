@@ -23,13 +23,17 @@ fn trunc(s: &str, n: usize) -> String {
 }
 
 #[derive(PartialEq)]
-pub struct ClipboardManager;
+pub struct ClipboardManager {
+    pub dismiss: State<bool>,
+}
 
 impl Component for ClipboardManager {
     fn render(&self) -> impl IntoElement {
         let t = use_app_theme();
         let items = use_state(Vec::<ClipboardItem>::new);
         let filter = use_state(String::new);
+        let mut dismiss = self.dismiss;
+        let wid = Platform::window_id();
         use_hook(move || {
             let mut it = items;
             spawn(async move {
@@ -91,10 +95,14 @@ impl Component for ClipboardManager {
             .background(Color::TRANSPARENT)
             .content(Content::Flex)
             .child(
-                FadeSlideIn::new().child(
+                PanelShell::new(dismiss.into_readable())
+                    .duration(300)
+                    .scale_from(1.0)
+                    .on_dismiss(EventHandler::new(move |()| Platform::get().close_window(wid)))
+                    .child(
                     rect()
                         .width(Size::fill())
-                        .height(Size::fill())
+                        .height(Size::auto())
                         .corner_radius(20.)
                         .background(t.panel)
                         .border(Border::new().width(1.).fill(t.border))
@@ -130,25 +138,21 @@ impl Component for ClipboardManager {
                                                 it.set(cur);
                                             }
                                         }))
-                                        .child(small_close_button(move || {
-                                            Platform::get().close_window(Platform::window_id())
-                                        })),
+                                        .child(small_close_button(move || dismiss.set(true))),
                                 ),
                         )
                         .child(sidebar_search(filter, "Search clipboard…"))
-                        .child(rect().width(Size::fill()).height(Size::fill()).content(Content::Flex).child(
-                            if filtered.is_empty() {
-                                empty_state(COPY, "No clipboard items", "Copy text to see it here").into_element()
-                            } else {
-                                ScrollView::new()
-                                    .width(Size::fill())
-                                    .height(Size::fill())
-                                    .child(rect().width(Size::fill()).vertical().spacing(6.).children(
-                                        filtered.into_iter().map(|it| {
+                        .child({
+                            let n = filtered.len();
+                            let sc = n.min(8);
+                            let dr = dismiss.into_readable();
+                            let col =
+                                rect().width(Size::fill()).vertical().spacing(6.).content(Content::Flex).children(
+                                        filtered.into_iter().enumerate().map(|(i, it)| {
                                             let id = it.id;
                                             let txt = trunc(&it.text, 80);
                                             let pinned = it.pinned;
-                                            rect()
+                                            StaggerRow::new(i, sc, dr.clone()).child(rect()
                                                 .width(Size::fill())
                                                 .padding((8., 10.))
                                                 .corner_radius(10.)
@@ -176,46 +180,51 @@ impl Component for ClipboardManager {
                                                         .horizontal()
                                                         .spacing(6.)
                                                         .content(Content::Flex)
-                                                        .child(ghost_button(if pinned { "Unpin" } else { "Pin" }, {
-                                                            let id = id;
-                                                            move || {
-                                                                let _ = ipsea::clipboard::toggle_pin_item(
-                                                                    CLIPBOARD_SOCKET_NAME,
-                                                                    id,
-                                                                );
-                                                            }
-                                                        }))
-                                                        .child(secondary_button("Copy", {
+                                                        .child(tool_button(
+                                                            PIN,
+                                                            if pinned { t.accent } else { t.text_dim },
+                                                            {
+                                                                let id = id;
+                                                                move || {
+                                                                    let _ = ipsea::clipboard::toggle_pin_item(
+                                                                        CLIPBOARD_SOCKET_NAME,
+                                                                        id,
+                                                                    );
+                                                                }
+                                                            },
+                                                        ))
+                                                        .child(tool_button(COPY, t.text, {
                                                             let id = id;
                                                             move || {
                                                                 let _ =
                                                                     ipsea::clipboard::select_item(CLIPBOARD_SOCKET_NAME, id);
                                                             }
                                                         }))
-                                                        .child(
-                                                            rect()
-                                                                .width(Size::px(28.))
-                                                                .height(Size::px(28.))
-                                                                .corner_radius(6.)
-                                                                .background(t.panel_raised)
-                                                                .border(Border::new().width(1.).fill(t.border))
-                                                                .center()
-                                                                .cursor(CursorIcon::Pointer)
-                                                                .on_press(move |_| {
-                                                                    let _ = ipsea::clipboard::delete_item(
-                                                                        CLIPBOARD_SOCKET_NAME,
-                                                                        id,
-                                                                    );
-                                                                })
-                                                                .child(label().font_size(11.).color(t.accent_red).text("✕")),
-                                                        ),
+                                                        .child(tool_button(TRASH, t.accent_red, move || {
+                                                            let _ = ipsea::clipboard::delete_item(
+                                                                CLIPBOARD_SOCKET_NAME,
+                                                                id,
+                                                            );
+                                                        })),
+                                                )
                                                 )
                                                 .into_element()
                                         }),
-                                    ))
-                                    .into_element()
-                            },
-                        )),
+                                );
+                            rect().width(Size::fill()).height(Size::auto()).content(Content::Flex).child(
+                                if n == 0 {
+                                    empty_state(COPY, "No clipboard items", "Copy text to see it here").into_element()
+                                } else if n > 4 {
+                                    ScrollView::new()
+                                        .width(Size::fill())
+                                        .height(Size::px(240.))
+                                        .child(col)
+                                        .into_element()
+                                } else {
+                                    col.into_element()
+                                },
+                            )
+                        }),
                 ),
             )
             .into_element()
@@ -360,35 +369,11 @@ pub fn start_clipboard_service() {
 
 pub fn clipboard_app() -> Element {
     let _st = use_init_app_theme(get_theme());
-    use_hook(|| {
-        let wid = Platform::window_id();
-        spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                let should_close = tokio::task::spawn_blocking(|| {
-                    let out = std::process::Command::new("hyprctl").args(["activewindow", "-j"]).output();
-                    if let Ok(o) = out {
-                        let s = String::from_utf8_lossy(&o.stdout).to_string();
-                        if s.trim().is_empty() || s.contains("\"class\": \"\"") {
-                            return false;
-                        }
-                        if s.contains("\"class\": \"overlay-clipboard\"") {
-                            return false;
-                        }
-                        return !s.contains("\"title\": \"clipboard\"");
-                    }
-                    false
-                })
-                .await
-                .unwrap_or(false);
-                if should_close {
-                    Platform::get().close_window(wid);
-                    break;
-                }
-            }
-        });
+    let dismiss = use_state(|| false);
+    use_hook(move || {
+        crate::state::spawn_panel_focus_watcher(&["overlay-clipboard", "overlay", "topbar"], "clipboard", dismiss);
     });
-    ClipboardManager.into_element()
+    ClipboardManager { dismiss }.into_element()
 }
 
 pub fn clipboard_window_config() -> WindowConfig {
@@ -402,8 +387,8 @@ pub fn clipboard_window_config() -> WindowConfig {
         .with_transparency(true)
         .with_resizable(false)
         .with_background(Color::TRANSPARENT)
-        .with_on_close(|_ctx, _wid| {
-            if let Some(cw) = GlobalContexts::get().try_get_context::<crate::ClipboardWindowId>() {
+        .with_on_close(|ctx, _wid| {
+            if let Some(cw) = ctx.global_contexts.try_get_context::<crate::ClipboardWindowId>() {
                 if let Ok(mut g) = cw.0.lock() {
                     *g = None;
                 }
@@ -412,55 +397,4 @@ pub fn clipboard_window_config() -> WindowConfig {
         })
 }
 
-pub fn open_clipboard_manager() {
-    let mon = crate::get_monitor_states().into_iter().find(|m| m.x == 0).unwrap_or(crate::MonitorState {
-        name: "default".to_string(),
-        x: 0,
-        y: 0,
-        width: 1920.0,
-        height: 1080.0,
-    });
-    let w = 520;
-    let h = 380;
-    let px = mon.x + mon.width as i32 - w - 12;
-    let py = mon.y + 44;
-    let lua_rule = format!(
-        r#"hl.window_rule({{ name = "finick-clipboard-position", match = {{ class = "^(overlay-clipboard)$" }}, monitor = "{mon}", float = true, pin = true, move = {{ {px}, {py} }}, size = {{ {w}, {h} }}, border_size = 0, no_shadow = true, no_anim = true, no_blur = true, rounding = 20 }})"#,
-        mon = mon.name,
-        px = px,
-        py = py,
-        w = w,
-        h = h
-    );
-    let _ = std::process::Command::new("hyprctl").args(["eval", &lua_rule]).output();
-    let cfg = clipboard_window_config();
-    spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(35)).await;
-        let wid = Platform::get().launch_window(cfg).await;
-        let _ = wid;
-        tokio::spawn(async move {
-            for delay in [30, 80] {
-                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
-                let lua = format!(
-                    r#"
-                    for _, w in ipairs(hl.get_windows()) do
-                        if w.class == 'overlay-clipboard' or w.title == 'clipboard' then
-                            local addr = 'address:' .. tostring(w.address)
-                            hl.dispatch(hl.dsp.window.float({{ window = addr }}))
-                            hl.dispatch(hl.dsp.window.pin({{ window = addr }}))
-                            hl.dispatch(hl.dsp.window.move({{ window = addr, x = {px}, y = {py} }}))
-                            hl.dispatch(hl.dsp.window.resize({{ window = addr, x = {w}, y = {h}, relative = false }}))
-                            break
-                        end
-                    end
-                    "#,
-                    px = px,
-                    py = py,
-                    w = w,
-                    h = h
-                );
-                let _ = std::process::Command::new("hyprctl").args(["eval", &lua]).output();
-            }
-        });
-    });
-}
+

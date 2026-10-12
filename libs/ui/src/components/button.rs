@@ -1,5 +1,8 @@
 use {
-    crate::theme::{RADIUS_PILL, use_app_theme},
+    crate::{
+        icons::icon,
+        theme::{RADIUS_PILL, use_app_theme},
+    },
     freya::prelude::*,
 };
 
@@ -104,6 +107,21 @@ pub fn ghost_button(text: impl Into<String>, mut on_press: impl FnMut() + 'stati
         .cursor(CursorIcon::Pointer)
         .on_press(move |_| on_press())
         .child(label().font_size(12.).font_weight(FontWeight::MEDIUM).color(t.text).text(text_str))
+}
+
+/// A uniform square icon button for row actions (pin, copy, delete).
+pub fn tool_button(icon_svg: &'static str, icon_color: Color, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
+    let t = use_app_theme();
+    rect()
+        .width(Size::px(30.))
+        .height(Size::px(30.))
+        .corner_radius(8.)
+        .background(t.panel_raised)
+        .border(Border::new().width(1.).fill(t.border))
+        .center()
+        .cursor(CursorIcon::Pointer)
+        .on_press(move |_| on_press())
+        .child(icon(icon_svg, 14., icon_color))
 }
 
 /// A focus pill button with indicator dot matching .focus-pill in ui_demo.html

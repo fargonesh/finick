@@ -5,7 +5,9 @@ use {
 };
 
 #[derive(PartialEq)]
-pub struct ScreenshotUtility;
+pub struct ScreenshotUtility {
+    pub dismiss: State<bool>,
+}
 
 impl Component for ScreenshotUtility {
     fn render(&self) -> impl IntoElement {
@@ -15,6 +17,8 @@ impl Component for ScreenshotUtility {
         let mon_names: Vec<String> = monitors.iter().map(|m| m.name.clone()).collect();
         let selected_mon = use_state(|| mon_names.first().cloned().unwrap_or_default());
         let copying = use_state(|| false);
+        let mut dismiss = self.dismiss;
+        let wid = Platform::window_id();
         rect()
             .width(Size::fill())
             .height(Size::fill())
@@ -22,10 +26,14 @@ impl Component for ScreenshotUtility {
             .background(Color::TRANSPARENT)
             .content(Content::Flex)
             .child(
-                FadeSlideIn::new().child(
+                PanelShell::new(dismiss.into_readable())
+                    .duration(300)
+                    .scale_from(1.0)
+                    .on_dismiss(EventHandler::new(move |()| Platform::get().close_window(wid)))
+                    .child(
                     rect()
                         .width(Size::fill())
-                        .height(Size::fill())
+                        .height(Size::auto())
                         .padding(12.)
                         .corner_radius(20.)
                         .background(t.panel)
@@ -41,7 +49,7 @@ impl Component for ScreenshotUtility {
                                 .cross_align(Alignment::Center)
                                 .content(Content::Flex)
                                 .child(label().font_size(16.).font_weight(FontWeight::BOLD).color(t.text).text("Screenshot"))
-                                .child(small_close_button(move || Platform::get().close_window(Platform::window_id()))),
+                                .child(small_close_button(move || dismiss.set(true))),
                         )
                         .child(label().font_size(12.).color(t.text_dim).text("Capture and copy to clipboard"))
                         .child(
@@ -53,7 +61,7 @@ impl Component for ScreenshotUtility {
                                 .child({
                                     let mut st = status;
                                     let mut cp = copying;
-                                    action_tile_flex("⛶", "Fullscreen", false, move || {
+                                    action_tile_flex(FULLSCREEN, "Fullscreen", false, move || {
                                         if *cp.read() {
                                             return;
                                         }
@@ -92,7 +100,7 @@ impl Component for ScreenshotUtility {
                                 .child({
                                     let mut st = status;
                                     let mut cp = copying;
-                                    action_tile_flex("◫", "Region", false, move || {
+                                    action_tile_flex(CROP_ICON, "Region", false, move || {
                                         if *cp.read() {
                                             return;
                                         }
@@ -132,7 +140,7 @@ impl Component for ScreenshotUtility {
                                     let mut st = status;
                                     let mut cp = copying;
                                     let mon = selected_mon.read().clone();
-                                    action_tile_flex("🖥", "Monitor", false, move || {
+                                    action_tile_flex(MONITOR_ICON, "Monitor", false, move || {
                                         if *cp.read() || mon.is_empty() {
                                             return;
                                         }
@@ -213,35 +221,11 @@ impl Component for ScreenshotUtility {
 
 pub fn screenshot_app() -> Element {
     let _st = use_init_app_theme(get_theme());
-    use_hook(|| {
-        let wid = Platform::window_id();
-        spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                let should_close = tokio::task::spawn_blocking(|| {
-                    let out = std::process::Command::new("hyprctl").args(["activewindow", "-j"]).output();
-                    if let Ok(o) = out {
-                        let s = String::from_utf8_lossy(&o.stdout).to_string();
-                        if s.trim().is_empty() || s.contains("\"class\": \"\"") {
-                            return false;
-                        }
-                        if s.contains("\"class\": \"overlay-screenshot\"") {
-                            return false;
-                        }
-                        return !s.contains("\"title\": \"screenshot\"");
-                    }
-                    false
-                })
-                .await
-                .unwrap_or(false);
-                if should_close {
-                    Platform::get().close_window(wid);
-                    break;
-                }
-            }
-        });
+    let dismiss = use_state(|| false);
+    use_hook(move || {
+        crate::state::spawn_panel_focus_watcher(&["overlay-screenshot", "overlay", "topbar"], "screenshot", dismiss);
     });
-    ScreenshotUtility.into_element()
+    ScreenshotUtility { dismiss }.into_element()
 }
 
 pub fn screenshot_window_config() -> WindowConfig {
@@ -255,8 +239,8 @@ pub fn screenshot_window_config() -> WindowConfig {
         .with_transparency(true)
         .with_resizable(false)
         .with_background(Color::TRANSPARENT)
-        .with_on_close(|_ctx, _wid| {
-            if let Some(sw) = GlobalContexts::get().try_get_context::<crate::ScreenshotWindowId>() {
+        .with_on_close(|ctx, _wid| {
+            if let Some(sw) = ctx.global_contexts.try_get_context::<crate::ScreenshotWindowId>() {
                 if let Ok(mut g) = sw.0.lock() {
                     *g = None;
                 }
@@ -265,55 +249,4 @@ pub fn screenshot_window_config() -> WindowConfig {
         })
 }
 
-pub fn open_screenshot_utility() {
-    let mon = crate::get_monitor_states().into_iter().find(|m| m.x == 0).unwrap_or(crate::MonitorState {
-        name: "default".to_string(),
-        x: 0,
-        y: 0,
-        width: 1920.0,
-        height: 1080.0,
-    });
-    let w = 500;
-    let h = 264;
-    let px = mon.x + mon.width as i32 - w - 12;
-    let py = mon.y + 44;
-    let lua_rule = format!(
-        r#"hl.window_rule({{ name = "finick-screenshot-position", match = {{ class = "^(overlay-screenshot)$" }}, monitor = "{mon}", float = true, pin = true, move = {{ {px}, {py} }}, size = {{ {w}, {h} }}, border_size = 0, no_shadow = true, no_anim = true, no_blur = true, rounding = 20 }})"#,
-        mon = mon.name,
-        px = px,
-        py = py,
-        w = w,
-        h = h
-    );
-    let _ = std::process::Command::new("hyprctl").args(["eval", &lua_rule]).output();
-    let cfg = screenshot_window_config();
-    spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(35)).await;
-        let wid = Platform::get().launch_window(cfg).await;
-        let _ = wid;
-        tokio::spawn(async move {
-            for delay in [30, 80] {
-                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
-                let lua = format!(
-                    r#"
-                    for _, w in ipairs(hl.get_windows()) do
-                        if w.class == 'overlay-screenshot' or w.title == 'screenshot' then
-                            local addr = 'address:' .. tostring(w.address)
-                            hl.dispatch(hl.dsp.window.float({{ window = addr }}))
-                            hl.dispatch(hl.dsp.window.pin({{ window = addr }}))
-                            hl.dispatch(hl.dsp.window.move({{ window = addr, x = {px}, y = {py} }}))
-                            hl.dispatch(hl.dsp.window.resize({{ window = addr, x = {w}, y = {h}, relative = false }}))
-                            break
-                        end
-                    end
-                    "#,
-                    px = px,
-                    py = py,
-                    w = w,
-                    h = h
-                );
-                let _ = std::process::Command::new("hyprctl").args(["eval", &lua]).output();
-            }
-        });
-    });
-}
+

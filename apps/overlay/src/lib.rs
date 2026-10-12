@@ -4,6 +4,7 @@ pub mod clipboard_manager;
 pub mod launcher;
 mod notification_panel;
 mod notification_popup;
+mod toasts;
 pub mod osd;
 mod panel;
 pub mod screenshot;
@@ -37,6 +38,9 @@ pub struct ClipboardWindowId(pub Arc<Mutex<Option<winit::window::WindowId>>>);
 #[derive(Clone, Default)]
 pub struct ScreenshotWindowId(pub Arc<Mutex<Option<winit::window::WindowId>>>);
 
+#[derive(Clone, Default)]
+pub struct ToastWindowId(pub Arc<Mutex<Option<winit::window::WindowId>>>);
+
 fn clock_now() -> String { state::clock_now() }
 
 fn panel_window_config() -> WindowConfig {
@@ -50,8 +54,8 @@ fn panel_window_config() -> WindowConfig {
         .with_transparency(true)
         .with_resizable(false)
         .with_background(Color::TRANSPARENT)
-        .with_on_close(|_ctx, _wid| {
-            if let Some(panel) = GlobalContexts::get().try_get_context::<PanelWindowId>() {
+        .with_on_close(|ctx, _wid| {
+            if let Some(panel) = ctx.global_contexts.try_get_context::<PanelWindowId>() {
                 if let Ok(mut g) = panel.0.lock() {
                     *g = None;
                 }
@@ -132,6 +136,7 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                 let current_mon = get_monitor_state(&mon_name);
                 let panel_x = current_mon.x + current_mon.width as i32 - 460 - 12;
                 let panel_y = current_mon.y + 44;
+                crate::state::arm_travel_guard(panel_x as f64, panel_y as f64, 460., 700., (panel_x + 380) as f64);
 
                 // Set placement rule before window maps via Hyprland 0.55 Lua API
                 let lua_rule = format!(
@@ -259,6 +264,7 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                 let current_mon = get_monitor_state(&mon_name);
                 let panel_x = current_mon.x + current_mon.width as i32 - 400 - 12;
                 let panel_y = current_mon.y + 44;
+                crate::state::arm_travel_guard(panel_x as f64, panel_y as f64, 400., 520., (panel_x + 340) as f64);
                 let lua_rule = format!(
                     r#"
                     hl.window_rule({{
@@ -322,7 +328,6 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
     let battery_pct = use_state(|| 0u8);
     let battery_status = use_state(|| "Unknown".to_string());
     let notifications = use_state(Vec::<state::Notification>::new);
-    let overlay_toasts = use_state(Vec::<state::Notification>::new);
     let workspaces = use_state(|| system::get_workspaces());
     let active_workspaces = use_state(|| system::get_active_workspaces());
 
@@ -378,48 +383,6 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
             }
         });
 
-        let mut ot_state = overlay_toasts;
-        spawn(async move {
-            loop {
-                if let Ok(mut rx) = ipsea::notifications::subscribe_channel(ipsea::notifications::NOTIFICATIONS_SOCKET_NAME)
-                {
-                    while let Some(evt) = rx.recv().await {
-                        match evt {
-                            ipsea::notifications::NotificationEvent::Show(notif) => {
-                                let id = notif.id;
-                                let timeout = if notif.timeout > 0 { notif.timeout as u64 } else { 5000 };
-
-                                let mut current = ot_state.read().clone();
-                                if let Some(idx) = current.iter().position(|n| n.id == id) {
-                                    current[idx] = notif.clone();
-                                } else {
-                                    current.push(notif.clone());
-                                }
-                                ot_state.set(current);
-
-                                let mut ot_dismiss = ot_state;
-                                spawn(async move {
-                                    tokio::time::sleep(std::time::Duration::from_millis(timeout)).await;
-                                    let mut list = ot_dismiss.read().clone();
-                                    if let Some(pos) = list.iter().position(|n| n.id == id) {
-                                        list.remove(pos);
-                                        ot_dismiss.set(list);
-                                    }
-                                });
-                            }
-                            ipsea::notifications::NotificationEvent::Close(id) => {
-                                let mut current = ot_state.read().clone();
-                                if let Some(pos) = current.iter().position(|n| n.id == id) {
-                                    current.remove(pos);
-                                    ot_state.set(current);
-                                }
-                            }
-                        }
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-            }
-        });
         let mut clk = clock;
         let is_24h = use_24h;
         let mut wired_state = wired;
@@ -723,18 +686,7 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                             .width(Size::px(28.))
                             .height(Size::px(28.))
                             .corner_radius(8.)
-                            .background(if is_h {
-                                t.panel_raised
-                            } else if has_notif {
-                                t.panel
-                            } else {
-                                Color::TRANSPARENT
-                            })
-                            .border(Border::new().width(1.).fill(if is_h || has_notif {
-                                t.border
-                            } else {
-                                Color::TRANSPARENT
-                            }))
+                            .background(if is_h { t.panel_raised } else { Color::TRANSPARENT })
                             .center()
                             .cursor(CursorIcon::Pointer)
                             .on_pointer_enter(move |_| h.set(true))
@@ -743,34 +695,29 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                                 let tn = toggle_notifications.clone();
                                 move |_| tn()
                             })
-                            .child(
-                                rect()
-                                    .horizontal()
-                                    .cross_align(Alignment::Center)
-                                    .spacing(2.)
-                                    .content(Content::Flex)
-                                    .child(icon_stroked(NOTIFICATIONS, sz - 1., sw, if has_notif { t.accent } else { base }))
-                                    .maybe(has_notif, |el| {
-                                        el.child(
-                                            rect()
-                                                .padding((1., 4.))
-                                                .corner_radius(999.)
-                                                .background(t.accent_red)
-                                                .center()
-                                                .child(
-                                                    label()
-                                                        .font_size(9.)
-                                                        .font_weight(FontWeight::BOLD)
-                                                        .color(Color::WHITE)
-                                                        .text(if count > 99 {
-                                                            "99+".to_string()
-                                                        } else {
-                                                            count.to_string()
-                                                        }),
-                                                ),
-                                        )
-                                    }),
-                            )
+                            .child(icon_stroked(NOTIFICATIONS, sz - 1., sw, if has_notif { t.accent } else { base }))
+                            .maybe(has_notif, |el| {
+                                el.child(
+                                    rect()
+                                        .position(Position::new_absolute().top(0.).right(0.))
+                                        .height(Size::px(15.))
+                                        .padding((0., 4.))
+                                        .corner_radius(999.)
+                                        .background(t.accent_red)
+                                        .center()
+                                        .child(
+                                            label()
+                                                .font_size(9.)
+                                                .font_weight(FontWeight::BOLD)
+                                                .color(Color::WHITE)
+                                                .text(if count > 99 {
+                                                    "99+".to_string()
+                                                } else {
+                                                    count.to_string()
+                                                }),
+                                        ),
+                                )
+                            })
                     })
                 })
                 .child(
@@ -910,6 +857,18 @@ pub fn apply_hyprland_base_rules() {
             no_shadow = true,
             no_anim = true,
             no_blur = true,
+            rounding = 20,
+        })
+        hl.window_rule({
+            name = "finick-toasts",
+            match = { class = "^(overlay-toasts)$" },
+            float = true,
+            pin = true,
+            border_size = 0,
+            no_shadow = true,
+            no_anim = true,
+            no_blur = true,
+            no_initial_focus = true,
             rounding = 20,
         })
     "#;
@@ -1436,6 +1395,7 @@ pub fn run() {
         .with_global(NotificationPanelWindowId::default())
         .with_global(ClipboardWindowId::default())
         .with_global(ScreenshotWindowId::default())
+        .with_global(ToastWindowId::default())
         .with_global(modal::ModalState::default());
 
     for mon in &initial_monitors {
@@ -1478,6 +1438,9 @@ pub fn run() {
                                 if let Some(ctx) = ctx.global_contexts.try_get_context::<crate::ScreenshotWindowId>() {
                                     if let Ok(mut g) = ctx.0.lock() { *g = None; }
                                 }
+                                if let Some(ctx) = ctx.global_contexts.try_get_context::<crate::ToastWindowId>() {
+                                    if let Ok(mut g) = ctx.0.lock() { *g = None; }
+                                }
                                 if let Some(modal_ctx) = ctx.global_contexts.try_get_context::<modal::ModalState>() {
                                     if let Ok(mut g) = modal_ctx.req.lock() { *g = None; }
                                 }
@@ -1487,6 +1450,7 @@ pub fn run() {
                         let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-clipboard)$"]).output();
                         let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-screenshot)$"]).output();
                         let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-notifications)$"]).output();
+                        let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-toasts)$"]).output();
                         let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-panel)$"]).output();
                     } else if let ipsea::modals::ModalRequest::Clipboard = req {
                         let proxy = proxy_clone.clone();
@@ -1498,8 +1462,10 @@ pub fn run() {
                                 if let Some(cw) = ctx.global_contexts.try_get_context::<crate::ClipboardWindowId>() {
                                     if let Ok(mut g) = cw.0.lock() {
                                         if let Some(id) = g.take() {
-                                            ctx.windows_mut().remove(&id);
-                                            was_open = true;
+                                            if ctx.windows().contains_key(&id) {
+                                                ctx.windows_mut().remove(&id);
+                                                was_open = true;
+                                            }
                                         }
                                     }
                                 }
@@ -1546,6 +1512,7 @@ pub fn run() {
                             let hgt = 380;
                             let px = mon.x + mon.width as i32 - w - 12;
                             let py = mon.y + 44;
+                            crate::state::arm_travel_guard(px as f64, py as f64, 520., 380., (px + 460) as f64);
                             let mon_name = mon.name.clone();
                             let _ = std::process::Command::new("hyprctl").args(["eval", &format!(r#"hl.window_rule({{ name = "finick-clipboard-live-{mon_name}", match = {{ class = "^(overlay-clipboard)$" }}, monitor = "{mon_name}", float = true, pin = true, move = {{ {px}, {py} }}, size = {{ {w}, {hgt} }}, border_size = 0, no_shadow = true, no_anim = true, no_blur = true, rounding = 20 }})"#, mon_name=mon_name, px=px, py=py, w=w, hgt=hgt)]).output();
                             tokio::time::sleep(std::time::Duration::from_millis(35)).await;
@@ -1589,8 +1556,10 @@ pub fn run() {
                                 if let Some(sw) = ctx.global_contexts.try_get_context::<crate::ScreenshotWindowId>() {
                                     if let Ok(mut g) = sw.0.lock() {
                                         if let Some(id) = g.take() {
-                                            ctx.windows_mut().remove(&id);
-                                            was_open = true;
+                                            if ctx.windows().contains_key(&id) {
+                                                ctx.windows_mut().remove(&id);
+                                                was_open = true;
+                                            }
                                         }
                                     }
                                 }
@@ -1637,6 +1606,7 @@ pub fn run() {
                             let hgt = 264;
                             let px = mon.x + mon.width as i32 - w - 12;
                             let py = mon.y + 44;
+                            crate::state::arm_travel_guard(px as f64, py as f64, 500., 264., (px + 440) as f64);
                             let mon_name = mon.name.clone();
                             let _ = std::process::Command::new("hyprctl").args(["eval", &format!(r#"hl.window_rule({{ name = "finick-screenshot-live-{mon_name}", match = {{ class = "^(overlay-screenshot)$" }}, monitor = "{mon_name}", float = true, pin = true, move = {{ {px}, {py} }}, size = {{ {w}, {hgt} }}, border_size = 0, no_shadow = true, no_anim = true, no_blur = true, rounding = 20 }})"#, mon_name=mon_name, px=px, py=py, w=w, hgt=hgt)]).output();
                             tokio::time::sleep(std::time::Duration::from_millis(35)).await;
@@ -1728,6 +1698,10 @@ pub fn run() {
                     }
                 }
             );
+        });
+        let proxy_toasts = proxy.clone();
+        tokio::spawn(async move {
+            crate::toasts::run_toast_manager(proxy_toasts).await;
         });
         tokio::spawn(async move {
             run_monitor_listener(proxy, monitors_for_listener).await;

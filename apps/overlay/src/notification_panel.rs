@@ -8,6 +8,8 @@ pub fn notification_panel_app() -> Element {
     let theme_state = use_init_app_theme(get_theme());
     let t = use_app_theme();
     let notifications = use_state(Vec::<crate::state::Notification>::new);
+    let mut dismiss = use_state(|| false);
+    let wid = Platform::window_id();
     use_hook(move || {
         let mut ns = notifications;
         spawn(async move {
@@ -18,35 +20,11 @@ pub fn notification_panel_app() -> Element {
         let _ = theme_state;
     });
     use_hook(|| {
-        let panel_id = Platform::window_id();
-        spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                let should_close = tokio::task::spawn_blocking(|| {
-                    let out = std::process::Command::new("hyprctl").args(["activewindow", "-j"]).output();
-                    if let Ok(o) = out {
-                        let s = String::from_utf8_lossy(&o.stdout).to_string();
-                        if s.trim().is_empty() || s.contains("\"class\": \"\"") {
-                            return false;
-                        }
-                        if s.contains("\"class\": \"overlay-notifications\"")
-                            || s.contains("\"class\": \"overlay\"")
-                            || s.contains("\"class\": \"topbar\"")
-                        {
-                            return false;
-                        }
-                        return true;
-                    }
-                    false
-                })
-                .await
-                .unwrap_or(false);
-                if should_close {
-                    Platform::get().close_window(panel_id);
-                    break;
-                }
-            }
-        });
+        crate::state::spawn_panel_focus_watcher(
+            &["overlay-notifications", "overlay", "topbar"],
+            "notifications-panel",
+            dismiss,
+        );
     });
     let notifs = notifications.read().clone();
     let notif_count = notifs.len();
@@ -98,41 +76,44 @@ pub fn notification_panel_app() -> Element {
                             }
                         })),
                 )
-                .child(small_close_button(move || {
-                    if let Some(ctx) = GlobalContexts::get().try_get_context::<crate::NotificationPanelWindowId>() {
-                        if let Ok(mut g) = ctx.0.lock() {
-                            *g = None;
-                        }
-                    }
-                    Platform::get().close_window(Platform::window_id())
-                })),
+                .child(small_close_button(move || dismiss.set(true))),
         );
     let list = if notifs.is_empty() {
         empty_state(NOTIFICATIONS, "No notifications", "You're all caught up").into_element()
     } else {
-        let mut col = rect().width(Size::fill()).vertical().spacing(10.).content(Content::Flex);
-        for n in notifs.iter().rev().cloned() {
+        let sc = notifs.len().min(8);
+        let dr = dismiss.into_readable();
+        let mut col = rect().width(Size::fill()).vertical().spacing(10.).padding(6.).content(Content::Flex);
+        for (i, n) in notifs.iter().rev().cloned().enumerate() {
             let mut ns = notifications;
             let notif = n.clone();
-            col = col.child(
-                crate::notification_popup::NotificationPopup::from_notification(&notif)
-                    .with_auto_dismiss(false)
-                    .with_width(Size::fill())
-                    .on_close(move |id| {
-                        let mut list = ns.read().clone();
-                        if let Some(pos) = list.iter().position(|item| item.id == id) {
-                            list.remove(pos);
-                            ns.set(list);
-                        }
-                        dismiss_notification(id);
-                    }),
-            );
+            let card = crate::notification_popup::NotificationPopup::from_notification(&notif)
+                .with_auto_dismiss(false)
+                .with_width(Size::fill())
+                .on_close(move |id| {
+                    let mut list = ns.read().clone();
+                    if let Some(pos) = list.iter().position(|item| item.id == id) {
+                        list.remove(pos);
+                        ns.set(list);
+                    }
+                    dismiss_notification(id);
+                });
+            col = col.child(StaggerRow::new(i, sc, dr.clone()).child(card));
         }
-        ScrollView::new().width(Size::fill()).height(Size::fill()).show_scrollbar(true).child(col).into_element()
+        if notifs.len() > 4 {
+            ScrollView::new()
+                .width(Size::fill())
+                .height(Size::px(380.))
+                .show_scrollbar(true)
+                .child(col)
+                .into_element()
+        } else {
+            col.into_element()
+        }
     };
     let inner = rect()
         .width(Size::fill())
-        .height(Size::fill())
+        .height(Size::auto())
         .vertical()
         .spacing(12.)
         .padding(12.)
@@ -141,14 +122,20 @@ pub fn notification_panel_app() -> Element {
         .border(Border::new().width(1.).fill(t.border))
         .content(Content::Flex)
         .child(header)
-        .child(rect().width(Size::fill()).height(Size::fill()).content(Content::Flex).child(list));
+        .child(rect().width(Size::fill()).height(Size::auto()).content(Content::Flex).child(list));
     rect()
         .width(Size::fill())
         .height(Size::fill())
         .padding(6.)
         .background(Color::TRANSPARENT)
         .content(Content::Flex)
-        .child(FadeSlideIn::new().child(inner))
+        .child(
+            PanelShell::new(dismiss.into_readable())
+                .duration(300)
+                .scale_from(1.0)
+                .on_dismiss(EventHandler::new(move |()| Platform::get().close_window(wid)))
+                .child(inner),
+        )
         .into_element()
 }
 
@@ -163,8 +150,8 @@ pub fn notification_panel_window_config() -> WindowConfig {
         .with_transparency(true)
         .with_resizable(false)
         .with_background(Color::TRANSPARENT)
-        .with_on_close(|_ctx, _wid| {
-            if let Some(panel) = GlobalContexts::get().try_get_context::<crate::NotificationPanelWindowId>() {
+        .with_on_close(|ctx, _wid| {
+            if let Some(panel) = ctx.global_contexts.try_get_context::<crate::NotificationPanelWindowId>() {
                 if let Ok(mut g) = panel.0.lock() {
                     *g = None;
                 }
