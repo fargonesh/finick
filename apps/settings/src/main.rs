@@ -10,6 +10,7 @@ use {
 mod detail_pages;
 mod overview;
 mod pages;
+mod screentime;
 mod state;
 
 use {detail_pages::*, overview::overview_page, state::*};
@@ -40,6 +41,14 @@ pub enum Route {
     Accounts,
     Shortcuts,
     DefaultApps,
+    OnlineAccounts,
+    Sharing,
+    Search,
+    Apps,
+    Keyboard,
+    Multitasking,
+    System,
+    Peripherals,
 }
 
 #[derive(Clone, Copy)]
@@ -198,10 +207,66 @@ pub const ALL_NAV_ROUTES: &[RouteInfo] = &[
     // Bottom
     RouteInfo {
         route: Route::Shortcuts,
-        title: "Keyboard",
+        title: "Shortcuts",
         icon_svg: KEYBOARD,
         group: Some("System"),
         keywords: "keyboard shortcuts keybindings hotkeys hyprland",
+    },
+    RouteInfo {
+        route: Route::Keyboard,
+        title: "Keyboard",
+        icon_svg: KEYBOARD,
+        group: Some("System"),
+        keywords: "keyboard layouts input sources typing repeat rate compose",
+    },
+    RouteInfo {
+        route: Route::OnlineAccounts,
+        title: "Online Accounts",
+        icon_svg: GLOBE,
+        group: Some("System"),
+        keywords: "online accounts goa google nextcloud exchange",
+    },
+    RouteInfo {
+        route: Route::Sharing,
+        title: "Sharing",
+        icon_svg: WIRED,
+        group: Some("System"),
+        keywords: "sharing rdp vnc ssh media screen share remote",
+    },
+    RouteInfo {
+        route: Route::Search,
+        title: "Search",
+        icon_svg: SEARCH,
+        group: Some("System"),
+        keywords: "search providers index locations launcher files",
+    },
+    RouteInfo {
+        route: Route::Apps,
+        title: "Apps",
+        icon_svg: APPS,
+        group: Some("System"),
+        keywords: "apps permissions flatpak defaults handlers",
+    },
+    RouteInfo {
+        route: Route::Multitasking,
+        title: "Multitasking",
+        icon_svg: LAYOUT_GRID,
+        group: Some("System"),
+        keywords: "multitasking hot corner workspaces edge tiling snap",
+    },
+    RouteInfo {
+        route: Route::System,
+        title: "System",
+        icon_svg: GENERAL,
+        group: Some("System"),
+        keywords: "system users updates region timezone remote desktop",
+    },
+    RouteInfo {
+        route: Route::Peripherals,
+        title: "Color & Tablets",
+        icon_svg: MOUSE,
+        group: Some("System"),
+        keywords: "color tablet wacom removable media autorun profiles",
     },
     RouteInfo {
         route: Route::DefaultApps,
@@ -246,7 +311,15 @@ impl Route {
             "language" | "language-region" | "locale" | "region" => Some(Self::Language),
             "printers" | "printers-scanners" | "scanners" | "printing" => Some(Self::Printers),
             "accounts" | "users" | "account" | "user" => Some(Self::Accounts),
-            "shortcuts" | "keyboard" | "keybindings" | "hotkeys" => Some(Self::Shortcuts),
+            "shortcuts" | "keyboard-shortcuts" | "keybindings" | "hotkeys" => Some(Self::Shortcuts),
+            "keyboard" | "keyboard-typing" | "input-sources" | "typing" | "layouts" => Some(Self::Keyboard),
+            "online-accounts" | "onlineaccounts" | "accounts-online" => Some(Self::OnlineAccounts),
+            "sharing" | "share" | "rdp" | "vnc" | "ssh-sharing" => Some(Self::Sharing),
+            "search" | "search-providers" | "index" => Some(Self::Search),
+            "apps" | "applications" | "permissions" => Some(Self::Apps),
+            "multitasking" | "hot-corner" | "tiling" => Some(Self::Multitasking),
+            "system" | "system-updates" => Some(Self::System),
+            "peripherals" | "color-tablets" | "tablets" | "color" | "removable-media" => Some(Self::Peripherals),
             "default-apps" | "defaultapps" | "defaults" | "mime" => Some(Self::DefaultApps),
             _ => None,
         }
@@ -276,6 +349,14 @@ pub const SETTINGS_PAGE_SLUGS: &[&str] = &[
     "printers",
     "accounts",
     "shortcuts",
+    "keyboard",
+    "online-accounts",
+    "sharing",
+    "search",
+    "apps",
+    "multitasking",
+    "system",
+    "peripherals",
     "default-apps",
     "about",
 ];
@@ -683,6 +764,14 @@ fn settings_root(initial_route: Route) -> impl IntoElement {
                                     Route::Privacy => pages::Privacy.into_element(),
                                     Route::Language => pages::Language.into_element(),
                                     Route::Shortcuts => pages::Shortcuts.into_element(),
+                                    Route::Keyboard => pages::Keyboard { store }.into_element(),
+                                    Route::OnlineAccounts => pages::OnlineAccounts.into_element(),
+                                    Route::Sharing => pages::Sharing { store }.into_element(),
+                                    Route::Search => pages::Search { store }.into_element(),
+                                    Route::Apps => pages::Apps.into_element(),
+                                    Route::Multitasking => pages::Multitasking { store }.into_element(),
+                                    Route::System => pages::System { store }.into_element(),
+                                    Route::Peripherals => pages::Peripherals { store }.into_element(),
                                     Route::DefaultApps => pages::DefaultApps.into_element(),
                                     Route::Printers => pages::Printers.into_element(),
                                     Route::Accounts => {

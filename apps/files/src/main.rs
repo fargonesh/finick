@@ -1580,23 +1580,10 @@ fn file_type_label(name: &str, is_dir: bool) -> String {
 }
 
 fn try_open_path(path: &str, mut notice: State<Option<(String, NoticeKind)>>) {
-    if let Err(e) = std::process::Command::new("xdg-open").arg(path).spawn() {
+    let r = std::process::Command::new("gio").arg("open").arg(path).spawn().or_else(|_| std::process::Command::new("xdg-open").arg(path).spawn());
+    if let Err(e) = r {
         notice.set(Some((format!("Open failed: {path}: {e}"), NoticeKind::Error)));
     }
-}
-
-fn danger_button_full_local(text: impl Into<String>, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
-    let t = use_app_theme();
-    let text_str = text.into();
-    rect()
-        .width(Size::fill())
-        .padding((10., 16.))
-        .corner_radius(8.)
-        .background(t.accent_red)
-        .center()
-        .cursor(CursorIcon::Pointer)
-        .on_press(move |_| on_press())
-        .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(text_str))
 }
 
 fn open_with_chooser(path: &str, mut notice: State<Option<(String, NoticeKind)>>) {
@@ -1613,7 +1600,10 @@ fn open_with_chooser(path: &str, mut notice: State<Option<(String, NoticeKind)>>
 
 fn show_in_folder(path: &str, mut notice: State<Option<(String, NoticeKind)>>) {
     let parent = PathBuf::from(path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or("/".to_string());
-    if let Err(e) = std::process::Command::new("xdg-open").arg(&parent).spawn() {
+    let r = std::process::Command::new("gio").arg("open").arg(&parent).spawn().or_else(|_| {
+        std::process::Command::new("xdg-open").arg(&parent).spawn()
+    });
+    if let Err(e) = r {
         notice.set(Some((format!("Open location failed: {parent}: {e}"), NoticeKind::Error)));
     }
 }
@@ -4498,7 +4488,7 @@ fn files_root(initial_path: Option<String>) -> Element {
                             sr.set(true);
                         }
                     })))
-                    .child(rect().width(Size::flex(1.)).content(Content::Flex).child(danger_button_full_local("Delete", {
+                    .child(rect().width(Size::flex(1.)).content(Content::Flex).child(danger_button_full("Delete", {
                         let s = s_path.clone();
                         let mut pend = pending_delete;
                         let mut show = show_delete_confirm;
@@ -4725,55 +4715,36 @@ fn files_root(initial_path: Option<String>) -> Element {
             .center()
             .content(Content::Flex)
             .child(
-                rect()
-                    .width(Size::px(360.))
-                    .padding(16.)
-                    .corner_radius(16.)
-                    .background(t.bg_surface)
-                    .spacing(12.)
-                    .child(label().font_size(16.).font_weight(FontWeight::BOLD).color(t.text_primary).text("Add Place"))
+                dialog_card(360.)
+                    .child(tile_head(Some(PIN), "Add Place", None::<String>))
                     .child(Input::new(add_place_name).width(Size::fill()).placeholder("Name"))
-                    .child(label().font_size(11.).color(t.text_muted).text(current_path.read().clone()))
+                    .child(tile_sub(current_path.read().clone()))
                     .child(
                         rect()
                             .horizontal()
                             .spacing(8.)
                             .main_align(Alignment::End)
                             .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .padding((8., 10.))
-                                    .corner_radius(8.)
-                                    .background(t.bg_card)
-                                    .on_press({
-                                        let mut s = show_add_place;
-                                        move |_| s.set(false)
-                                    })
-                                    .child(label().font_size(12.).color(t.text_primary).text("Cancel")),
-                            )
-                            .child(
-                                rect()
-                                    .padding((8., 12.))
-                                    .corner_radius(8.)
-                                    .background(t.primary_accent)
-                                    .on_press({
-                                        let mut s = show_add_place;
-                                        let mut pin = pinned;
-                                        let name_s = add_place_name;
-                                        let path_s = current_path;
-                                        move |_| {
-                                            let n = name_s.read().trim().to_string();
-                                            if !n.is_empty() {
-                                                let mut v = pin.read().clone();
-                                                v.push((n, path_s.read().clone()));
-                                                save_pinned(&v);
-                                                pin.set(v);
-                                            }
-                                            s.set(false);
-                                        }
-                                    })
-                                    .child(label().font_size(12.).color(t.bg_base).text("Add")),
-                            ),
+                            .child(ghost_button("Cancel", {
+                                let mut s = show_add_place;
+                                move || s.set(false)
+                            }))
+                            .child(primary_button("Add", {
+                                let mut s = show_add_place;
+                                let mut pin = pinned;
+                                let name_s = add_place_name;
+                                let path_s = current_path;
+                                move || {
+                                    let n = name_s.read().trim().to_string();
+                                    if !n.is_empty() {
+                                        let mut v = pin.read().clone();
+                                        v.push((n, path_s.read().clone()));
+                                        save_pinned(&v);
+                                        pin.set(v);
+                                    }
+                                    s.set(false);
+                                }
+                            })),
                     ),
             )
             .into_element()
@@ -4831,13 +4802,8 @@ fn files_root(initial_path: Option<String>) -> Element {
             .center()
             .content(Content::Flex)
             .child(
-                rect()
-                    .width(Size::px(360.))
-                    .padding(16.)
-                    .corner_radius(16.)
-                    .background(t.bg_surface)
-                    .spacing(12.)
-                    .child(label().font_size(16.).font_weight(FontWeight::BOLD).color(t.text_primary).text("Rename"))
+                dialog_card(360.)
+                    .child(tile_head(Some(PENCIL), "Rename", None::<String>))
                     .child(Input::new(rename_input).width(Size::fill()).placeholder("New name").on_submit({
                         let mut show = show_rename;
                         let tgt = rename_target;
@@ -4877,30 +4843,18 @@ fn files_root(initial_path: Option<String>) -> Element {
                             .spacing(8.)
                             .main_align(Alignment::End)
                             .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .padding((8., 10.))
-                                    .corner_radius(8.)
-                                    .background(t.bg_card)
-                                    .on_press({
-                                        let mut s = show_rename;
-                                        move |_| s.set(false)
-                                    })
-                                    .child(label().font_size(12.).color(t.text_primary).text("Cancel")),
-                            )
-                            .child(
-                                rect()
-                                    .padding((8., 12.))
-                                    .corner_radius(8.)
-                                    .background(t.primary_accent)
-                                    .on_press({
-                                        let mut s = show_rename;
-                                        let tgt = rename_target;
-                                        let inp = rename_input;
-                                        let cp = current_path;
-                                        let items_s = items;
-                                        let mut sel = selected_item;
-                                        move |_| {
+                            .child(ghost_button("Cancel", {
+                                let mut s = show_rename;
+                                move || s.set(false)
+                            }))
+                            .child(primary_button("Rename", {
+                                let mut s = show_rename;
+                                let tgt = rename_target;
+                                let inp = rename_input;
+                                let cp = current_path;
+                                let items_s = items;
+                                let mut sel = selected_item;
+                                move || {
                                             if let Some(it) = tgt.read().clone() {
                                                 let mut note = notice;
                                                 let new_name = inp.read().trim().to_string();
@@ -4931,9 +4885,7 @@ fn files_root(initial_path: Option<String>) -> Element {
                                             }
                                             s.set(false);
                                         }
-                                    })
-                                    .child(label().font_size(12.).color(t.bg_base).text("Rename")),
-                            ),
+                                    })),
                     ),
             )
             .into_element()
@@ -4951,14 +4903,9 @@ fn files_root(initial_path: Option<String>) -> Element {
             .center()
             .content(Content::Flex)
             .child(
-                rect()
-                    .width(Size::px(380.))
-                    .padding(16.)
-                    .corner_radius(16.)
-                    .background(t.bg_surface)
-                    .spacing(12.)
-                    .child(label().font_size(16.).font_weight(FontWeight::BOLD).color(t.text_primary).text("Move to Trash"))
-                    .child(label().font_size(12.).color(t.text_muted).text(format!(
+                dialog_card(380.)
+                    .child(tile_head(Some(TRASH), "Move to Trash", None::<String>))
+                    .child(tile_sub(format!(
                         "Move {n} item{} to Trash? You can undo from the status bar.",
                         if n == 1 { "" } else { "s" }
                     )))
@@ -4968,54 +4915,38 @@ fn files_root(initial_path: Option<String>) -> Element {
                             .spacing(8.)
                             .main_align(Alignment::End)
                             .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .padding((8., 10.))
-                                    .corner_radius(8.)
-                                    .background(t.bg_card)
-                                    .cursor(CursorIcon::Pointer)
-                                    .on_press({
-                                        let mut s = show_delete_confirm;
-                                        let mut p = pending_delete;
-                                        move |_| {
-                                            p.set(Vec::new());
-                                            s.set(false);
-                                        }
-                                    })
-                                    .child(label().font_size(12.).color(t.text_primary).text("Cancel")),
-                            )
-                            .child(
-                                rect()
-                                    .padding((8., 12.))
-                                    .corner_radius(8.)
-                                    .background(t.primary_accent)
-                                    .cursor(CursorIcon::Pointer)
-                                    .on_press({
-                                        let mut s = show_delete_confirm;
-                                        let mut p = pending_delete;
-                                        let mut sel = selected_item;
-                                        let mut multi = selected_paths;
-                                        let cp = current_path;
-                                        let items_c = items;
-                                        move |_| {
-                                            confirm_trash_delete_multi(
-                                                p.read().clone(),
-                                                items_c,
-                                                notice,
-                                                job_running,
-                                                job_label,
-                                                job_progress,
-                                                job_cancel,
-                                                cp.read().clone(),
-                                            );
-                                            p.set(Vec::new());
-                                            sel.set(None);
-                                            multi.set(Vec::new());
-                                            s.set(false);
-                                        }
-                                    })
-                                    .child(label().font_size(12.).color(t.bg_base).text("Move to Trash")),
-                            ),
+                            .child(ghost_button("Cancel", {
+                                let mut s = show_delete_confirm;
+                                let mut p = pending_delete;
+                                move || {
+                                    p.set(Vec::new());
+                                    s.set(false);
+                                }
+                            }))
+                            .child(primary_button("Move to Trash", {
+                                let mut s = show_delete_confirm;
+                                let mut p = pending_delete;
+                                let mut sel = selected_item;
+                                let mut multi = selected_paths;
+                                let cp = current_path;
+                                let items_c = items;
+                                move || {
+                                    confirm_trash_delete_multi(
+                                        p.read().clone(),
+                                        items_c,
+                                        notice,
+                                        job_running,
+                                        job_label,
+                                        job_progress,
+                                        job_cancel,
+                                        cp.read().clone(),
+                                    );
+                                    p.set(Vec::new());
+                                    sel.set(None);
+                                    multi.set(Vec::new());
+                                    s.set(false);
+                                }
+                            })),
                     ),
             )
             .into_element()
@@ -5033,20 +4964,9 @@ fn files_root(initial_path: Option<String>) -> Element {
             .center()
             .content(Content::Flex)
             .child(
-                rect()
-                    .width(Size::px(380.))
-                    .padding(16.)
-                    .corner_radius(16.)
-                    .background(t.bg_surface)
-                    .spacing(12.)
-                    .child(
-                        label()
-                            .font_size(16.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(t.text_primary)
-                            .text("Items already exist"),
-                    )
-                    .child(label().font_size(12.).color(t.text_muted).text(format!(
+                dialog_card(380.)
+                    .child(tile_head(Some(COPY), "Items already exist", None::<String>))
+                    .child(tile_sub(format!(
                         "{count} item{} already exist at the destination. Overwrite them?",
                         if count == 1 { "" } else { "s" }
                     )))
@@ -5056,34 +4976,20 @@ fn files_root(initial_path: Option<String>) -> Element {
                             .spacing(8.)
                             .main_align(Alignment::End)
                             .content(Content::Flex)
-                            .child(
-                                rect()
-                                    .padding((8., 10.))
-                                    .corner_radius(8.)
-                                    .background(t.bg_card)
-                                    .cursor(CursorIcon::Pointer)
-                                    .on_press({
-                                        let mut s = show_overwrite;
-                                        let mut p = pending_paste;
-                                        move |_| {
-                                            p.set(None);
-                                            s.set(false);
-                                        }
-                                    })
-                                    .child(label().font_size(12.).color(t.text_primary).text("Cancel")),
-                            )
-                            .child(
-                                rect()
-                                    .padding((8., 10.))
-                                    .corner_radius(8.)
-                                    .background(t.bg_card)
-                                    .cursor(CursorIcon::Pointer)
-                                    .on_press({
-                                        let mut s = show_overwrite;
-                                        let mut p = pending_paste;
-                                        let mut note = notice;
-                                        let items_c = items;
-                                        move |_| {
+                            .child(ghost_button("Cancel", {
+                                let mut s = show_overwrite;
+                                let mut p = pending_paste;
+                                move || {
+                                    p.set(None);
+                                    s.set(false);
+                                }
+                            }))
+                            .child(secondary_button("Skip existing", {
+                                let mut s = show_overwrite;
+                                let mut p = pending_paste;
+                                let mut note = notice;
+                                let items_c = items;
+                                move || {
                                             if let Some(pv) = p.read().clone() {
                                                 let missing: Vec<String> = pv
                                                     .srcs
@@ -5121,21 +5027,13 @@ fn files_root(initial_path: Option<String>) -> Element {
                                             p.set(None);
                                             s.set(false);
                                         }
-                                    })
-                                    .child(label().font_size(12.).color(t.text_primary).text("Skip existing")),
-                            )
-                            .child(
-                                rect()
-                                    .padding((8., 10.))
-                                    .corner_radius(8.)
-                                    .background(t.bg_card)
-                                    .cursor(CursorIcon::Pointer)
-                                    .on_press({
-                                        let mut s = show_overwrite;
-                                        let mut p = pending_paste;
-                                        let items_c = items;
-                                        let mut note = notice;
-                                        move |_| {
+                                    }))
+                            .child(secondary_button("Rename new", {
+                                let mut s = show_overwrite;
+                                let mut p = pending_paste;
+                                let items_c = items;
+                                let mut note = notice;
+                                move || {
                                             if let Some(pv) = p.read().clone() {
                                                 let mut renamed: Vec<String> = Vec::new();
                                                 for src in &pv.srcs {
@@ -5196,41 +5094,31 @@ fn files_root(initial_path: Option<String>) -> Element {
                                             p.set(None);
                                             s.set(false);
                                         }
-                                    })
-                                    .child(label().font_size(12.).color(t.text_primary).text("Rename new")),
-                            )
-                            .child(
-                                rect()
-                                    .padding((8., 12.))
-                                    .corner_radius(8.)
-                                    .background(t.primary_accent)
-                                    .cursor(CursorIcon::Pointer)
-                                    .on_press({
-                                        let mut s = show_overwrite;
-                                        let mut p = pending_paste;
-                                        let items_c = items;
-                                        move |_| {
-                                            if let Some(pv) = p.read().clone() {
-                                                start_paste_job_multi(
-                                                    pv.srcs,
-                                                    true,
-                                                    pv.is_cut,
-                                                    pv.dest_dir,
-                                                    items_c,
-                                                    notice,
-                                                    job_running,
-                                                    job_label,
-                                                    job_progress,
-                                                    job_cancel,
-                                                    clipboard,
-                                                );
-                                            }
-                                            p.set(None);
-                                            s.set(false);
-                                        }
-                                    })
-                                    .child(label().font_size(12.).color(t.bg_base).text("Overwrite")),
-                            ),
+                                    }))
+                            .child(danger_button("Overwrite", {
+                                let mut s = show_overwrite;
+                                let mut p = pending_paste;
+                                let items_c = items;
+                                move || {
+                                    if let Some(pv) = p.read().clone() {
+                                        start_paste_job_multi(
+                                            pv.srcs,
+                                            true,
+                                            pv.is_cut,
+                                            pv.dest_dir,
+                                            items_c,
+                                            notice,
+                                            job_running,
+                                            job_label,
+                                            job_progress,
+                                            job_cancel,
+                                            clipboard,
+                                        );
+                                    }
+                                    p.set(None);
+                                    s.set(false);
+                                }
+                            })),
                     ),
             )
             .into_element()

@@ -43,12 +43,20 @@ pub fn control_panel_app() -> Element {
     let bg_apps = use_state(|| 0usize);
     let power_supported = use_state(|| true);
     let last_error = use_state(|| Option::<String>::None);
+    let dnd_sched = use_state(crate::state::DndSchedule::default);
     let mut dismiss = use_state(|| false);
     use_hook(move || {
         load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
         subscribe_live(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
         load_extended_batch(airplane, night, power_profile);
         subscribe_extended_live(airplane, night, power_profile);
+        {
+            let mut ds = dnd_sched;
+            spawn(async move {
+                let sched = tokio::task::spawn_blocking(crate::state::load_dnd_schedule).await.unwrap_or_default();
+                ds.set_if_modified(sched);
+            });
+        }
         let mut wired_state = wired;
         let mut pct_state = battery_pct;
         let mut status_state = battery_status;
@@ -462,17 +470,39 @@ pub fn control_panel_app() -> Element {
             )
             .into_element()
         });
-    let focus_card = tile().height(Size::px(row2_h)).child(tile_head(
-        Some(FOCUS),
-        "Focus",
-        Some({
-            let mut f = dnd;
-            pill_switch(*f.read(), move |v| {
-                f.set_if_modified(v);
-                apply(SettingKey::DoNotDisturb, if v { "on".to_string().into() } else { "off".to_string().into() });
-            })
-        }),
-    ));
+    let focus_card = {
+        let sched = dnd_sched.read().clone();
+        let sched_meta = format!("{}–{}", sched.start, sched.end);
+        let sched_on = sched.enabled;
+        tile().height(Size::px(row2_h)).child(tile_head(
+            Some(FOCUS),
+            "Focus",
+            Some({
+                let mut f = dnd;
+                pill_switch(*f.read(), move |v| {
+                    f.set_if_modified(v);
+                    apply(SettingKey::DoNotDisturb, if v { "on".to_string().into() } else { "off".to_string().into() });
+                })
+            }),
+        )).child(setting_row(
+            format!("Schedule · {sched_meta}"),
+            Some(if crate::state::dnd_schedule_active(&sched, &crate::state::now_hm_local()) {
+                "In quiet hours now"
+            } else {
+                "Silences banners on schedule"
+            }),
+            false,
+            {
+                let mut ds = dnd_sched;
+                pill_switch(sched_on, move |v| {
+                    let mut s = ds.read().clone();
+                    s.enabled = v;
+                    crate::state::save_dnd_schedule(&s);
+                    ds.set(s);
+                })
+            },
+        ))
+    };
     let sound_card = tile().child(tile_head(Some(SOUND), "Sound", None::<Element>)).child({
         let mut v = volume;
         slider_row(Some(SOUND), *v.read(), move |nv| {

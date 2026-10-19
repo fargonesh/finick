@@ -8,6 +8,9 @@ use {
 pub enum OsdKind {
     Volume,
     Brightness,
+    NightLight,
+    Power,
+    Recording,
 }
 
 #[derive(PartialEq)]
@@ -37,6 +40,9 @@ impl Component for OsdOverlay {
         let icon_svg = match k {
             OsdKind::Volume => SOUND,
             OsdKind::Brightness => SUN,
+            OsdKind::NightLight => SUN,
+            OsdKind::Power => BATTERY,
+            OsdKind::Recording => RECORD_ICON,
         };
         let label_text = match k {
             OsdKind::Volume => {
@@ -47,6 +53,19 @@ impl Component for OsdOverlay {
                 }
             }
             OsdKind::Brightness => format!("Brightness {}%", v as i32),
+            OsdKind::NightLight => {
+                if v > 0.5 {
+                    "Night Light on".to_string()
+                } else {
+                    "Night Light off".to_string()
+                }
+            }
+            OsdKind::Power => {
+                "Power profile changed".to_string()
+            }
+            OsdKind::Recording => {
+                format!("Recording {:02}:{:02}", (v as u64) / 60, (v as u64) % 60)
+            }
         };
         rect()
             .width(Size::fill())
@@ -183,6 +202,16 @@ pub fn use_osd_state() -> (State<bool>, State<OsdKind>, State<f64>, State<bool>,
                                     new_val = v.as_f64().unwrap_or(0.0);
                                     show = true;
                                 }
+                                SettingKey::DisplayNightShift => {
+                                    new_kind = OsdKind::NightLight;
+                                    new_val = if v.as_bool().unwrap_or(false) { 1.0 } else { 0.0 };
+                                    show = true;
+                                }
+                                SettingKey::PowerProfile => {
+                                    new_kind = OsdKind::Power;
+                                    new_val = 0.0;
+                                    show = true;
+                                }
                                 SettingKey::AccessibilityReduceMotion => {
                                     if let Some(b) = v.as_bool() {
                                         red.set_if_modified(b);
@@ -281,6 +310,33 @@ pub fn use_osd_state() -> (State<bool>, State<OsdKind>, State<f64>, State<bool>,
                     } else if *p_vis.read() && *p_kd.read() == OsdKind::Brightness {
                         p_val.set_if_modified(b);
                     }
+                }
+                // Recording timer: while wl-screenrec is active, surface a
+                // Recording OSD with elapsed seconds. Volume/brightness events
+                // still take over; this only fires when the OSD is hidden.
+                let rec = tokio::task::spawn_blocking(system::capture::get_active_screencast)
+                    .await
+                    .unwrap_or(None);
+                if let Some(r) = rec {
+                    if !*p_vis.read() {
+                        let cur = p_gen.read().wrapping_add(1);
+                        p_kd.set(OsdKind::Recording);
+                        p_val.set(r.duration_secs as f64);
+                        p_vis.set(true);
+                        p_gen.set(cur);
+                        let mut v2 = p_vis;
+                        let g2 = p_gen;
+                        spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                            if *g2.read() == cur {
+                                v2.set(false);
+                            }
+                        });
+                    } else if *p_kd.read() == OsdKind::Recording {
+                        p_val.set_if_modified(r.duration_secs as f64);
+                    }
+                } else if *p_vis.read() && *p_kd.read() == OsdKind::Recording {
+                    p_vis.set(false);
                 }
             }
         });

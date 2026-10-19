@@ -4372,7 +4372,7 @@ pub struct ScreenTimeDetailPage {
 impl Component for ScreenTimeDetailPage {
     fn render(&self) -> impl IntoElement {
         let store = self.store;
-        let t = use_app_theme();
+        let _t = use_app_theme();
         let st_lock = store.lock_label(&SettingKey::ScreenTimeEnabled);
         let is_st_locked = st_lock.is_some();
         let enabled = *store.screen_time_enabled.read();
@@ -4380,6 +4380,45 @@ impl Component for ScreenTimeDetailPage {
         let app_limits_on = *store.app_limits_enabled.read();
         let from = store.downtime_from.read().clone();
         let to = store.downtime_to.read().clone();
+        let usage = use_state(crate::screentime::load_day_usage);
+        let limits = use_state(crate::screentime::load_limits);
+        let tick_error = use_state(|| Option::<String>::None);
+
+        {
+            let store = store;
+            let mut usage = usage;
+            let enabled = enabled;
+            use_hook(move || {
+                if !enabled {
+                    return;
+                }
+                spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        let app = tokio::task::spawn_blocking(crate::screentime::active_app_blocking)
+                            .await
+                            .unwrap_or(None);
+                        if let Some(name) = app {
+                            let n = name.clone();
+                            tokio::task::spawn_blocking(move || crate::screentime::record_tick(&n, 5))
+                                .await
+                                .ok();
+                            usage.set(crate::screentime::load_day_usage());
+                        }
+                    }
+                });
+            });
+            let _ = (store, tick_error);
+        }
+
+        let total_secs = usage.read().total_secs();
+        let top = usage.read().top_apps(5);
+        let limit_map = limits.read().clone();
+        let over_limit: Vec<String> = top
+            .iter()
+            .filter(|(app, secs)| limit_map.get(app).map(|lim| *secs > *lim).unwrap_or(false))
+            .map(|(app, _)| app.clone())
+            .collect();
 
         rect()
             .width(Size::fill())
@@ -4411,25 +4450,70 @@ impl Component for ScreenTimeDetailPage {
                                         })),
                                 ),
                             ))
-                            .child(tile_sub(if enabled { "Limits and downtime are enforced" } else { "Screen Time is off" }))
-                            .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .margin((12., 0., 0., 0.))
-                                    .opacity(if !enabled { 0.45 } else { 1.0 })
-                                    .child(mini_bar_chart([62., 48., 71., 55., 80., 44., 67.], [
-                                        "M", "T", "W", "T", "F", "S", "S",
-                                    ])),
-                            )
-                            .child(
-                                rect()
-                                    .width(Size::fill())
-                                    .horizontal()
-                                    .main_align(Alignment::SpaceBetween)
-                                    .margin((8., 0., 0., 0.))
-                                    .child(label().font_size(11.).color(t.text_dim).text("Weekly average: 3h 42m / day"))
-                                    .child(label().font_size(11.).color(t.accent).text("See All Activity →")),
-                            ),
+                            .child(tile_sub(if enabled {
+                                "Tracking active windows while on"
+                            } else {
+                                "Screen Time is off — enable to track usage"
+                            }))
+                            .child(setting_row(
+                                format!("Today · {}", crate::screentime::format_duration(total_secs)),
+                                Some(if enabled {
+                                    "Live tally from the active window"
+                                } else {
+                                    "Paused while off"
+                                }),
+                                false,
+                                status_chip(
+                                    if enabled { "Tracking" } else { "Paused" },
+                                    enabled,
+                                    None,
+                                ),
+                            ))
+                            .maybe(!over_limit.is_empty() && enabled, |el| {
+                                el.child(notice_pill(
+                                    format!("Over limit: {}", over_limit.join(", ")),
+                                    NoticeKind::Warn,
+                                ))
+                            })
+                            .child({
+                                if top.is_empty() {
+                                    tile_sub("No usage yet today — open an app and it appears here").into_element()
+                                } else {
+                                    rect()
+                                        .width(Size::fill())
+                                        .vertical()
+                                        .spacing(8.)
+                                        .content(Content::Flex)
+                                        .children(top.iter().cloned().map(|(app, secs)| {
+                                            let lim = limit_map.get(&app).copied();
+                                            let meta = match lim {
+                                                Some(l) if secs > l => Some(format!(
+                                                    "{} · over {} limit",
+                                                    crate::screentime::format_duration(secs),
+                                                    crate::screentime::format_duration(l)
+                                                )),
+                                                Some(l) => Some(format!(
+                                                    "{} · {} left",
+                                                    crate::screentime::format_duration(secs),
+                                                    crate::screentime::format_duration(l.saturating_sub(secs))
+                                                )),
+                                                None => Some(crate::screentime::format_duration(secs)),
+                                            };
+                                            setting_row(
+                                                app,
+                                                meta,
+                                                false,
+                                                status_chip(
+                                                    crate::screentime::format_clock(secs),
+                                                    lim.map(|l| secs <= l).unwrap_or(false),
+                                                    None,
+                                                ),
+                                            )
+                                            .into_element()
+                                        }))
+                                        .into_element()
+                                }
+                            }),
                     )
                     .child(grid2([
                         rect().width(Size::flex(1.)).child(
@@ -4440,30 +4524,63 @@ impl Component for ScreenTimeDetailPage {
                                     .child(setting_row("Limits enabled", None::<String>, false, {
                                         let store = store;
                                         pill_switch(app_limits_on, move |v| {
-                                            if !is_st_locked {
-                                                let mut s = store.app_limits_enabled;
-                                                s.set(v);
+                                            if !is_st_locked && enabled {
+                                                store.set(
+                                                    SettingKey::Custom("screentime.app_limits_enabled".to_string()),
+                                                    v,
+                                                );
                                             }
                                         })
                                     }))
-                                    .child(setting_row(
-                                        "Social · 1h 30m",
-                                        Some("Instagram, TikTok"),
-                                        false,
-                                        status_chip("1h 12m left", true, None),
-                                    ))
-                                    .child(setting_row(
-                                        "Games · 1h",
-                                        Some("Steam, Minecraft"),
-                                        true,
-                                        status_chip("42m left", true, None),
-                                    ))
-                                    .child(setting_row(
-                                        "Browser · 2h",
-                                        Some("Safari, Chrome"),
-                                        true,
-                                        ghost_button("Add Limit", || {}),
-                                    )),
+                                    .child({
+                                        if top.is_empty() {
+                                            tile_sub("Limits appear once apps are used").into_element()
+                                        } else {
+                                            rect()
+                                                .width(Size::fill())
+                                                .vertical()
+                                                .spacing(8.)
+                                                .content(Content::Flex)
+                                                .children(top.iter().cloned().map(|(app, _)| {
+                                                    let lim = limit_map.get(&app).copied().unwrap_or(0);
+                                                    let mut limits = limits;
+                                                    let app_c = app.clone();
+                                                    setting_row(
+                                                        app.clone(),
+                                                        Some(if lim == 0 {
+                                                            "No limit".to_string()
+                                                        } else {
+                                                            format!(
+                                                                "Limit {}",
+                                                                crate::screentime::format_duration(lim)
+                                                            )
+                                                        }),
+                                                        false,
+                                                        segmented_control(
+                                                            vec![("Off", 0), ("1h", 1), ("2h", 2)],
+                                                            if lim == 0 {
+                                                                0
+                                                            } else if lim <= 3600 {
+                                                                1
+                                                            } else {
+                                                                2
+                                                            },
+                                                            move |i| {
+                                                                let secs = match i {
+                                                                    1 => 3600,
+                                                                    2 => 7200,
+                                                                    _ => 0,
+                                                                };
+                                                                crate::screentime::save_limit(&app_c, secs);
+                                                                limits.set(crate::screentime::load_limits());
+                                                            },
+                                                        ),
+                                                    )
+                                                    .into_element()
+                                                }))
+                                                .into_element()
+                                        }
+                                    }),
                             ),
                         ),
                         rect().width(Size::flex(1.)).child(
@@ -4474,9 +4591,11 @@ impl Component for ScreenTimeDetailPage {
                                     .child(setting_row("Downtime", None::<String>, false, {
                                         let store = store;
                                         pill_switch(downtime_on, move |v| {
-                                            if !is_st_locked {
-                                                let mut s = store.downtime_enabled;
-                                                s.set(v);
+                                            if !is_st_locked && enabled {
+                                                store.set(
+                                                    SettingKey::Custom("screentime.downtime_enabled".to_string()),
+                                                    v,
+                                                );
                                             }
                                         })
                                     }))
@@ -4484,39 +4603,24 @@ impl Component for ScreenTimeDetailPage {
                                         "Schedule",
                                         Some(format!("{from} — {to}")),
                                         true,
-                                        ghost_button("Edit", || {}),
+                                        status_chip(format!("{from}–{to}"), downtime_on, None),
                                     ))
-                                    .child(tile_sub("Only apps you allow and phone calls will be available")),
+                                    .child(tile_sub("Persisted through the settings daemon")),
                             ),
                         ),
                     ]))
                     .child(grid2([
                         rect().width(Size::flex(1.)).child(
                             tile()
-                                .child(tile_head(None, "Communication", None::<String>))
-                                .child(setting_row(
-                                    "During downtime",
-                                    Some("Contacts only"),
-                                    false,
-                                    status_chip("Contacts", false, None),
-                                ))
-                                .child(setting_row(
-                                    "During Screen Time",
-                                    Some("Everyone"),
-                                    true,
-                                    ghost_button("Manage", || {}),
+                                .child(tile_head(None, "Breaks & greyscale", None::<String>))
+                                .child(tile_sub(
+                                    "Greyscale and break reminders are not enforced by the daemon yet",
                                 )),
                         ),
                         rect().width(Size::flex(1.)).child(
                             tile()
                                 .child(tile_head(None, "Content & Privacy", st_lock.as_ref().map(|l| lock_badge(l))))
-                                .child(setting_row(
-                                    "Content restrictions",
-                                    None::<String>,
-                                    false,
-                                    pill_switch(false, |_| {}),
-                                ))
-                                .child(setting_row("App installs", None::<String>, true, pill_switch(true, |_| {}))),
+                                .child(tile_sub("Managed elsewhere — no local enforcement here")),
                         ),
                     ])),
             )

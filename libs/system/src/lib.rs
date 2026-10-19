@@ -27,6 +27,7 @@ pub use lock::{locker_binary, locker_locked, locker_lockfile, locker_process_ali
 pub mod store;
 pub mod store_flatpak;
 pub mod store_hm;
+pub mod store_meta;
 pub mod store_nix;
 pub mod store_opts;
 

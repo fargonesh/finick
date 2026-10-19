@@ -622,6 +622,10 @@ impl SettingsStore {
                     "topbar.show_battery" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_battery; s.set(b); },
                     "topbar.show_notifications" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_notifications; s.set(b); },
                     "topbar.show_brightness" | "topbar.show_focus" => {}
+                    "screentime.downtime_enabled" => if let Some(b) = val.as_bool() { let mut s = self.downtime_enabled; s.set(b); },
+                    "screentime.app_limits_enabled" => if let Some(b) = val.as_bool() { let mut s = self.app_limits_enabled; s.set(b); },
+                    "screentime.downtime_from" => if let Some(sv) = val.as_str() { let mut s = self.downtime_from; s.set(sv.to_string()); },
+                    "screentime.downtime_to" => if let Some(sv) = val.as_str() { let mut s = self.downtime_to; s.set(sv.to_string()); },
                     _ => {}
                 }
             }
