@@ -1,4 +1,10 @@
-use freya_engine::prelude::{AlphaType, ColorType, ImageInfo, Surface as SkiaSurface, wrap_pixels};
+use freya_engine::prelude::{
+    AlphaType,
+    ColorType,
+    ImageInfo,
+    Surface as SkiaSurface,
+    wrap_pixels,
+};
 
 pub(crate) fn with_raster_surface<T>(
     pixels: &mut [u8],

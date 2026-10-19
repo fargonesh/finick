@@ -580,21 +580,16 @@ impl Display for LockSource {
 
 /// Represents the lock state of a setting, indicating whether UI controls
 /// should render as read-only and whether daemon mutations should be denied.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub enum LockState {
     /// The setting is mutable by the current user.
+    #[default]
     Unlocked,
     /// The setting is read-only and locked by an authoritative source.
     Locked {
         source: LockSource,
         reason: String,
     },
-}
-
-impl Default for LockState {
-    fn default() -> Self {
-        LockState::Unlocked
-    }
 }
 
 impl LockState {
@@ -1120,7 +1115,7 @@ fn expect_ok(rx: mpsc::Receiver<SettingsResponse>) -> std::io::Result<Result<(),
         match res {
             SettingsResponse::Ok => return Ok(Ok(())),
             SettingsResponse::Rejected { reason, .. } => return Ok(Err(reason)),
-            SettingsResponse::Error(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+            SettingsResponse::Error(e) => return Err(std::io::Error::other(e)),
             _ => {}
         }
     }
@@ -1134,7 +1129,7 @@ pub fn get_setting(socket: impl Into<PathBuf> + Display, key: SettingKey) -> std
         match res {
             SettingsResponse::Setting(entry) => return Ok(Some(entry)),
             SettingsResponse::NotFound { .. } => return Ok(None),
-            SettingsResponse::Error(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+            SettingsResponse::Error(e) => return Err(std::io::Error::other(e)),
             _ => {}
         }
     }
@@ -1158,7 +1153,7 @@ fn collect_entries(socket: impl Into<PathBuf> + Display, req: SettingsRequest) -
         match res {
             SettingsResponse::Setting(entry) => entries.push(entry),
             SettingsResponse::SettingsList(list) => entries.extend(list),
-            SettingsResponse::Error(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+            SettingsResponse::Error(e) => return Err(std::io::Error::other(e)),
             _ => {}
         }
     }
@@ -1279,8 +1274,8 @@ mod tests {
         let i = SettingValue::from(42);
         assert_eq!(i.as_i64(), Some(42));
 
-        let f = SettingValue::from(3.14);
-        assert!((f.as_f64().unwrap() - 3.14).abs() < 1e-6);
+        let f = SettingValue::from(std::f64::consts::PI);
+        assert!((f.as_f64().unwrap() - std::f64::consts::PI).abs() < 1e-12);
 
         let s = SettingValue::from("coral");
         assert_eq!(s.as_str(), Some("coral"));

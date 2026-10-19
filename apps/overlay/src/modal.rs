@@ -6,9 +6,11 @@ use {
     ui::*,
 };
 
+type ModalPending = (ModalRequest, std::sync::mpsc::Sender<ModalResponse>, winit::window::WindowId);
+
 #[derive(Clone, Default)]
 pub struct ModalState {
-    pub req: Arc<Mutex<Option<(ModalRequest, std::sync::mpsc::Sender<ModalResponse>, winit::window::WindowId)>>>,
+    pub req: Arc<Mutex<Option<ModalPending>>>,
 }
 
 #[derive(PartialEq, Clone)]
@@ -27,7 +29,7 @@ impl Component for ModalApp {
             return rect().into_element();
         };
 
-        let req_snapshot: Option<(ModalRequest, std::sync::mpsc::Sender<ModalResponse>, winit::window::WindowId)> =
+        let req_snapshot: Option<ModalPending> =
             ctx.req.lock().ok().and_then(|g| g.clone());
         let Some((req, tx, wid)) = req_snapshot else {
             return rect().into_element();
@@ -73,7 +75,7 @@ impl Component for ModalApp {
                                         .child(primary_button(
                                             if *is_working.read() { "Connecting..." } else { "Connect" },
                                             {
-                                                let p = pwd.clone();
+                                                let p = pwd;
                                                 let s = ssid.clone();
                                                 let ctx = ctx.clone();
                                                 let mut iw = is_working;
@@ -142,7 +144,7 @@ impl Component for ModalApp {
                                         }))
                                         .child(primary_button(if *is_working.read() { "Pairing..." } else { "Pair" }, {
                                             let m = mac.clone();
-                                            let p = pwd.clone();
+                                            let p = pwd;
                                             let ctx = ctx.clone();
                                             let mut iw = is_working;
                                             let tx = tx.clone();
@@ -202,7 +204,7 @@ impl Component for ModalApp {
                                         .child(primary_button(
                                             if *is_working.read() { "Authenticating..." } else { "Authenticate" },
                                             {
-                                                let p = pwd.clone();
+                                                let p = pwd;
                                                 let ctx = ctx.clone();
                                                 let mut iw = is_working;
                                                 let tx = tx.clone();

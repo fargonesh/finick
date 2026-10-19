@@ -104,16 +104,14 @@ pub fn use_osd_state() -> (State<bool>, State<OsdKind>, State<f64>, State<bool>)
                         val.set(v as f64);
                     }
                 }
-                if e.key == SettingKey::DisplayBrightness {
-                    if let Some(v) = e.value.as_f64() {
+                if e.key == SettingKey::DisplayBrightness
+                    && let Some(v) = e.value.as_f64() {
                         val.set(v);
                     }
-                }
-                if e.key == SettingKey::AudioMuted {
-                    if let Some(b) = e.value.as_bool() {
+                if e.key == SettingKey::AudioMuted
+                    && let Some(b) = e.value.as_bool() {
                         mu.set(b);
                     }
-                }
             }
             if let Ok(mut rx) = subscribe_channel(SETTINGS_SOCKET_NAME, SubscriptionFilter::all()) {
                 while let Some(evt) = rx.recv().await {

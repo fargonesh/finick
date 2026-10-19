@@ -49,7 +49,7 @@ pub fn setting_row_locked(
                 .color(if is_locked { t.text_dim } else { t.text })
                 .text(name_str),
         )
-        .maybe_child(lock_str.map(|s| lock_badge(s)));
+        .maybe_child(lock_str.map(lock_badge));
 
     rect()
         .width(Size::fill())

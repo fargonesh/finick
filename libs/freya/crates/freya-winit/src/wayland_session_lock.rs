@@ -13,36 +13,67 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{
+            AtomicBool,
+            Ordering,
+        },
     },
     time::Duration,
 };
 
 use smithay_client_toolkit::{
-    compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_output, delegate_registry, delegate_session_lock, delegate_shm,
-    output::{OutputHandler, OutputState},
+    compositor::{
+        CompositorHandler,
+        CompositorState,
+    },
+    delegate_compositor,
+    delegate_output,
+    delegate_registry,
+    delegate_session_lock,
+    delegate_shm,
+    output::{
+        OutputHandler,
+        OutputState,
+    },
     reexports::{
         calloop::EventLoop,
         calloop_wayland_source::WaylandSource,
         client::{
-            Connection, Proxy, QueueHandle,
+            Connection,
+            Proxy,
+            QueueHandle,
             globals::registry_queue_init,
-            protocol::{wl_buffer, wl_output, wl_shm, wl_surface},
+            protocol::{
+                wl_buffer,
+                wl_output,
+                wl_shm,
+                wl_surface,
+            },
         },
     },
-    registry::{ProvidesRegistryState, RegistryState},
+    registry::{
+        ProvidesRegistryState,
+        RegistryState,
+    },
     registry_handlers,
     session_lock::{
-        SessionLock, SessionLockHandler, SessionLockState, SessionLockSurface,
+        SessionLock,
+        SessionLockHandler,
+        SessionLockState,
+        SessionLockSurface,
         SessionLockSurfaceConfigure,
     },
-    shm::{Shm, ShmHandler},
+    shm::{
+        Shm,
+        ShmHandler,
+    },
 };
 
-use crate::wayland_native::{NativeRenderCallback, attach_shm_frame};
-
 pub use crate::wayland_native::NativeWaylandError;
+use crate::wayland_native::{
+    NativeRenderCallback,
+    attach_shm_frame,
+};
 
 /// Run an ext-session-lock-v1 client.
 ///
@@ -62,6 +93,7 @@ pub use crate::wayland_native::NativeWaylandError;
 ///     Arc,
 ///     atomic::AtomicBool,
 /// };
+///
 /// use freya_winit::wayland_session_lock::run_session_lock;
 ///
 /// let unlock = Arc::new(AtomicBool::new(false));
@@ -158,9 +190,7 @@ pub fn run_session_lock(
             || "Compositor denied or finished the session lock".to_string(),
             |error| format!("Compositor denied or finished the session lock; {error}"),
         );
-        return Err(NativeWaylandError(
-            message,
-        ));
+        return Err(NativeWaylandError(message));
     }
     if let Some(error) = teardown_error {
         return Err(error);

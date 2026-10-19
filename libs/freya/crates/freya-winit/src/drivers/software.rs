@@ -2,13 +2,21 @@ use std::num::NonZeroU32;
 
 use freya_engine::prelude::Surface as SkiaSurface;
 use raw_window_handle::{
-    DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
-    RawWindowHandle, WindowHandle,
+    DisplayHandle,
+    HandleError,
+    HasDisplayHandle,
+    HasWindowHandle,
+    RawDisplayHandle,
+    RawWindowHandle,
+    WindowHandle,
 };
 use winit::{
     dpi::PhysicalSize,
     event_loop::ActiveEventLoop,
-    window::{Window, WindowAttributes},
+    window::{
+        Window,
+        WindowAttributes,
+    },
 };
 
 use super::raster::with_raster_surface;

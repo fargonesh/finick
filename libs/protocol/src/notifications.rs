@@ -133,7 +133,7 @@ pub fn get_active_notifications(
 ) -> std::io::Result<Vec<Notification>> {
     let mut list = Vec::new();
     let (tx, rx) = std::sync::mpsc::channel();
-    let _ = send_command(
+    send_command(
         socket,
         &NotificationRequest::GetAll,
         Some(move |evt: NotificationEvent| {

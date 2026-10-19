@@ -12,11 +12,10 @@ pub fn copy_text(text: &str) -> Result<(), String> {
             use std::io::Write;
             let _ = stdin.write_all(text.as_bytes());
         }
-        if let Ok(status) = child.wait() {
-            if status.success() {
+        if let Ok(status) = child.wait()
+            && status.success() {
                 return Ok(());
             }
-        }
     }
 
     // Native Wayland copy via wl-clipboard-rs
@@ -30,11 +29,9 @@ pub fn paste_text() -> Result<String, String> {
     if let Ok(output) = std::process::Command::new("wl-paste")
         .args(["--no-newline"])
         .output()
-    {
-        if output.status.success() {
+        && output.status.success() {
             return String::from_utf8(output.stdout).map_err(|e| e.to_string());
         }
-    }
 
     // Native Wayland paste via wl-clipboard-rs
     match get_contents(ClipboardType::Regular, PasteSeat::Unspecified, PasteMimeType::Text) {

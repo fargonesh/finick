@@ -44,8 +44,8 @@ pub fn material_colors_from_hex(hex: &str) -> Vec<(String, Color)> {
         None => return Vec::new(),
     };
     let (h, s, v) = rgb_to_hsv(base.r(), base.g(), base.b());
-    let s = s.max(0.45).min(0.85);
-    let v = v.max(0.75).min(0.95);
+    let s = s.clamp(0.45, 0.85);
+    let v = v.clamp(0.75, 0.95);
     let shifts = [30.0, -30.0, 60.0, 180.0, -60.0];
     shifts.into_iter().enumerate().map(|(i, sh)| {
         let nh = (h + sh + 360.0) % 360.0;
@@ -84,8 +84,8 @@ pub fn extract_wallpaper_colors(wp_path: &str) -> Vec<Accent> {
         }
     }
     // Fallback: extract distinct tones from image bytes
-    if let Ok(bytes) = std::fs::read(clean) {
-        if bytes.len() > 1024 {
+    if let Ok(bytes) = std::fs::read(clean)
+        && bytes.len() > 1024 {
             let mut list = Vec::new();
             let step = bytes.len() / 5;
             for i in 1..4 {
@@ -102,7 +102,6 @@ pub fn extract_wallpaper_colors(wp_path: &str) -> Vec<Accent> {
             }
             return list;
         }
-    }
     Vec::new()
 }
 

@@ -228,7 +228,7 @@ fn app() -> impl IntoElement {
     let t = use_app_theme();
     let wired_info = use_state(|| HyprlandBackend.get_wired_info());
     let displays = use_state(|| HyprlandBackend.get_displays());
-    let about_info = use_state(|| crate::pages::about::fetch_about_info());
+    let about_info = use_state(crate::pages::about::fetch_about_info);
     let current_route = use_state(|| Route::Overview);
     let search_query = use_state(String::new);
     let focused_nav_idx = use_state(|| 0usize);
@@ -261,18 +261,15 @@ fn app() -> impl IntoElement {
     // (matches the sidebar rendering below). Keyboard nav must follow this order.
     let visible_routes: Vec<RouteInfo> = {
         let mut v: Vec<RouteInfo> = filtered_routes.iter().copied().filter(|i| i.route != Route::About).collect();
-        if filtered_routes.iter().any(|i| i.route == Route::About) {
-            if let Some(about) = filtered_routes.iter().copied().find(|i| i.route == Route::About) {
-                v.push(about);
-            }
+        if filtered_routes.iter().any(|i| i.route == Route::About)
+            && let Some(about) = filtered_routes.iter().copied().find(|i| i.route == Route::About)
+        {
+            v.push(about);
         }
         v
     };
-    let active_focus_idx = if visible_routes.is_empty() {
-        0
-    } else {
-        (*focused_nav_idx.read()).min(visible_routes.len() - 1)
-    };
+    let active_focus_idx =
+        if visible_routes.is_empty() { 0 } else { (*focused_nav_idx.read()).min(visible_routes.len() - 1) };
 
     responsive_view(780.0, move |compact| {
         let sidebar_w = if compact { 180. } else { 232. };
@@ -433,9 +430,7 @@ fn app() -> impl IntoElement {
                                     .width(Size::fill())
                                     .corner_radius(6.)
                                     .border(Border::new().width(1.).fill(focus_border))
-                                    .child(nav_item(ABOUT, "About", is_active || is_focused, move || {
-                                        cr.set(Route::About)
-                                    }))
+                                    .child(nav_item(ABOUT, "About", is_active || is_focused, move || cr.set(Route::About)))
                             }),
                     ),
             )

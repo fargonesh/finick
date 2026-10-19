@@ -11,7 +11,10 @@ use freya_engine::prelude::Surface as SkiaSurface;
 use winit::{
     dpi::PhysicalSize,
     event_loop::ActiveEventLoop,
-    window::{Window, WindowAttributes},
+    window::{
+        Window,
+        WindowAttributes,
+    },
 };
 
 use crate::config::RendererPreference;

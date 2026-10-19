@@ -60,7 +60,8 @@ jobs:
             libcairo2-dev \
             libgdk-pixbuf-2.0-dev \
             libwebkit2gtk-4.1-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            libxdo-dev
       - run: cargo clippy --workspace --locked --all-targets -- -D warnings
 
   test:
@@ -91,7 +92,8 @@ jobs:
             libcairo2-dev \
             libgdk-pixbuf-2.0-dev \
             libwebkit2gtk-4.1-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            libxdo-dev
       - run: cargo check --workspace --locked
       - run: cargo test --workspace --locked
 
@@ -127,7 +129,8 @@ jobs:
             libcairo2-dev \
             libgdk-pixbuf-2.0-dev \
             libwebkit2gtk-4.1-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            libxdo-dev
       - name: Build release
         run: cargo build --release --locked
       - name: Stage binaries

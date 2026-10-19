@@ -1,16 +1,28 @@
 use freya_core::{
     elements::rect::Rect,
     prelude::{
-        Event, EventHandlersExt, EventsCombos, Platform, PointerEventData, PressEventType,
-        UserEvent, consume_root_context,
+        Event,
+        EventHandlersExt,
+        EventsCombos,
+        Platform,
+        PointerEventData,
+        PressEventType,
+        UserEvent,
+        consume_root_context,
     },
     user_event::SingleThreadErasedEvent,
 };
-use winit::window::{Window, WindowId};
+use winit::window::{
+    Window,
+    WindowId,
+};
 
 use crate::{
     config::WindowConfig,
-    renderer::{NativeWindowErasedEventAction, RendererContext},
+    renderer::{
+        NativeWindowErasedEventAction,
+        RendererContext,
+    },
     window::CurrentWindowId,
 };
 

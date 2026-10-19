@@ -70,7 +70,6 @@ impl Component for Shortcuts {
                                         ),
                                 )
                                 .maybe_child((*add_open.read()).then(|| {
-                                    let t = t;
                                     rect()
                                         .width(Size::fill())
                                         .vertical()
@@ -161,7 +160,7 @@ impl Component for Shortcuts {
                                                             return;
                                                         }
                                                         let mods: Vec<String> = mods_raw
-                                                            .split(|c| c == ',' || c == ' ' || c == '+')
+                                                            .split([',', ' ', '+'])
                                                             .filter(|s| !s.is_empty())
                                                             .map(|s| s.to_string())
                                                             .collect();

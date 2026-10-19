@@ -10,14 +10,13 @@ pub fn locker_binary() -> Option<std::path::PathBuf> {
             return Some(cand);
         }
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent() {
             let cand = dir.join("locker");
             if cand.is_file() {
                 return Some(cand);
             }
         }
-    }
     for base in [
         "/run/current-system/sw/bin/locker",
         "/usr/local/bin/locker",
@@ -91,14 +90,13 @@ pub fn locker_locked() -> bool {
 }
 
 pub fn locker_process_alive() -> bool {
-    if let Ok(old) = std::fs::read_to_string(locker_lockfile()) {
-        if let Ok(pid) = old.trim().parse::<i32>() {
+    if let Ok(old) = std::fs::read_to_string(locker_lockfile())
+        && let Ok(pid) = old.trim().parse::<i32>() {
             let cmdline = std::fs::read_to_string(format!("/proc/{pid}/cmdline")).unwrap_or_default();
             if cmdline.contains("locker") {
                 return true;
             }
         }
-    }
     false
 }
 
@@ -110,9 +108,8 @@ pub fn watch_lid_close<F: Fn() + Send + 'static>(on_close: F) {
             std::thread::sleep(std::time::Duration::from_secs(2));
             let mut closed = false;
             for p in &paths {
-                if let Ok(c) = std::fs::read_to_string(p) {
-                    if c.to_lowercase().contains("closed") { closed = true; break; }
-                }
+                if let Ok(c) = std::fs::read_to_string(p)
+                    && c.to_lowercase().contains("closed") { closed = true; break; }
             }
             if closed && !last_closed { on_close(); }
             last_closed = closed;

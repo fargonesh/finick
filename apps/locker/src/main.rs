@@ -64,7 +64,7 @@ fn locker_app() -> Element {
     let time_str = use_state(|| chrono::Local::now().format("%H:%M").to_string());
     let date_str = use_state(|| chrono::Local::now().format("%A, %B %-d").to_string());
     let battery = use_state(|| HyprlandBackend.get_power_info());
-    let wallpaper = use_hook(|| parse_wallpaper());
+    let wallpaper = use_hook(parse_wallpaper);
     let username = system::current_username();
     let hostname = use_hook(|| HyprlandBackend.get_host_info().hostname);
     let initial = username.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "?".to_string());
@@ -80,7 +80,7 @@ fn locker_app() -> Element {
                 ts.set(chrono::Local::now().format("%H:%M").to_string());
                 ds.set(chrono::Local::now().format("%A, %B %-d").to_string());
                 tick += 1;
-                if tick % 30 == 0 {
+                if tick.is_multiple_of(30) {
                     let info = tokio::task::spawn_blocking(|| HyprlandBackend.get_power_info()).await.unwrap_or(
                         system::PowerInfo {
                             capacity: "Unknown".to_string(),
@@ -307,7 +307,6 @@ fn locker_app() -> Element {
                                                 focus_border_fill: Some(Color::TRANSPARENT.into()),
                                                 color: Some(Color::WHITE.into()),
                                                 placeholder_color: Some(Color::from_rgb(150, 151, 158).into()),
-                                                ..Default::default()
                                             })
                                             .on_submit({
                                                 let mut h = do_unlock.clone();
@@ -493,7 +492,7 @@ fn main() {
 
     let mons = locker_monitors();
     place_locker_windows(mons.clone());
-    let _ = std::thread::spawn(|| watch_lid_and_lock());
+    let _ = std::thread::spawn(watch_lid_and_lock);
     let mut launch_config = LaunchConfig::new().with_exit_on_close(false);
     for m in &mons {
         let title: &'static str = Box::leak(format!("locker-{}", m.name).into_boxed_str());

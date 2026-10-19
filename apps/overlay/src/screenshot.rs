@@ -240,11 +240,10 @@ pub fn screenshot_window_config() -> WindowConfig {
         .with_resizable(false)
         .with_background(Color::TRANSPARENT)
         .with_on_close(|ctx, _wid| {
-            if let Some(sw) = ctx.global_contexts.try_get_context::<crate::ScreenshotWindowId>() {
-                if let Ok(mut g) = sw.0.lock() {
+            if let Some(sw) = ctx.global_contexts.try_get_context::<crate::ScreenshotWindowId>()
+                && let Ok(mut g) = sw.0.lock() {
                     *g = None;
                 }
-            }
             CloseDecision::Close
         })
 }

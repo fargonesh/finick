@@ -8,32 +8,65 @@
 
 use std::time::Duration;
 
+pub use smithay_client_toolkit::shell::wlr_layer::{
+    Anchor,
+    KeyboardInteractivity,
+    Layer,
+};
 use smithay_client_toolkit::{
-    compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,
-    output::{OutputHandler, OutputState},
+    compositor::{
+        CompositorHandler,
+        CompositorState,
+    },
+    delegate_compositor,
+    delegate_layer,
+    delegate_output,
+    delegate_registry,
+    delegate_shm,
+    output::{
+        OutputHandler,
+        OutputState,
+    },
     reexports::{
         calloop::EventLoop,
         calloop_wayland_source::WaylandSource,
         client::{
-            Connection, QueueHandle,
+            Connection,
+            QueueHandle,
             globals::registry_queue_init,
-            protocol::{wl_buffer, wl_output, wl_shm, wl_surface},
+            protocol::{
+                wl_buffer,
+                wl_output,
+                wl_shm,
+                wl_surface,
+            },
         },
     },
-    registry::{ProvidesRegistryState, RegistryState},
+    registry::{
+        ProvidesRegistryState,
+        RegistryState,
+    },
     registry_handlers,
     shell::{
         WaylandSurface,
-        wlr_layer::{LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
+        wlr_layer::{
+            LayerShell,
+            LayerShellHandler,
+            LayerSurface,
+            LayerSurfaceConfigure,
+        },
     },
-    shm::{Shm, ShmHandler},
+    shm::{
+        Shm,
+        ShmHandler,
+    },
 };
 
-use crate::wayland_native::{NativeRenderCallback, attach_shm_frame};
-
 pub use crate::wayland_native::NativeWaylandError;
-pub use smithay_client_toolkit::shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer};
+use crate::wayland_native::{
+    NativeRenderCallback,
+    attach_shm_frame,
+};
 
 /// Options for a standalone wlr-layer-shell surface.
 #[derive(Debug, Clone)]
@@ -66,7 +99,10 @@ impl LayerShellConfig {
 /// software backend. Winit windows and behavior are unaffected.
 ///
 /// ```no_run
-/// use freya_winit::wayland_layer_shell::{LayerShellConfig, run_layer_shell};
+/// use freya_winit::wayland_layer_shell::{
+///     LayerShellConfig,
+///     run_layer_shell,
+/// };
 ///
 /// run_layer_shell(LayerShellConfig::new(640, 80), |_, surface| {
 ///     surface.canvas().clear(freya_core::prelude::Color::BLACK);

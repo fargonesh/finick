@@ -28,6 +28,7 @@ fn tab_title(tab: Tab) -> &'static str {
 
 /// Home Manager `programs.*` options card for a nix detail view.
 /// Free fn like `app_row_icon`: states in, element out.
+#[allow(clippy::too_many_arguments)]
 fn options_card(
     module: Option<String>,
     loading: bool,
@@ -52,9 +53,6 @@ fn options_card(
     if let Some(enable) = fields.iter().find(|f| f.name == "enable" && matches!(f.kind, system::store_opts::OptKind::Bool)) {
         let checked = opt_bool(enable, &values);
         let field = enable.clone();
-        let notice = notice;
-        let opt_values = opt_values;
-        let dirty = dirty;
         card = card.child(setting_row(
             "Enable module".to_string(),
             Some(field.path.clone()),
@@ -84,9 +82,6 @@ fn options_card(
         match &field.kind {
             system::store_opts::OptKind::Bool => {
                 let checked = opt_bool(&field, &values);
-                let notice = notice;
-                let opt_values = opt_values;
-                let dirty = dirty;
                 card = card.child(setting_row(
                     field.name.clone(),
                     opt_blurb(&field),
@@ -104,9 +99,6 @@ fn options_card(
                     .unwrap_or("")
                     .to_string();
                 let items: Vec<(String, String)> = allowed.iter().map(|v| (v.clone(), v.clone())).collect();
-                let notice = notice;
-                let opt_values = opt_values;
-                let dirty = dirty;
                 card = card.child(setting_row(
                     field.name.clone(),
                     opt_blurb(&field),
@@ -119,12 +111,8 @@ fn options_card(
             _ => {
                 if editing.as_deref() == Some(path.as_str()) {
                     let mut edit_path = edit_path;
-                    let draft = draft;
                     let field_c = field.clone();
                     let field_s = field.clone();
-                    let notice = notice;
-                    let opt_values = opt_values;
-                    let dirty = dirty;
                     let dirty_c = dirty;
                     let draft_v = draft;
                     card = card.child(field_label(format!("{} — {}", field.name, field.path))).child(
@@ -215,19 +203,19 @@ fn strip_ansi(raw: &str) -> String {
     let mut chars = raw.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\x1b' {
-            if let Some(&next) = chars.peek() {
-                if next == '[' || next == ']' || next == '(' {
-                    chars.next();
-                    for nc in chars.by_ref() {
-                        if nc == '\x07' {
-                            break;
-                        }
-                        if nc.is_ascii_alphabetic() {
-                            break;
-                        }
+            if let Some(&next) = chars.peek()
+                && (next == '[' || next == ']' || next == '(')
+            {
+                chars.next();
+                for nc in chars.by_ref() {
+                    if nc == '\x07' {
+                        break;
                     }
-                    continue;
+                    if nc.is_ascii_alphabetic() {
+                        break;
+                    }
                 }
+                continue;
             }
             continue;
         }
@@ -341,7 +329,7 @@ fn is_generic_wrapper(line: &str) -> bool {
 fn cleaned_lines(raw: &str) -> Vec<String> {
     strip_ansi(raw)
         .lines()
-        .map(|l| strip_job_prefix(l))
+        .map(strip_job_prefix)
         .map(|l| l.trim().to_string())
         .filter(|l| !l.is_empty() && !is_noise_line(l))
         .collect()
@@ -378,12 +366,12 @@ fn parse_error_summary(raw: &str) -> String {
         .or_else(|| lines.iter().find(|l| !is_generic_wrapper(l)).cloned().or_else(|| lines.last().cloned()));
     let mut base = pick.unwrap_or_else(|| lines[0].clone());
     base = base.split_whitespace().collect::<Vec<_>>().join(" ");
-    if base.len() < 25 {
-        if let Some(next) = lines.iter().find(|l| **l != base && !is_generic_wrapper(l)) {
-            let extra: String = next.split_whitespace().collect::<Vec<_>>().join(" ");
-            if !extra.is_empty() {
-                base = format!("{base} {extra}");
-            }
+    if base.len() < 25
+        && let Some(next) = lines.iter().find(|l| **l != base && !is_generic_wrapper(l))
+    {
+        let extra: String = next.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !extra.is_empty() {
+            base = format!("{base} {extra}");
         }
     }
     if base.chars().count() > 240 { format!("{}…", base.chars().take(240).collect::<String>()) } else { base }
@@ -514,9 +502,9 @@ impl Component for NoticeBanner {
                             saved_path.set(Some(save_error_log(&detail)));
                         })
                     })
-                    .maybe_child(saved.map(|p| {
-                        label().font_size(11.).color(t.text_dim).text(format!("Saved to {p}")).into_element()
-                    })),
+                    .maybe_child(
+                        saved.map(|p| label().font_size(11.).color(t.text_dim).text(format!("Saved to {p}")).into_element()),
+                    ),
             )
             .into_element()
     }
@@ -579,6 +567,7 @@ enum JobEvent {
 
 /// Run a store job via finickd (or locally if the daemon is unreachable),
 /// streaming progress into the notice line. One helper for all five op sites.
+#[allow(clippy::too_many_arguments)]
 fn spawn_store_job(
     job: system::store::StoreJob,
     verb: String,
@@ -611,19 +600,17 @@ fn spawn_store_job(
     });
     spawn(async move {
         while let Some(ev) = rx.recv().await {
-            if let JobEvent::Progress(line) = ev {
-                notice.set(line);
-            }
+            let JobEvent::Progress(line) = ev;
+            notice.set(line);
         }
     });
     spawn(async move {
-        while let Some((summary, detail)) = done_rx.recv().await {
+        if let Some((summary, detail)) = done_rx.recv().await {
             notice.set(summary);
             notice_detail.set(detail);
             job_busy.set(false);
             dirty.set(dirty_after);
             refresh();
-            break;
         }
     });
 }
@@ -672,6 +659,7 @@ fn do_remove(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn select_entry(
     entry: StoreEntry,
     mut selected: State<Option<StoreEntry>>,
@@ -954,9 +942,6 @@ fn store_app() -> impl IntoElement {
     let pending_remove = use_state(|| None::<StoreEntry>);
 
     {
-        let installed = installed;
-        let updates = updates;
-        let hm_file = hm_file;
         let mut hm_imported = hm_imported;
         use_hook(move || {
             refresh_installed(installed);
@@ -1067,9 +1052,6 @@ fn store_app() -> impl IntoElement {
                                     ))
                                     .maybe(!hm_linked, |el| {
                                         el.child({
-                                            let hm_file = hm_file;
-                                            let hm_imported = hm_imported;
-                                            let notice = notice;
                                             let mut dirty = dirty;
                                             secondary_button_full("Link apps.nix", move || {
                                                 let f = hm_file.read().clone();
@@ -1094,10 +1076,6 @@ fn store_app() -> impl IntoElement {
                                     })
                                     .maybe(dirty_val, |el| {
                                         el.child({
-                                            let notice = notice;
-                                            let notice_detail = notice_detail;
-                                            let job_busy = job_busy;
-                                            let dirty = dirty;
                                             primary_button_full(
                                                 if job_busy_val { "Applying…" } else { "Apply changes" },
                                                 move || {
@@ -1221,11 +1199,7 @@ fn store_app() -> impl IntoElement {
                                                 .child(tile_head(
                                                     None,
                                                     "Source & ownership",
-                                                    Some(status_chip(
-                                                        source_label(&entry.source),
-                                                        entry.installed,
-                                                        None,
-                                                    )),
+                                                    Some(status_chip(source_label(&entry.source), entry.installed, None)),
                                                 ))
                                                 .child(tile_sub(ownership_blurb(&entry)))
                                                 .child(tile_sub(format!(
@@ -1287,7 +1261,7 @@ fn store_app() -> impl IntoElement {
                                                         Some("Flatpak sandbox".to_string()),
                                                     ))
                                                     .child(rect().width(Size::fill()).vertical().children(
-                                                        perm_list.iter().cloned().map(|p| {
+                                                        perm_list.iter().map(|p| {
                                                             let mut notice = notice_c;
                                                             let app_id = entry_p.id.clone();
                                                             let key = p.key.clone();
@@ -1403,11 +1377,6 @@ fn store_app() -> impl IntoElement {
                                                         .spacing(8.)
                                                         .content(Content::Flex)
                                                         .child({
-                                                            let query = query;
-                                                            let results = results;
-                                                            let search_busy = search_busy;
-                                                            let notice = notice;
-                                                            let notice_detail = notice_detail;
                                                             secondary_button("Retry search", move || {
                                                                 if *search_busy.read() {
                                                                     return;
@@ -1440,7 +1409,7 @@ fn store_app() -> impl IntoElement {
                                                         .width(Size::fill())
                                                         .vertical()
                                                         .spacing(GAP)
-                                                        .children(items.iter().cloned().map(|entry| {
+                                                        .children(items.iter().map(|entry| {
                                                             let notice_c = notice;
                                                             let notice_detail_c = notice_detail;
                                                             let job_busy_c = job_busy;
@@ -1451,7 +1420,7 @@ fn store_app() -> impl IntoElement {
                                                             let label_text =
                                                                 if entry.installed { "Reinstall" } else { "Install" };
                                                             tile()
-                                                                .child(app_header_row(&entry))
+                                                                .child(app_header_row(entry))
                                                                 .child(
                                                                     rect()
                                                                         .width(Size::fill())
@@ -1475,12 +1444,6 @@ fn store_app() -> impl IntoElement {
                                                                                 .cross_align(Alignment::Center)
                                                                                 .content(Content::Flex)
                                                                                 .child({
-                                                                                    let selected = selected;
-                                                                                    let nix_detail = nix_detail;
-                                                                                    let perms = perms;
-                                                                                    let opt_module = opt_module;
-                                                                                    let opt_fields = opt_fields;
-                                                                                    let opt_values = opt_values;
                                                                                     secondary_button("Details", move || {
                                                                                         select_entry(
                                                                                             entry_d.clone(),
@@ -1539,11 +1502,11 @@ fn store_app() -> impl IntoElement {
                                                             .width(Size::fill())
                                                             .vertical()
                                                             .spacing(GAP)
-                                                            .children(items.iter().cloned().map(|entry| {
+                                                            .children(items.iter().map(|entry| {
                                                                 let entry_c = entry.clone();
                                                                 let entry_d = entry.clone();
                                                                 tile()
-                                                                    .child(app_header_row(&entry))
+                                                                    .child(app_header_row(entry))
                                                                     .child(
                                                                         rect()
                                                                             .width(Size::fill())
@@ -1571,12 +1534,6 @@ fn store_app() -> impl IntoElement {
                                                                                     .cross_align(Alignment::Center)
                                                                                     .content(Content::Flex)
                                                                                     .child({
-                                                                                        let selected = selected;
-                                                                                        let nix_detail = nix_detail;
-                                                                                        let perms = perms;
-                                                                                        let opt_module = opt_module;
-                                                                                        let opt_fields = opt_fields;
-                                                                                        let opt_values = opt_values;
                                                                                         secondary_button(
                                                                                             "Details",
                                                                                             move || {
@@ -1601,9 +1558,11 @@ fn store_app() -> impl IntoElement {
                                                                                             el.child(danger_button(
                                                                                                 "Remove",
                                                                                                 move || {
-                                                                                                    pending_remove.set(Some(
-                                                                                                        entry_c.clone(),
-                                                                                                    ));
+                                                                                                    pending_remove.set(
+                                                                                                        Some(
+                                                                                                            entry_c.clone(),
+                                                                                                        ),
+                                                                                                    );
                                                                                                 },
                                                                                             ))
                                                                                         },
@@ -1661,7 +1620,7 @@ fn store_app() -> impl IntoElement {
                                                             .width(Size::fill())
                                                             .vertical()
                                                             .spacing(8.)
-                                                            .children(items.iter().cloned().map(|fp| {
+                                                            .children(items.iter().map(|fp| {
                                                                 let notice_c = notice;
                                                                 let notice_detail_c = notice_detail;
                                                                 let job_busy_c = job_busy;
@@ -1720,11 +1679,7 @@ fn store_app() -> impl IntoElement {
                         dialog_card(420.)
                             .spacing(12.)
                             .child(tile_head(None, format!("Remove {}", target.name), None::<String>))
-                            .child(tile_sub(format!(
-                                "{} · {}",
-                                source_label(&target.source),
-                                short_entry_id(&target)
-                            )))
+                            .child(tile_sub(format!("{} · {}", source_label(&target.source), short_entry_id(&target))))
                             .child(tile_sub(removal_note(&target.source)))
                             .child(tile_sub(action_timing_note(&target.source)))
                             .child(
@@ -1736,14 +1691,7 @@ fn store_app() -> impl IntoElement {
                                     .content(Content::Flex)
                                     .child(ghost_button("Cancel", move || pending_cancel.set(None)))
                                     .child(danger_button("Remove", move || {
-                                        do_remove(
-                                            target_c.clone(),
-                                            notice,
-                                            notice_detail,
-                                            job_busy,
-                                            dirty,
-                                            installed,
-                                        );
+                                        do_remove(target_c.clone(), notice, notice_detail, job_busy, dirty, installed);
                                         pending_confirm.set(None);
                                         selected.set(None);
                                     })),

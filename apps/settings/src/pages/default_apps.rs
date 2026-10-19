@@ -64,7 +64,7 @@ impl Component for DefaultApps {
                                 .child(tile_sub(desc))
                                 .child(setting_row(
                                     format!("Current: {label_val}"),
-                                    Some(format!("{cat_id}")),
+                                    Some(cat_id.to_string()),
                                     false,
                                     label().font_size(11.).color(t.text_dim).text(cur_name.clone()),
                                 ))

@@ -150,10 +150,10 @@ fn places_path() -> PathBuf {
 
 fn load_pinned() -> Vec<(String, String)> {
     let p = places_path();
-    if let Ok(s) = std::fs::read_to_string(p) {
-        if let Ok(v) = serde_json::from_str::<Vec<(String, String)>>(&s) {
-            return v;
-        }
+    if let Ok(s) = std::fs::read_to_string(p)
+        && let Ok(v) = serde_json::from_str::<Vec<(String, String)>>(&s)
+    {
+        return v;
     }
     Vec::new()
 }
@@ -180,10 +180,10 @@ fn recent_path() -> PathBuf {
 
 fn load_recent() -> Vec<String> {
     let p = recent_path();
-    if let Ok(s) = std::fs::read_to_string(p) {
-        if let Ok(v) = serde_json::from_str::<Vec<String>>(&s) {
-            return v.into_iter().filter(|d| Path::new(d).is_dir()).take(20).collect();
-        }
+    if let Ok(s) = std::fs::read_to_string(p)
+        && let Ok(v) = serde_json::from_str::<Vec<String>>(&s)
+    {
+        return v.into_iter().filter(|d| Path::new(d).is_dir()).take(20).collect();
     }
     Vec::new()
 }
@@ -262,11 +262,11 @@ fn empty_trash_all() -> Result<usize, String> {
         n += 1;
     }
     let (_, info) = trash_dirs();
-    if info.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&info) {
-            for e in entries.filter_map(|e| e.ok()) {
-                let _ = std::fs::remove_file(e.path());
-            }
+    if info.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&info)
+    {
+        for e in entries.filter_map(|e| e.ok()) {
+            let _ = std::fs::remove_file(e.path());
         }
     }
     let _ = LAST_TRASHED.lock().map(|mut v| v.clear());
@@ -329,27 +329,26 @@ fn fetch_via_index(req: index::ty::Request, fallback_dir: Option<String>, mut it
                 op_err = Some(String::from("Search unavailable"));
             }
         }
-        if let Some(dir) = fallback_dir.as_deref() {
-            if result.is_empty() || res.is_err() {
-                if let Ok(entries) = std::fs::read_dir(dir) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let md = entry.metadata().ok();
-                        let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                        let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
-                        let modified = md
-                            .as_ref()
-                            .and_then(|m| m.modified().ok())
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs());
-                        result.push(Item {
-                            ty: if is_dir { ItemType::Folder } else { ItemType::File },
-                            name: entry.file_name().to_string_lossy().to_string(),
-                            path: entry.path().to_string_lossy().to_string(),
-                            size,
-                            modified,
-                        });
-                    }
-                }
+        if let Some(dir) = fallback_dir.as_deref()
+            && (result.is_empty() || res.is_err())
+            && let Ok(entries) = std::fs::read_dir(dir)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let md = entry.metadata().ok();
+                let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
+                let modified = md
+                    .as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs());
+                result.push(Item {
+                    ty: if is_dir { ItemType::Folder } else { ItemType::File },
+                    name: entry.file_name().to_string_lossy().to_string(),
+                    path: entry.path().to_string_lossy().to_string(),
+                    size,
+                    modified,
+                });
             }
         }
         result.sort_by(|a, b| match (&a.ty, &b.ty) {
@@ -520,6 +519,7 @@ fn copy_dir_recursive_cancel(src: &PathBuf, dst: &PathBuf, cancel: State<bool>) 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn selection_handle_press(
     path: String,
     item: Item,
@@ -532,18 +532,18 @@ fn selection_handle_press(
 ) {
     let mut cur = selected_paths.read().clone();
     if shift {
-        if let Some(a) = anchor.read().clone() {
-            if let (Some(ai), Some(ci)) = (ordered.iter().position(|p| p == &a), ordered.iter().position(|p| p == &path)) {
-                let (lo, hi) = if ai <= ci { (ai, ci) } else { (ci, ai) };
-                for p in &ordered[lo..=hi] {
-                    if !cur.contains(p) {
-                        cur.push(p.clone());
-                    }
+        if let Some(a) = anchor.read().clone()
+            && let (Some(ai), Some(ci)) = (ordered.iter().position(|p| p == &a), ordered.iter().position(|p| p == &path))
+        {
+            let (lo, hi) = if ai <= ci { (ai, ci) } else { (ci, ai) };
+            for p in &ordered[lo..=hi] {
+                if !cur.contains(p) {
+                    cur.push(p.clone());
                 }
-                selected_paths.set(cur);
-                focus.set(Some(item));
-                return;
             }
+            selected_paths.set(cur);
+            focus.set(Some(item));
+            return;
         }
         if !cur.contains(&path) {
             cur.push(path.clone());
@@ -671,7 +671,7 @@ fn file_type_label(name: &str, is_dir: bool) -> String {
         "zip" | "tar" | "gz" | "xz" | "7z" | "rar" => String::from("Archive"),
         "rs" | "ts" | "js" | "py" | "go" | "c" | "cpp" | "sh" | "toml" | "json" | "yaml" => String::from("Code"),
         "txt" | "md" | "log" | "csv" => String::from("Text"),
-        ext if ext.is_empty() => String::from("File"),
+        "" => String::from("File"),
         ext => format!("{} file", ext.to_uppercase()),
     }
 }
@@ -1065,7 +1065,7 @@ fn app() -> Element {
 
     let pinned_val = pinned.read().clone();
     if !pinned_val.is_empty() {
-        let _ = save_pinned(&pinned_val);
+        save_pinned(&pinned_val);
     }
     let home_path = env::home_dir().map(|v| v.to_str().unwrap().to_string()).unwrap_or("/".to_string());
     let docs_path = env::home_dir().map(|v| v.join("Documents").to_str().unwrap().to_string()).unwrap_or("/".to_string());
@@ -1076,78 +1076,69 @@ fn app() -> Element {
     let recent_list = recent_dirs.read().clone();
     let is_trash_view = cp == trash_path;
 
-    let sidebar = rect()
-        .width(Size::flex(0.6))
-        .max_width(Size::px(260.))
-        .height(Size::fill())
-        .background(t.sidebar_bg)
-        .border(Border::new().width(1.).fill(t.border))
-        .padding(12.)
-        .child(
-            rect()
-                .horizontal()
-                .width(Size::fill())
-                .cross_align(Alignment::Center)
-                .main_align(Alignment::SpaceBetween)
-                .margin((0., 0., 4., 0.))
-                .child(nav_group_label("PLACES"))
-                .child(ghost_button("Collapse", {
-                    let mut s = show_sidebar;
-                    move || s.set(false)
-                })),
-        )
-        .child(sidebar_entry("Home", HOME, &current_path, home_path.clone(), items, pinned, clipboard))
-        .maybe(path_exists(&docs_path), |el| {
-            el.child(sidebar_entry("Documents", DOCUMENT, &current_path, docs_path.clone(), items, pinned, clipboard))
-        })
-        .maybe(path_exists(&dl_path), |el| {
-            el.child(sidebar_entry("Downloads", DOWNLOAD, &current_path, dl_path.clone(), items, pinned, clipboard))
-        })
-        .maybe(path_exists(&pic_path), |el| {
-            el.child(sidebar_entry("Pictures", PICTURE, &current_path, pic_path.clone(), items, pinned, clipboard))
-        })
-        .child(sidebar_entry("Trash", TRASH, &current_path, trash_path.clone(), items, pinned, clipboard))
-        .maybe(!devices.is_empty(), |el| {
-            el.child(
+    let sidebar =
+        rect()
+            .width(Size::flex(0.6))
+            .max_width(Size::px(260.))
+            .height(Size::fill())
+            .background(t.sidebar_bg)
+            .border(Border::new().width(1.).fill(t.border))
+            .padding(12.)
+            .child(
                 rect()
-                    .margin((4., 0., 0., 0.))
-                    .content(Content::Flex)
-                    .child(nav_group_label("DEVICES"))
-                    .children(devices.iter().map(|(name, path)| {
-                        sidebar_entry(name, STORAGE, &current_path, path.clone(), items, pinned, clipboard)
+                    .horizontal()
+                    .width(Size::fill())
+                    .cross_align(Alignment::Center)
+                    .main_align(Alignment::SpaceBetween)
+                    .margin((0., 0., 4., 0.))
+                    .child(nav_group_label("PLACES"))
+                    .child(ghost_button("Collapse", {
+                        let mut s = show_sidebar;
+                        move || s.set(false)
                     })),
             )
-        })
-        .maybe(!recent_list.is_empty(), |el| {
-            el.child(
-                rect()
-                    .margin((4., 0., 0., 0.))
-                    .content(Content::Flex)
-                    .child(nav_group_label("RECENT"))
-                    .children(recent_list.iter().map(|path| {
+            .child(sidebar_entry("Home", HOME, &current_path, home_path.clone(), items, pinned, clipboard))
+            .maybe(path_exists(&docs_path), |el| {
+                el.child(sidebar_entry("Documents", DOCUMENT, &current_path, docs_path.clone(), items, pinned, clipboard))
+            })
+            .maybe(path_exists(&dl_path), |el| {
+                el.child(sidebar_entry("Downloads", DOWNLOAD, &current_path, dl_path.clone(), items, pinned, clipboard))
+            })
+            .maybe(path_exists(&pic_path), |el| {
+                el.child(sidebar_entry("Pictures", PICTURE, &current_path, pic_path.clone(), items, pinned, clipboard))
+            })
+            .child(sidebar_entry("Trash", TRASH, &current_path, trash_path.clone(), items, pinned, clipboard))
+            .maybe(!devices.is_empty(), |el| {
+                el.child(rect().margin((4., 0., 0., 0.)).content(Content::Flex).child(nav_group_label("DEVICES")).children(
+                    devices.iter().map(|(name, path)| {
+                        sidebar_entry(name, STORAGE, &current_path, path.clone(), items, pinned, clipboard)
+                    }),
+                ))
+            })
+            .maybe(!recent_list.is_empty(), |el| {
+                el.child(rect().margin((4., 0., 0., 0.)).content(Content::Flex).child(nav_group_label("RECENT")).children(
+                    recent_list.iter().map(|path| {
                         let name =
                             PathBuf::from(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(path.clone());
                         sidebar_entry(&name, CLOCK_ICON, &current_path, path.clone(), items, pinned, clipboard)
-                    })),
-            )
-        })
-        .child(if !pinned.read().is_empty() {
-            rect()
-                .margin((4., 0., 0., 0.))
-                .content(Content::Flex)
-                .child(nav_group_label("PINNED"))
-                .children(
-                    pinned
-                        .read()
-                        .iter()
-                        .map(|(name, path)| sidebar_entry(name, PIN, &current_path, path.clone(), items, pinned, clipboard)),
-                )
-                .into_element()
-        } else {
-            rect().into_element()
-        })
-        .child(
-            rect().margin((12., 0., 0., 0.)).width(Size::fill()).content(Content::Flex).child(
+                    }),
+                ))
+            })
+            .child(if !pinned.read().is_empty() {
+                rect()
+                    .margin((4., 0., 0., 0.))
+                    .content(Content::Flex)
+                    .child(nav_group_label("PINNED"))
+                    .children(
+                        pinned.read().iter().map(|(name, path)| {
+                            sidebar_entry(name, PIN, &current_path, path.clone(), items, pinned, clipboard)
+                        }),
+                    )
+                    .into_element()
+            } else {
+                rect().into_element()
+            })
+            .child(rect().margin((12., 0., 0., 0.)).width(Size::fill()).content(Content::Flex).child(
                 secondary_button_full("Add Place", {
                     let mut show = show_add_place;
                     let mut name_st = add_place_name;
@@ -1161,12 +1152,11 @@ fn app() -> Element {
                         show.set(true);
                     }
                 }),
-            ),
-        );
+            ));
 
     let show_sidebar_val = *show_sidebar.read();
     let view_mode_val = view_mode.read().clone();
-    let icon_size_val = icon_size.read().clone();
+    let icon_size_val = *icon_size.read();
     let grid_active = view_mode_val == ViewMode::Grid;
     let list_active = view_mode_val == ViewMode::List;
 
@@ -1182,7 +1172,6 @@ fn app() -> Element {
         }))
         .child(icon_button("‹", {
             let mut current = current_path;
-            let items = items;
             let h = history;
             let mut hi = hist_idx;
             let mut hn = hist_nav;
@@ -1200,7 +1189,6 @@ fn app() -> Element {
         }))
         .child(icon_button("›", {
             let mut current = current_path;
-            let items = items;
             let h = history;
             let mut hi = hist_idx;
             let mut hn = hist_nav;
@@ -1218,14 +1206,12 @@ fn app() -> Element {
         }))
         .child(icon_button("↻", {
             let current = current_path;
-            let items = items;
             move || {
                 load_dir(current.read().clone(), items);
             }
         }))
         .child(tool_button(ARROW_LEFT, t.text, {
             let mut current = current_path;
-            let items = items;
             move || {
                 let path = PathBuf::from(current.read().clone());
                 if let Some(parent) = path.parent() {
@@ -1248,7 +1234,6 @@ fn app() -> Element {
         .padding((2., 10.))
         .child(Input::new(uri_input).width(Size::fill()).flat().placeholder("Path").on_submit({
             let mut current = current_path;
-            let items = items;
             move |val: String| {
                 current.set(val.clone());
                 load_dir(val, items);
@@ -1366,22 +1351,14 @@ fn app() -> Element {
                 move |v: IconSize| s.set(v)
             },
         ))
-        .child(tool_button(
-            LAYOUT_GRID,
-            if grid_active { t.accent } else { t.text_dim },
-            {
-                let mut vm = view_mode;
-                move || vm.set(ViewMode::Grid)
-            },
-        ))
-        .child(tool_button(
-            LIST,
-            if list_active { t.accent } else { t.text_dim },
-            {
-                let mut vm = view_mode;
-                move || vm.set(ViewMode::List)
-            },
-        ))
+        .child(tool_button(LAYOUT_GRID, if grid_active { t.accent } else { t.text_dim }, {
+            let mut vm = view_mode;
+            move || vm.set(ViewMode::Grid)
+        }))
+        .child(tool_button(LIST, if list_active { t.accent } else { t.text_dim }, {
+            let mut vm = view_mode;
+            move || vm.set(ViewMode::List)
+        }))
         .child(tool_button(PLUS, t.accent, {
             let path_state = current_path;
             let items_state = items;
@@ -1390,8 +1367,7 @@ fn app() -> Element {
                 let mut unique_path = target_path.clone();
                 let mut counter = 1;
                 while unique_path.exists() {
-                    unique_path =
-                        PathBuf::from(path_state.read().clone()).join(format!("New Folder ({})", counter));
+                    unique_path = PathBuf::from(path_state.read().clone()).join(format!("New Folder ({})", counter));
                     counter += 1;
                 }
                 let _ = std::fs::create_dir_all(&unique_path);
@@ -1509,8 +1485,8 @@ fn app() -> Element {
                 let shift = shift_held;
                 move |e: Event<PointerEventData>| {
                     let p = e.data().element_location();
-                    ds.set(Some((p.x as f64, p.y as f64)));
-                    dc.set(Some((p.x as f64, p.y as f64)));
+                    ds.set(Some((p.x, p.y)));
+                    dc.set(Some((p.x, p.y)));
                     if !*ctrl.read() && !*shift.read() {
                         sel.set(None);
                         multi.set(Vec::new());
@@ -1523,7 +1499,7 @@ fn app() -> Element {
                 move |e: Event<PointerEventData>| {
                     if ds.read().is_some() {
                         let p = e.data().element_location();
-                        dc.set(Some((p.x as f64, p.y as f64)));
+                        dc.set(Some((p.x, p.y)));
                     }
                 }
             })
@@ -2166,26 +2142,19 @@ fn app() -> Element {
                     .margin((8., 0., 0., 0.))
                     .width(Size::fill())
                     .content(Content::Flex)
-                    .child(
-                        rect()
-                            .width(Size::flex(1.))
-                            .content(Content::Flex)
-                            .child(secondary_button_full("Open-With", {
-                                let p = s_path.clone();
-                                let n = notice;
-                                move || open_with_chooser(&p, n)
-                            })),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::flex(1.))
-                            .content(Content::Flex)
-                            .child(secondary_button_full("Show in folder", {
-                                let p = s_path2.clone();
-                                let n = notice;
-                                move || show_in_folder(&p, n)
-                            })),
-                    )
+                    .child(rect().width(Size::flex(1.)).content(Content::Flex).child(secondary_button_full("Open-With", {
+                        let p = s_path.clone();
+                        let n = notice;
+                        move || open_with_chooser(&p, n)
+                    })))
+                    .child(rect().width(Size::flex(1.)).content(Content::Flex).child(secondary_button_full(
+                        "Show in folder",
+                        {
+                            let p = s_path2.clone();
+                            let n = notice;
+                            move || show_in_folder(&p, n)
+                        },
+                    )))
                     .into_element()
             })
             .child({
@@ -2216,37 +2185,27 @@ fn app() -> Element {
                     .margin((8., 0., 0., 0.))
                     .width(Size::fill())
                     .content(Content::Flex)
-                    .child(
-                        rect()
-                            .width(Size::flex(1.))
-                            .content(Content::Flex)
-                            .child(secondary_button_full("Rename", {
-                                let name_c2 = name_c.clone();
-                                move || {
-                                    ri.set(name_c2.clone());
-                                    rt.set(Some(sel.clone()));
-                                    sr.set(true);
-                                }
-                            })),
-                    )
-                    .child(
-                        rect().width(Size::flex(1.)).content(Content::Flex).child(danger_button_full_local(
-                            "Delete",
-                            {
-                                let s = s_path.clone();
-                                let mut pend = pending_delete;
-                                let mut show = show_delete_confirm;
-                                move || {
-                                    let mut paths = selected_paths.read().clone();
-                                    if !paths.contains(&s) {
-                                        paths.push(s.clone());
-                                    }
-                                    pend.set(paths);
-                                    show.set(true);
-                                }
-                            },
-                        )),
-                    )
+                    .child(rect().width(Size::flex(1.)).content(Content::Flex).child(secondary_button_full("Rename", {
+                        let name_c2 = name_c.clone();
+                        move || {
+                            ri.set(name_c2.clone());
+                            rt.set(Some(sel.clone()));
+                            sr.set(true);
+                        }
+                    })))
+                    .child(rect().width(Size::flex(1.)).content(Content::Flex).child(danger_button_full_local("Delete", {
+                        let s = s_path.clone();
+                        let mut pend = pending_delete;
+                        let mut show = show_delete_confirm;
+                        move || {
+                            let mut paths = selected_paths.read().clone();
+                            if !paths.contains(&s) {
+                                paths.push(s.clone());
+                            }
+                            pend.set(paths);
+                            show.set(true);
+                        }
+                    })))
                     .into_element()
             })
             .child({
@@ -2728,10 +2687,10 @@ fn app() -> Element {
                     match e.data().key {
                         Key::Character(ref s) if s == "c" => {
                             let mut v = multi.read().clone();
-                            if v.is_empty() {
-                                if let Some(it) = sel.read().clone() {
-                                    v = vec![it.path];
-                                }
+                            if v.is_empty()
+                                && let Some(it) = sel.read().clone()
+                            {
+                                v = vec![it.path];
                             }
                             if !v.is_empty() {
                                 clip.set(Some((v, false)));
@@ -2739,10 +2698,10 @@ fn app() -> Element {
                         }
                         Key::Character(ref s) if s == "x" => {
                             let mut v = multi.read().clone();
-                            if v.is_empty() {
-                                if let Some(it) = sel.read().clone() {
-                                    v = vec![it.path];
-                                }
+                            if v.is_empty()
+                                && let Some(it) = sel.read().clone()
+                            {
+                                v = vec![it.path];
                             }
                             if !v.is_empty() {
                                 clip.set(Some((v, true)));
@@ -2824,10 +2783,10 @@ fn app() -> Element {
                         }
                         Key::Named(NamedKey::Delete) => {
                             let mut paths = multi.read().clone();
-                            if paths.is_empty() {
-                                if let Some(it) = sel.read().clone() {
-                                    paths = vec![it.path];
-                                }
+                            if paths.is_empty()
+                                && let Some(it) = sel.read().clone()
+                            {
+                                paths = vec![it.path];
                             }
                             if !paths.is_empty() {
                                 confirm_trash_delete_multi(
@@ -2960,7 +2919,7 @@ fn app() -> Element {
                         )
                         .child(bottom_bar),
                 )
-                .maybe_child(selected_item.read().is_some().then(|| drawer)),
+                .maybe_child(selected_item.read().is_some().then_some(drawer)),
         )
         .child(add_place_modal)
         .child(rename_modal)
@@ -3023,11 +2982,7 @@ fn main() {
     let _guard = _rt.as_ref().map(|rt| rt.enter());
 
     launch(
-        LaunchConfig::new().with_window(
-            WindowConfig::new(app)
-                .with_title("Files")
-                .with_size(1100., 700.)
-                .with_min_size(640., 480.),
-        ),
+        LaunchConfig::new()
+            .with_window(WindowConfig::new(app).with_title("Files").with_size(1100., 700.).with_min_size(640., 480.)),
     )
 }

@@ -143,14 +143,13 @@ pub mod prelude {
         freya_winit::launch(launch_config)
     }
 
+    #[cfg_attr(feature = "docs", doc(cfg(feature = "router")))]
+    #[cfg(feature = "router")]
+    pub use freya_router;
     #[cfg(all(feature = "wayland-layer-shell", target_os = "linux"))]
     pub use freya_winit::wayland_layer_shell;
     #[cfg(all(feature = "wayland-session-lock", target_os = "linux"))]
     pub use freya_winit::wayland_session_lock;
-
-    #[cfg_attr(feature = "docs", doc(cfg(feature = "router")))]
-    #[cfg(feature = "router")]
-    pub use freya_router;
     pub use torin::{
         alignment::Alignment,
         content::Content,

@@ -151,11 +151,10 @@ pub fn notification_panel_window_config() -> WindowConfig {
         .with_resizable(false)
         .with_background(Color::TRANSPARENT)
         .with_on_close(|ctx, _wid| {
-            if let Some(panel) = ctx.global_contexts.try_get_context::<crate::NotificationPanelWindowId>() {
-                if let Ok(mut g) = panel.0.lock() {
+            if let Some(panel) = ctx.global_contexts.try_get_context::<crate::NotificationPanelWindowId>()
+                && let Ok(mut g) = panel.0.lock() {
                     *g = None;
                 }
-            }
             CloseDecision::Close
         })
 }

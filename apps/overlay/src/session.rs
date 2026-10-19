@@ -56,7 +56,7 @@ impl Component for SessionMenu {
                                 .main_align(Alignment::End)
                                 .content(Content::Flex)
                                 .margin((10., 0., 0., 0.))
-                                .child(ghost_button("Cancel", move || close())),
+                                .child(ghost_button("Cancel", close)),
                         ),
                 ),
             )

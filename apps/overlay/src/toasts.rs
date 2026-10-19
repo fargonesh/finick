@@ -213,11 +213,10 @@ pub fn toasts_window_config() -> WindowConfig {
         .with_resizable(false)
         .with_background(Color::TRANSPARENT)
         .with_on_close(|ctx, _wid| {
-            if let Some(tw) = ctx.global_contexts.try_get_context::<ToastWindowId>() {
-                if let Ok(mut g) = tw.0.lock() {
+            if let Some(tw) = ctx.global_contexts.try_get_context::<ToastWindowId>()
+                && let Ok(mut g) = tw.0.lock() {
                     *g = None;
                 }
-            }
             CloseDecision::Close
         })
 }
@@ -286,11 +285,10 @@ pub async fn ensure_toasts_window(proxy: &LaunchProxy) {
     let _ = proxy
         .post_callback(move |ctx| {
             let wid = ctx.launch_window(crate::toasts::toasts_window_config());
-            if let Some(tw) = ctx.global_contexts.try_get_context::<ToastWindowId>() {
-                if let Ok(mut g) = tw.0.lock() {
+            if let Some(tw) = ctx.global_contexts.try_get_context::<ToastWindowId>()
+                && let Ok(mut g) = tw.0.lock() {
                     *g = Some(wid);
                 }
-            }
         })
         .await;
     tokio::spawn(async move {

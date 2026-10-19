@@ -1,7 +1,6 @@
 #[cfg(feature = "bincode")]
 use bincode;
 pub use log;
-
 #[cfg(not(feature = "bincode"))]
 use {
     log::{error, info, trace},

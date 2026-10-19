@@ -1,35 +1,88 @@
-use std::{borrow::Cow, path::PathBuf, rc::Rc, sync::Arc, task::Waker};
+use std::{
+    borrow::Cow,
+    path::PathBuf,
+    rc::Rc,
+    sync::Arc,
+    task::Waker,
+};
 
 use accesskit_winit::Adapter;
-use freya_clipboard::copypasta::{ClipboardContext, ClipboardProvider};
-use freya_components::{cache::AssetCacher, integration::integration};
+use freya_clipboard::copypasta::{
+    ClipboardContext,
+    ClipboardProvider,
+};
+use freya_components::{
+    cache::AssetCacher,
+    integration::integration,
+};
 use freya_core::{
     integration::*,
-    prelude::{Color, CursorIcon},
+    prelude::{
+        Color,
+        CursorIcon,
+    },
 };
-use freya_engine::prelude::{FontCollection, FontMgr};
-use futures_util::task::{ArcWake, waker};
-use keyboard_types::{Code, Key};
-use ragnarok::{EventsMeasurerRunner, NodesState};
+use freya_engine::prelude::{
+    FontCollection,
+    FontMgr,
+};
+use futures_util::task::{
+    ArcWake,
+    waker,
+};
+use keyboard_types::{
+    Code,
+    Key,
+};
+use ragnarok::{
+    EventsMeasurerRunner,
+    NodesState,
+};
 use raw_window_handle::HasDisplayHandle;
 #[cfg(target_os = "linux")]
 use raw_window_handle::RawDisplayHandle;
-use torin::prelude::{CursorPoint, Size2D};
+use torin::prelude::{
+    CursorPoint,
+    Size2D,
+};
 use winit::{
-    dpi::{LogicalPosition, LogicalSize},
+    dpi::{
+        LogicalPosition,
+        LogicalSize,
+    },
     event::ElementState,
-    event_loop::{ActiveEventLoop, EventLoopProxy},
+    event_loop::{
+        ActiveEventLoop,
+        EventLoopProxy,
+    },
     keyboard::ModifiersState,
-    window::{Theme, Window, WindowAttributes, WindowId},
+    window::{
+        Theme,
+        Window,
+        WindowAttributes,
+        WindowId,
+    },
 };
 
 use crate::{
     accessibility::AccessibilityTask,
-    config::{OnCloseHook, RendererPreference, WindowConfig},
+    config::{
+        OnCloseHook,
+        RendererPreference,
+        WindowConfig,
+    },
     drivers::GraphicsDriver,
     integration::is_ime_role,
-    plugins::{PluginEvent, PluginHandle, PluginsManager},
-    renderer::{NativeEvent, NativeWindowEvent, NativeWindowEventAction},
+    plugins::{
+        PluginEvent,
+        PluginHandle,
+        PluginsManager,
+    },
+    renderer::{
+        NativeEvent,
+        NativeWindowEvent,
+        NativeWindowEventAction,
+    },
 };
 
 #[derive(Clone, Copy)]

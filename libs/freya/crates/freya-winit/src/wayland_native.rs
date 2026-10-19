@@ -1,10 +1,18 @@
 use freya_engine::prelude::Surface as SkiaSurface;
 use smithay_client_toolkit::{
     reexports::client::{
-        Dispatch, QueueHandle,
-        protocol::{wl_buffer, wl_shm, wl_surface},
+        Dispatch,
+        QueueHandle,
+        protocol::{
+            wl_buffer,
+            wl_shm,
+            wl_surface,
+        },
     },
-    shm::{Shm, raw::RawPool},
+    shm::{
+        Shm,
+        raw::RawPool,
+    },
 };
 
 use crate::drivers::raster::with_raster_surface;

@@ -115,11 +115,13 @@ impl SettingsStore {
     }
 
     /// Returns whether the given setting is managed/locked specifically by NixOS.
+    #[allow(dead_code)] // Lock-state query API; consumed as the Settings UI grows.
     pub fn is_nix_locked(&self, key: &SettingKey) -> bool {
         self.lock_states.read().get(key).map(|l| l.is_nix_locked()).unwrap_or(false)
     }
 
     /// Returns the raw LockState for a key.
+    #[allow(dead_code)] // Lock-state query API; consumed as the Settings UI grows.
     pub fn lock_state(&self, key: &SettingKey) -> LockState {
         self.lock_states.read().get(key).cloned().unwrap_or(LockState::Unlocked)
     }
@@ -143,6 +145,7 @@ impl SettingsStore {
     }
 
     /// Clears the last mutation error (e.g. after user dismisses or retries).
+    #[allow(dead_code)] // Lock-state query API; consumed as the Settings UI grows.
     pub fn clear_error(&self) {
         let mut err = self.last_error;
         err.set(None);
@@ -209,11 +212,9 @@ impl SettingsStore {
         let key_clone = key.clone();
         if let Ok(Ok(entries)) =
             tokio::task::spawn_blocking(|| get_all_settings(SETTINGS_SOCKET_NAME)).await
-        {
-            if let Some(entry) = entries.iter().find(|e| e.key == key_clone) {
+            && let Some(entry) = entries.iter().find(|e| e.key == key_clone) {
                 self.apply_to_local_state(&entry.key, &entry.value);
             }
-        }
     }
 
     /// Updates the local Freya reactive state for a key without sending IPC requests.
@@ -343,15 +344,13 @@ impl SettingsStore {
                 }
             }
             SettingKey::AccentColor => {
-                if let Some(s) = val.as_str() {
-                    if let Some(acc) = ui::ACCENTS.iter().find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s)) {
-                        if let Some(mut theme_state) = try_consume_context::<State<ui::AppTheme>>() {
+                if let Some(s) = val.as_str()
+                    && let Some(acc) = ui::ACCENTS.iter().find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s))
+                        && let Some(mut theme_state) = try_consume_context::<State<ui::AppTheme>>() {
                             let new_t = theme_state.read().with_accent(*acc);
                             theme_state.set(new_t);
                             ui::set_theme(&new_t);
                         }
-                    }
-                }
             }
             SettingKey::ThemeMode => {
                 if let Some(s) = val.as_str() {
@@ -635,7 +634,7 @@ pub fn use_init_settings_store() -> SettingsStore {
 
     let wallpaper = use_state(|| "#1e1e2e".to_string());
     let wallpaper_idx = use_state(|| 0usize);
-    let wallpaper_folder = use_state(|| String::new());
+    let wallpaper_folder = use_state(String::new);
     let wallpaper_interval = use_state(|| 0usize);
     let scrollbar_pref = use_state(|| 0usize);
     let icon_size_pref = use_state(|| 1usize);
@@ -821,6 +820,7 @@ pub fn use_init_settings_store() -> SettingsStore {
 }
 
 /// Retrieves the SettingsStore from the Freya context.
+#[allow(dead_code)] // Alternate store accessor; kept for pages migrated off init paths.
 pub fn use_settings() -> SettingsStore {
     consume_context::<SettingsStore>()
 }
