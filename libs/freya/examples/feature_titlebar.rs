@@ -1,0 +1,61 @@
+use freya::prelude::*;
+
+fn main() {
+    launch(LaunchConfig::new().with_window(WindowConfig::new(app).with_decorations(false)))
+}
+
+fn app() -> impl IntoElement {
+    let mut maximized = use_state(|| false);
+
+    use_side_effect(move || {
+        let _ = Platform::get().root_size.read();
+        Platform::get().with_window(Platform::window_id(), move |window| {
+            maximized.set(window.is_maximized())
+        });
+    });
+
+    let minimize = move |_| {
+        Platform::get().with_window(Platform::window_id(), |window| {
+            window.set_minimized(true);
+        });
+    };
+
+    let toggle_maximize = move |_| {
+        Platform::get().with_window(Platform::window_id(), |window| {
+            let is_max = window.is_maximized();
+            window.set_maximized(!is_max);
+        });
+    };
+
+    let close = move |_| {
+        Platform::get().close_window(Platform::window_id());
+    };
+
+    rect()
+        .expanded()
+        .vertical()
+        .child(
+            rect()
+                .horizontal()
+                .background((225, 225, 225))
+                .content(Content::Flex)
+                .height(Size::px(32.))
+                .cross_align(Alignment::Center)
+                .padding((0., 0., 0., 8.))
+                .child("Custom Titlebar!")
+                .child(
+                    rect()
+                        .window_drag()
+                        .width(Size::flex(1.))
+                        .height(Size::fill()),
+                )
+                .child(TitlebarButton::new(TitlebarAction::Minimize).on_press(minimize))
+                .child(if maximized() {
+                    TitlebarButton::new(TitlebarAction::Restore).on_press(toggle_maximize)
+                } else {
+                    TitlebarButton::new(TitlebarAction::Maximize).on_press(toggle_maximize)
+                })
+                .child(TitlebarButton::new(TitlebarAction::Close).on_press(close)),
+        )
+        .child(rect().expanded().center().child("Hello, World!"))
+}

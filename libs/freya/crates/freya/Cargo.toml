@@ -1,0 +1,169 @@
+[package]
+name = "freya"
+version = "0.5.0-rc.4"
+description = "Cross-platform and non-web GUI Library powered by Skia."
+edition = "2024"
+license = "MIT"
+authors = ["Marc Espín <mespinsanz@gmail.com>"]
+readme = "../../README.md"
+homepage = "https://freyaui.dev/"
+repository = "https://github.com/marc2332/freya"
+keywords = ["gui", "ui", "desktop", "skia"]
+categories = ["gui", "asynchronous"]
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+features = ["all-publish"]
+no-default-features = true
+
+[features]
+default = ["winit"]
+# Shortcuts
+all = ["all-crossplatform", "tray", "webview", "camera", "video"]
+all-crossplatform = [
+  "winit",
+  "router",
+  "i18n",
+  "remote-asset",
+  "engine",
+  "plot",
+  "gif",
+  "material-design",
+  "calendar",
+  "sdk",
+  "sdk-tokio",
+  "markdown",
+  "markdown-code-editor",
+  "icons",
+  "icons-lucide",
+  "radio",
+  "titlebar",
+  "borderless",
+  "terminal",
+  "query",
+  "code-editor",
+  "zoom-shortcuts",
+]
+all-publish = [
+  "all",
+  "docs",
+  "freya-components/docs",
+  "dep:freya-testing",
+  "dep:freya-plotters-backend",
+]
+all-debug = [
+  "all",
+  "dep:freya-testing",
+  "dep:freya-plotters-backend",
+  "performance",
+]
+all-tests = [
+  "winit",
+  "router",
+  "i18n",
+  "remote-asset",
+  "engine",
+  "plot",
+  "gif",
+  "material-design",
+  "calendar",
+  "markdown",
+  "radio",
+  "webview",
+  "titlebar",
+  "borderless",
+  "query",
+  "zoom-shortcuts",
+]
+docs = ["all-debug"]
+# Features
+winit = ["dep:freya-winit"]
+wayland-layer-shell = ["winit", "freya-winit/wayland-layer-shell"]
+wayland-session-lock = ["winit", "freya-winit/wayland-session-lock"]
+router = [
+  "dep:freya-router",
+  "freya-components/router",
+  "freya-markdown?/router",
+]
+remote-asset = ["freya-components/remote-asset", "freya-markdown?/remote-asset"]
+i18n = ["dep:freya-i18n"]
+engine = []
+devtools = ["dep:freya-devtools", "freya-core/devtools"]
+performance = []
+plot = ["dep:plotters", "dep:freya-plotters-backend"]
+hotreload = ["winit", "freya-core/hotreload", "freya-winit/hotreload"]
+gif = ["freya-components/gif"]
+video = ["dep:freya-video"]
+calendar = ["freya-components/calendar"]
+markdown = ["dep:freya-markdown"]
+markdown-code-editor = ["markdown", "code-editor", "freya-markdown/code-editor"]
+sdk = ["dep:freya-sdk"]
+sdk-tokio = ["sdk", "freya-sdk/tokio"]
+tray = ["winit", "freya-winit/tray", "dep:tray-icon"]
+material-design = ["dep:freya-material-design"]
+hotpath = ["winit", "freya-core/hotpath", "freya-winit/hotpath"]
+icons = ["dep:freya-icons"]
+icons-lucide = ["icons", "freya-icons/lucide"]
+radio = ["dep:freya-radio"]
+query = ["dep:freya-query"]
+webview = ["dep:freya-webview"]
+titlebar = ["freya-components/titlebar"]
+borderless = ["winit", "dep:freya-borderless-plugin"]
+terminal = ["dep:freya-terminal"]
+code-editor = ["dep:freya-code-editor"]
+camera = ["dep:freya-camera"]
+zoom-shortcuts = ["freya-components/zoom-shortcuts"]
+
+[dependencies]
+freya-core = { workspace = true }
+freya-winit = { workspace = true, optional = true }
+torin = { workspace = true }
+freya-edit = { workspace = true }
+freya-clipboard = { workspace = true }
+freya-components = { workspace = true }
+freya-markdown = { workspace = true, optional = true }
+freya-animation = { workspace = true }
+freya-engine = { workspace = true }
+freya-devtools = { workspace = true, optional = true, features = ["server"] }
+freya-sdk = { workspace = true, optional = true }
+freya-icons = { workspace = true, optional = true }
+freya-router = { workspace = true, optional = true }
+freya-i18n = { workspace = true, optional = true }
+freya-radio = { workspace = true, optional = true }
+freya-query = { workspace = true, optional = true }
+freya-webview = { workspace = true, optional = true }
+freya-terminal = { workspace = true, optional = true }
+freya-code-editor = { workspace = true, optional = true }
+freya-video = { workspace = true, optional = true }
+freya-camera = { workspace = true, optional = true }
+freya-borderless-plugin = { workspace = true, optional = true }
+
+# Performance
+freya-performance-plugin = { workspace = true }
+freya-material-design = { workspace = true, optional = true }
+freya-testing = { workspace = true, optional = true }
+
+# Tray
+tray-icon = { workspace = true, optional = true }
+
+# Plot
+plotters = { version = "0.3.7", default-features = false, features = [
+  "chrono",
+  "image",
+  "all_series",
+  "all_elements",
+  "full_palette",
+  "colormaps",
+], optional = true }
+freya-plotters-backend = { workspace = true, optional = true }
+
+# Other
+cfg-if = "1.0"
+
+[target.'cfg(target_os = "android")'.dependencies]
+freya-android = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync"] }

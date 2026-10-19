@@ -1,0 +1,247 @@
+[package]
+name = "examples"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+hotpath = ["freya/hotpath"]
+hotreload = ["freya/hotreload"]
+hotpath-alloc = ["hotpath/hotpath-alloc"]
+devtools = ["freya/devtools"]
+performance = ["freya/performance"]
+plot = ["freya/plot"]
+
+
+[workspace]
+members = [
+  "./crates/freya",
+  "./crates/freya-core",
+  "./crates/torin",
+  "./crates/ragnarok",
+  "./crates/freya-clipboard",
+  "./crates/freya-edit",
+  "./crates/freya-winit",
+  "./crates/freya-components",
+  "./crates/freya-video",
+  "./crates/freya-markdown",
+  "./crates/pathgraph",
+  "./crates/freya-animation",
+  "./crates/freya-router",
+  "./crates/freya-router-macro",
+  "./crates/freya-testing",
+  "./crates/freya-i18n",
+  "./crates/freya-performance-plugin",
+  "./crates/freya-borderless-plugin",
+  "./crates/freya-radio",
+  "./crates/freya-engine",
+  "./crates/freya-devtools",
+  "./crates/freya-devtools-app",
+  "./crates/freya-icons",
+  "./crates/freya-sdk",
+  "./crates/freya-material-design",
+  "./crates/freya-plotters-backend",
+  "./crates/freya-query",
+  "./crates/freya-webview",
+  "./crates/freya-terminal",
+  "./crates/freya-code-editor",
+  "./crates/freya-camera",
+  "./crates/freya-android",
+  "./examples/ai-chat",
+  "./examples/state_query_sqlite",
+  "./examples/android",
+  "./examples/component_video",
+  "./examples/feature_camera",
+  "./examples/feature_tray",
+  "./examples/feature_tray_radio_state",
+  "./examples/feature_webview",
+  "./examples/feature_webviews_resizable",
+]
+
+[workspace.dependencies]
+freya = { path = "./crates/freya", version = "0.5.0-rc.4" }
+freya-core = { path = "./crates/freya-core", version = "0.5.0-rc.4" }
+torin = { path = "./crates/torin", version = "0.5.0-rc.4" }
+ragnarok = { path = "./crates/ragnarok", version = "0.5.0-rc.4" }
+freya-clipboard = { path = "./crates/freya-clipboard", version = "0.5.0-rc.4" }
+freya-edit = { path = "./crates/freya-edit", version = "0.5.0-rc.4" }
+freya-winit = { path = "./crates/freya-winit", version = "0.5.0-rc.4" }
+freya-components = { path = "./crates/freya-components", version = "0.5.0-rc.4" }
+freya-video = { path = "./crates/freya-video", version = "0.5.0-rc.4" }
+freya-markdown = { path = "./crates/freya-markdown", version = "0.5.0-rc.4" }
+pathgraph = { path = "./crates/pathgraph/", version = "0.5.0-rc.4" }
+freya-animation = { path = "./crates/freya-animation", version = "0.5.0-rc.4" }
+freya-router = { path = "./crates/freya-router", version = "0.5.0-rc.4" }
+freya-router-macro = { path = "./crates/freya-router-macro", version = "0.5.0-rc.4" }
+freya-testing = { path = "./crates/freya-testing", version = "0.5.0-rc.4" }
+freya-i18n = { path = "./crates/freya-i18n", version = "0.5.0-rc.4" }
+freya-performance-plugin = { path = "./crates/freya-performance-plugin", version = "0.5.0-rc.4" }
+freya-borderless-plugin = { path = "./crates/freya-borderless-plugin", version = "0.5.0-rc.4" }
+freya-radio = { path = "./crates/freya-radio", version = "0.5.0-rc.4" }
+freya-engine = { path = "./crates/freya-engine", version = "0.5.0-rc.4" }
+freya-devtools = { path = "./crates/freya-devtools", version = "0.5.0-rc.4" }
+freya-icons = { path = "./crates/freya-icons", version = "0.5.0-rc.4" }
+freya-sdk = { path = "./crates/freya-sdk", version = "0.5.0-rc.4" }
+freya-material-design = { path = "./crates/freya-material-design", version = "0.5.0-rc.4" }
+freya-plotters-backend = { path = "./crates/freya-plotters-backend", version = "0.5.0-rc.4" }
+freya-query = { path = "./crates/freya-query", version = "0.5.0-rc.4" }
+freya-webview = { path = "./crates/freya-webview", version = "0.5.0-rc.4" }
+freya-terminal = { path = "./crates/freya-terminal", version = "0.5.0-rc.4" }
+freya-code-editor = { path = "./crates/freya-code-editor", version = "0.5.0-rc.4" }
+freya-camera = { path = "./crates/freya-camera", version = "0.5.0-rc.4" }
+freya-android = { path = "./crates/freya-android", version = "0.5.0-rc.4" }
+mundy = { version = "0.2.3", default-features = false, features = [
+  "async-io",
+  "callback",
+  "accent-color",
+] }
+
+# core
+generational-box = "0.7"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+rustc-hash = "2.1.1"
+bitflags = "2.9.3"
+# Core/async
+futures-util = "0.3.31"
+futures-channel = "0.3.31"
+futures-lite = "2.6.1"
+async-io = "2.5.0"
+async-channel = "2.5.0"
+blocking = "1.6.2"
+ureq = "3.1.4"
+reqwest = { version = "0.12", default-features = false, features = [
+  "blocking",
+  "http2",
+  "rustls-tls",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2.5"
+linkify = "0.11"
+open = "5.1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Animations
+easer = "0.3.0"
+
+# Text editing
+ropey = "1.6.1"
+keyboard-types = "0.8.0"
+
+# Layout
+euclid = "0.22.9"
+
+# Layers, Ragnarok, etc
+itertools = "0.14.0"
+
+# Rendering
+freya-skia-safe = { version = "0.99.1", features = [
+  "textlayout",
+  "svg",
+  "webp",
+] }
+bytes = "1.10.1"
+rfd = "0.17"
+
+# Desktop renderer
+raw-window-handle = "0.6.0"
+winit = "0.30.13"
+
+# Tray
+tray-icon = "0.21"
+
+# OpenGL
+gl = "0.14.0"
+glutin = "0.32.0"
+glutin-winit = "0.5.0"
+
+# Vulkan
+ash = "^0.38"
+ash-window = "0.13.0"
+
+# Software rendering
+softbuffer = "0.4.8"
+
+# accessibility
+accesskit = "0.24.0"
+accesskit_winit = "0.33.0"
+
+# Performance
+hotpath = "0.22.0"
+
+# Errors
+anyhow = "1.0.100"
+thiserror = "2.0.17"
+
+# Images
+image = "0.25.8"
+
+# Video
+ffmpeg-sidecar = "2.3"
+rodio = { version = "0.20", default-features = false }
+
+# SDK
+tokio = { version = "1.0", default-features = false }
+
+[dev-dependencies]
+freya = { workspace = true, features = ["all-crossplatform"] }
+freya-core = { workspace = true, features = ["debug-integrity", "test"] }
+freya-engine = { workspace = true }
+torin = { workspace = true }
+freya-edit = { workspace = true }
+freya-winit = { workspace = true }
+freya-testing = { workspace = true }
+freya-i18n = { workspace = true }
+freya-performance-plugin = { workspace = true }
+freya-radio = { workspace = true }
+tree-sitter-rust = "0.24"
+
+freya-skia-safe = { workspace = true }
+
+tracing-subscriber = { workspace = true }
+
+rand = "0.10"
+
+async-io = { workspace = true }
+futures-lite = { workspace = true }
+futures-channel = { workspace = true }
+
+ropey = { workspace = true }
+
+hotpath = { workspace = true }
+
+itertools = { workspace = true }
+
+# SDK examples and Tokio Integration
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time"] }
+
+# File picker example
+rfd = { workspace = true }
+
+# Hacker News example
+serde = { workspace = true }
+serde_json = { workspace = true }
+open = { workspace = true }
+ureq = { workspace = true }
+blocking = { workspace = true }
+
+portable-pty = "0.9"
+futures-util = { workspace = true }
+
+[workspace.lints.clippy]
+redundant_clone = "warn"
+
+[profile.release]
+lto = true
+opt-level = 3
+
+[profile.bench]
+lto = true
+opt-level = 3
+
+# Optimizes the freya devtools server
+[profile.dev.package.freya-devtools]
+opt-level = 3

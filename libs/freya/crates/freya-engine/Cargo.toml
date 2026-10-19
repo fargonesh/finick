@@ -1,0 +1,25 @@
+[package]
+name = "freya-engine"
+description = "Abstract Freya's graphics APIs"
+version = "0.5.0-rc.4"
+edition = "2024"
+license = "MIT"
+authors = ["Marc Espín <mespinsanz@gmail.com>"]
+readme = "../../README.md"
+homepage = "https://freyaui.dev/"
+repository = "https://github.com/marc2332/freya"
+keywords = ["gui", "ui", "desktop", "skia", "graphics"]
+categories = ["gui"]
+
+[lints]
+workspace = true
+
+[features]
+gl = ["freya-skia-safe/gl"]
+vulkan = ["freya-skia-safe/vulkan"]
+metal = ["freya-skia-safe/metal"]
+x11 = ["freya-skia-safe/x11"]
+wayland = ["freya-skia-safe/wayland"]
+
+[dependencies]
+freya-skia-safe = { workspace = true }

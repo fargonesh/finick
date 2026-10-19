@@ -1,0 +1,18 @@
+[package]
+name = "freya-plotters-backend"
+description = "Freya's skia-safe backend for plotters"
+version = "0.5.0-rc.4"
+edition = "2024"
+license = "MIT"
+authors = ["Marc Espín <mespinsanz@gmail.com>"]
+readme = "./README.md"
+repository = "https://github.com/marc2332/freya"
+keywords = ["gui", "plot", "backend", "skia", "plotters"]
+categories = ["gui"]
+
+[lints]
+workspace = true
+
+[dependencies]
+freya-engine = { workspace = true }
+plotters-backend = "0.3.7"

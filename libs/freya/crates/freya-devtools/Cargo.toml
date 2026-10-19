@@ -1,0 +1,47 @@
+[package]
+name = "freya-devtools"
+version = "0.5.0-rc.4"
+description = "Devtools Server for Freya"
+edition = "2024"
+license = "MIT"
+authors = ["Marc Espín <mespinsanz@gmail.com>"]
+readme = "../../README.md"
+homepage = "https://freyaui.dev/"
+repository = "https://github.com/marc2332/freya"
+keywords = ["gui", "ui", "desktop", "skia"]
+categories = ["gui", "asynchronous"]
+
+[lints]
+workspace = true
+
+[features]
+server = [
+  "dep:smol",
+  "dep:async-lock",
+  "dep:tungstenite",
+  "dep:futures-util",
+  "dep:async-tungstenite",
+  "dep:anyhow",
+  "dep:serde_json",
+]
+client = []
+
+[dependencies]
+# Core
+freya-core = { workspace = true, features = ["serde"] }
+freya-winit = { workspace = true }
+freya-engine = { workspace = true }
+torin = { workspace = true, features = ["serde"] }
+
+# Server
+tungstenite = { version = "0.27", features = ["handshake"], optional = true }
+futures-util = { version = "0.3", optional = true }
+smol = { version = "2.0.2", optional = true }
+async-lock = { version = "3.4.1", optional = true }
+async-tungstenite = { version = "0.31.0", optional = true }
+anyhow = { version = "1", optional = true }
+serde_json = { workspace = true, optional = true }
+
+# Common
+serde = "1"
+accesskit = { workspace = true, features = ["serde"] }

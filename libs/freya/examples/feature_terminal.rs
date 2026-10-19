@@ -1,0 +1,184 @@
+use freya::{
+    clipboard::Clipboard,
+    prelude::*,
+    terminal::*,
+};
+use futures_util::FutureExt;
+
+fn main() {
+    launch(LaunchConfig::new().with_window(WindowConfig::new(app)))
+}
+
+fn app() -> impl IntoElement {
+    let mut handle = use_state(|| {
+        let mut cmd = CommandBuilder::new("bash");
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        cmd.env("LANG", "en_GB.UTF-8");
+        TerminalHandle::new(TerminalId::new(), cmd, None).ok()
+    });
+
+    use_future(move || async move {
+        let terminal_handle = handle.read().clone();
+        let Some(terminal_handle) = terminal_handle else {
+            return;
+        };
+        loop {
+            futures_util::select! {
+                _ = terminal_handle.closed().fuse() => {
+                    let _ = handle.write().take();
+                    break;
+                }
+                _ = terminal_handle.title_changed().fuse() => {
+                    if let Some(new_title) = terminal_handle.title() {
+                        Platform::get().with_window(Platform::window_id(), move |window| {
+                            window.set_title(&new_title);
+                        });
+                    }
+                }
+                _ = terminal_handle.clipboard_changed().fuse() => {
+                    if let Some(text) = terminal_handle.clipboard_content() {
+                        let _ = Clipboard::set(text);
+                    }
+                }
+            }
+        }
+    });
+
+    let a11y_id = use_a11y();
+    let focus = use_focus(a11y_id);
+    let mut dimensions = use_state(|| (0.0, 0.0));
+    let mut click_origin = use_state(|| None::<(usize, usize)>);
+
+    use_side_effect(move || {
+        let focused = *Platform::get().is_app_focused.read() && focus().is_focused();
+        if let Some(handle) = handle.read().clone() {
+            handle.focus_changed(focused);
+        }
+    });
+
+    rect()
+        .expanded()
+        .center()
+        .background((30, 30, 30))
+        .color((245, 245, 245))
+        .child(if let Some(handle) = handle.read().clone() {
+            rect()
+                .child(
+                    Terminal::new(handle.clone())
+                        .on_measured(move |(char_width, line_height)| {
+                            dimensions.set((char_width, line_height));
+                        })
+                        .on_mouse_down({
+                            let handle = handle.clone();
+                            move |e: Event<MouseEventData>| {
+                                a11y_id.request_focus();
+                                let (char_width, line_height) = dimensions();
+                                let col = (e.element_location.x / char_width as f64) as f32;
+                                let row = (e.element_location.y / line_height as f64) as f32;
+                                click_origin.set(Some((row as usize, col as usize)));
+                                let button = match e.button {
+                                    Some(MouseButton::Middle) => TerminalMouseButton::Middle,
+                                    Some(MouseButton::Right) => TerminalMouseButton::Right,
+                                    _ => TerminalMouseButton::Left,
+                                };
+                                let selection_type = match EventsCombos::pressed(e.element_location)
+                                {
+                                    PressEventType::Double => SelectionType::Semantic,
+                                    PressEventType::Triple => SelectionType::Lines,
+                                    _ => SelectionType::Simple,
+                                };
+                                handle.mouse_down(row, col, button, selection_type);
+                            }
+                        })
+                        .on_mouse_move({
+                            let handle = handle.clone();
+                            move |e: Event<MouseEventData>| {
+                                let (char_width, line_height) = dimensions();
+                                let col = (e.element_location.x / char_width as f64) as f32;
+                                let row = (e.element_location.y / line_height as f64) as f32;
+                                handle.mouse_move(row, col);
+                            }
+                        })
+                        .on_mouse_up({
+                            let handle = handle.clone();
+                            move |e: Event<MouseEventData>| {
+                                let (char_width, line_height) = dimensions();
+                                let col = (e.element_location.x / char_width as f64) as f32;
+                                let row = (e.element_location.y / line_height as f64) as f32;
+                                let button = match e.button {
+                                    Some(MouseButton::Middle) => TerminalMouseButton::Middle,
+                                    Some(MouseButton::Right) => TerminalMouseButton::Right,
+                                    _ => TerminalMouseButton::Left,
+                                };
+                                handle.mouse_up(row, col, button);
+                                let origin = click_origin();
+                                click_origin.set(None);
+                                if button == TerminalMouseButton::Left
+                                    && origin == Some((row as usize, col as usize))
+                                    && let Some(url) = handle.hyperlink_at(row, col)
+                                {
+                                    let _ = open::that(url);
+                                }
+                            }
+                        })
+                        .on_global_pointer_press({
+                            let handle = handle.clone();
+                            move |_: Event<PointerEventData>| {
+                                handle.release();
+                            }
+                        })
+                        .on_wheel({
+                            let handle = handle.clone();
+                            move |e: Event<WheelEventData>| {
+                                let (char_width, line_height) = dimensions();
+                                let (mouse_x, mouse_y) = e.element_location.to_tuple();
+                                let col = (mouse_x / char_width as f64) as f32;
+                                let row = (mouse_y / line_height as f64) as f32;
+                                handle.wheel(e.delta_y, row, col);
+                            }
+                        })
+                        .a11y_id(a11y_id)
+                        .a11y_role(AccessibilityRole::Terminal)
+                        .a11y_auto_focus(true)
+                        .on_key_up({
+                            let handle = handle.clone();
+                            move |e: Event<KeyboardEventData>| {
+                                if e.key == Key::Named(NamedKey::Shift) {
+                                    handle.shift_pressed(false);
+                                }
+                            }
+                        })
+                        .on_key_down(move |e: Event<KeyboardEventData>| {
+                            let ctrl_shift =
+                                e.modifiers.contains(Modifiers::CONTROL | Modifiers::SHIFT);
+
+                            match &e.key {
+                                Key::Character(ch)
+                                    if ctrl_shift && ch.eq_ignore_ascii_case("c") =>
+                                {
+                                    if let Some(text) = handle.get_selected_text() {
+                                        let _ = Clipboard::set(text);
+                                    }
+                                }
+                                Key::Character(ch)
+                                    if ctrl_shift && ch.eq_ignore_ascii_case("v") =>
+                                {
+                                    if let Ok(text) = Clipboard::get() {
+                                        let _ = handle.paste(&text);
+                                    }
+                                }
+                                _ => {
+                                    let _ = handle.write_key(&e.key, e.modifiers);
+                                }
+                            }
+                        }),
+                )
+                .expanded()
+                .background((10, 10, 10))
+                .padding(6.)
+                .into_element()
+        } else {
+            "Terminal exited".into_element()
+        })
+}

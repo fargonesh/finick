@@ -1,0 +1,83 @@
+[package]
+name = "freya-components"
+version = "0.5.0-rc.4"
+edition = "2024"
+description = "Components for Freya apps"
+license = "MIT"
+authors = ["Marc Espín <mespinsanz@gmail.com>"]
+readme = "../../README.md"
+homepage = "https://freyaui.dev/"
+repository = "https://github.com/marc2332/freya"
+keywords = ["gui", "ui", "desktop", "skia"]
+categories = ["gui", "asynchronous"]
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+features = ["docs"]
+
+[features]
+router = ["dep:open", "dep:freya-router"]
+remote-asset = ["dep:reqwest"]
+docs = ["dep:embed-doc-image"]
+gif = ["dep:gif"]
+calendar = ["dep:chrono"]
+titlebar = []
+zoom-shortcuts = []
+
+[dependencies]
+freya-core = { workspace = true }
+freya-animation = { workspace = true }
+torin = { workspace = true }
+freya-engine = { workspace = true }
+freya-edit = { workspace = true }
+freya-sdk = { workspace = true }
+tracing = { workspace = true }
+
+# Theming
+paste = "1.0.15"
+
+# Calendar
+chrono = { version = "0.4", optional = true }
+
+# Router
+open = { workspace = true, optional = true }
+freya-router = { workspace = true, optional = true }
+
+# Cache
+async-io = { workspace = true }
+
+# Remote Image
+reqwest = { workspace = true, optional = true }
+
+# Image viewer
+blocking = { workspace = true }
+bytes = { version = "1.10.1" }
+euclid = { workspace = true }
+async-lock = "3"
+
+# Other
+cfg-if = "1.0"
+
+# Errors
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Docs
+embed-doc-image = { version = "0.1.4", optional = true }
+
+# GIF
+gif = { version = "0.13.3", optional = true }
+
+# Accessibility
+accesskit = { workspace = true }
+
+[dev-dependencies]
+freya = { path = "../freya", features = [
+  "markdown",
+  "gif",
+  "remote-asset",
+  "calendar",
+] }
+freya-testing = { path = "../freya-testing" }
