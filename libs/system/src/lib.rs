@@ -1605,6 +1605,43 @@ fn get_finick_config_dir() -> Option<std::path::PathBuf> {
         })
 }
 
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceInfo {
+    pub id: i32,
+    pub name: String,
+    pub monitor: String,
+    pub windows: i32,
+}
+
+pub fn get_active_workspaces() -> std::collections::HashMap<String, i32> {
+    if let Ok(output) = std::process::Command::new("hyprctl").args(["monitors", "-j"]).output() {
+        let out = String::from_utf8_lossy(&output.stdout);
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out)
+            && let Some(arr) = v.as_array()
+        {
+            let mut map = std::collections::HashMap::new();
+            for mon in arr {
+                if let (Some(name), Some(ws)) = (mon["name"].as_str(), mon["activeWorkspace"]["id"].as_i64()) {
+                    map.insert(name.to_string(), ws as i32);
+                }
+            }
+            return map;
+        }
+    }
+    std::collections::HashMap::new()
+}
+
+pub fn get_workspaces() -> Vec<WorkspaceInfo> {
+    if let Ok(output) = std::process::Command::new("hyprctl").args(["workspaces", "-j"]).output() {
+        let out = String::from_utf8_lossy(&output.stdout);
+        if let Ok(mut workspaces) = serde_json::from_str::<Vec<WorkspaceInfo>>(&out) {
+            workspaces.sort_by_key(|w| w.id);
+            return workspaces;
+        }
+    }
+    Vec::new()
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1951,41 +1988,4 @@ mod tests {
         assert!(content.contains("texture(tex, v_texcoord)"));
         apply_night_shift(false, 50.0);
     }
-}
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceInfo {
-    pub id: i32,
-    pub name: String,
-    pub monitor: String,
-    pub windows: i32,
-}
-
-pub fn get_active_workspaces() -> std::collections::HashMap<String, i32> {
-    if let Ok(output) = std::process::Command::new("hyprctl").args(["monitors", "-j"]).output() {
-        let out = String::from_utf8_lossy(&output.stdout);
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out)
-            && let Some(arr) = v.as_array()
-        {
-            let mut map = std::collections::HashMap::new();
-            for mon in arr {
-                if let (Some(name), Some(ws)) = (mon["name"].as_str(), mon["activeWorkspace"]["id"].as_i64()) {
-                    map.insert(name.to_string(), ws as i32);
-                }
-            }
-            return map;
-        }
-    }
-    std::collections::HashMap::new()
-}
-
-pub fn get_workspaces() -> Vec<WorkspaceInfo> {
-    if let Ok(output) = std::process::Command::new("hyprctl").args(["workspaces", "-j"]).output() {
-        let out = String::from_utf8_lossy(&output.stdout);
-        if let Ok(mut workspaces) = serde_json::from_str::<Vec<WorkspaceInfo>>(&out) {
-            workspaces.sort_by_key(|w| w.id);
-            return workspaces;
-        }
-    }
-    Vec::new()
 }
