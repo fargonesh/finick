@@ -232,17 +232,11 @@ pub fn get_setting_entry(payload: &SettingsPayload, backend: &HyprlandBackend, k
             Some(SettingValue::Bool(*payload.personalization.notifications.silence_during_sleep))
         }
         SettingKey::Custom(k) => payload.custom.get(k).and_then(|v| {
-            if let Some(b) = v.as_bool() {
-                Some(SettingValue::Bool(b))
-            } else if let Some(i) = v.as_i64() {
-                Some(SettingValue::Int(i))
-            } else if let Some(f) = v.as_f64() {
-                Some(SettingValue::Float(f))
-            } else if let Some(s) = v.as_str() {
-                Some(SettingValue::String(s.to_string()))
-            } else {
-                None
-            }
+            v.as_bool()
+                .map(SettingValue::Bool)
+                .or_else(|| v.as_i64().map(SettingValue::Int))
+                .or_else(|| v.as_f64().map(SettingValue::Float))
+                .or_else(|| v.as_str().map(|s| SettingValue::String(s.to_string())))
         }),
         _ => None,
     };
@@ -971,7 +965,7 @@ pub fn handle_request(state: &Arc<Mutex<DaemonState>>, req: SettingsRequest, sen
         SettingsRequest::GetLocks { category } => {
             let state = state.lock().unwrap();
             for key in ALL_SETTING_KEYS {
-                if category.map_or(true, |c| key.category() == c) {
+                if category.is_none_or(|c| key.category() == c) {
                     let lock_state = get_lock_state(&state.payload, key);
                     if lock_state.is_locked() {
                         let _ = sender.send(SettingsResponse::LockState { key: key.clone(), lock_state });
@@ -1150,7 +1144,7 @@ pub fn handle_request(state: &Arc<Mutex<DaemonState>>, req: SettingsRequest, sen
             let mut state = state.lock().unwrap();
             let default_payload = config::SettingsPayload::default();
             for key in ALL_SETTING_KEYS {
-                if category.map_or(true, |c| key.category() == c) && !is_locked(&state.payload, key) {
+                if category.is_none_or(|c| key.category() == c) && !is_locked(&state.payload, key) {
                     if let Some(default_entry) = get_setting_entry(&default_payload, &state.backend, key) {
                         let _ = set_setting_value(&mut state.payload, key, &default_entry.value);
                     }
@@ -1319,7 +1313,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             failures += 1;
             if failures > 3 {
-                eprintln!("[finickd] locker crashed {}x, giving up — clearing stale lockfile to avoid YubiKey hammer", failures);
+                eprintln!(
+                    "[finickd] locker crashed {}x, giving up — clearing stale lockfile to avoid YubiKey hammer",
+                    failures
+                );
                 let _ = std::fs::remove_file(system::locker_lockfile());
                 let _ = std::process::Command::new("systemctl").args(["--user", "start", "finick-overlay"]).output();
                 failures = 0;

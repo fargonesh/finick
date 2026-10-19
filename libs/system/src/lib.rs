@@ -50,7 +50,7 @@ pub fn parse_display_dimensions(resolution: &str) -> (u32, u32) {
     if trimmed.is_empty() {
         return (1920, 1080);
     }
-    let mut parts = trimmed.split(|c| c == 'x' || c == 'X');
+    let mut parts = trimmed.split(['x', 'X']);
     let w = parts.next().and_then(|s| s.trim().parse::<u32>().ok()).filter(|&v| v > 0).unwrap_or(1920);
     let h = parts.next().and_then(|s| s.trim().split('@').next()?.parse::<u32>().ok()).filter(|&v| v > 0).unwrap_or(1080);
     (w, h)
@@ -1680,14 +1680,14 @@ impl SystemBackend for HyprlandBackend {
     fn restore_display_configs(&self) -> Result<(), String> {
         if let Some(dir) = get_finick_config_dir() {
             let file = dir.join("monitors.json");
-            if let Ok(content) = std::fs::read_to_string(file) {
-                if let Ok(configs) = serde_json::from_str::<Vec<PersistentDisplayConfig>>(&content) {
-                    let current = self.get_displays();
-                    let current_names: std::collections::HashSet<String> = current.into_iter().map(|d| d.name).collect();
-                    for c in configs {
-                        if current_names.contains(&c.name) {
-                            let _ = Self::apply_monitor_config(&c.name, &c.mode, &c.position, &c.scale, c.transform);
-                        }
+            if let Ok(content) = std::fs::read_to_string(file)
+                && let Ok(configs) = serde_json::from_str::<Vec<PersistentDisplayConfig>>(&content)
+            {
+                let current = self.get_displays();
+                let current_names: std::collections::HashSet<String> = current.into_iter().map(|d| d.name).collect();
+                for c in configs {
+                    if current_names.contains(&c.name) {
+                        let _ = Self::apply_monitor_config(&c.name, &c.mode, &c.position, &c.scale, c.transform);
                     }
                 }
             }
@@ -2109,12 +2109,12 @@ impl SystemBackend for HyprlandBackend {
     fn connect_wifi_with_password(&self, ssid: &str, password: Option<&str>, hidden: bool) -> Result<(), String> {
         let mut args = vec!["dev", "wifi", "connect", ssid];
         let pwd_str;
-        if let Some(pwd) = password {
-            if !pwd.is_empty() {
-                pwd_str = pwd.to_string();
-                args.push("password");
-                args.push(&pwd_str);
-            }
+        if let Some(pwd) = password
+            && !pwd.is_empty()
+        {
+            pwd_str = pwd.to_string();
+            args.push("password");
+            args.push(&pwd_str);
         }
         if hidden {
             args.push("hidden");
@@ -2469,14 +2469,14 @@ pub const WALLPAPER_COLOR_PRESETS: &[(&str, &str)] = &[
 ];
 
 fn resolve_swaybg() -> Option<std::path::PathBuf> {
-    if let Ok(output) = Command::new("which").arg("swaybg").output() {
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                let p = std::path::PathBuf::from(path_str);
-                if p.exists() {
-                    return Some(p);
-                }
+    if let Ok(output) = Command::new("which").arg("swaybg").output()
+        && output.status.success()
+    {
+        let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path_str.is_empty() {
+            let p = std::path::PathBuf::from(path_str);
+            if p.exists() {
+                return Some(p);
             }
         }
     }
@@ -2606,6 +2606,43 @@ fn get_finick_config_dir() -> Option<std::path::PathBuf> {
         })
 }
 
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceInfo {
+    pub id: i32,
+    pub name: String,
+    pub monitor: String,
+    pub windows: i32,
+}
+
+pub fn get_active_workspaces() -> std::collections::HashMap<String, i32> {
+    if let Ok(output) = std::process::Command::new("hyprctl").args(["monitors", "-j"]).output() {
+        let out = String::from_utf8_lossy(&output.stdout);
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out)
+            && let Some(arr) = v.as_array()
+        {
+            let mut map = std::collections::HashMap::new();
+            for mon in arr {
+                if let (Some(name), Some(ws)) = (mon["name"].as_str(), mon["activeWorkspace"]["id"].as_i64()) {
+                    map.insert(name.to_string(), ws as i32);
+                }
+            }
+            return map;
+        }
+    }
+    std::collections::HashMap::new()
+}
+
+pub fn get_workspaces() -> Vec<WorkspaceInfo> {
+    if let Ok(output) = std::process::Command::new("hyprctl").args(["workspaces", "-j"]).output() {
+        let out = String::from_utf8_lossy(&output.stdout);
+        if let Ok(mut workspaces) = serde_json::from_str::<Vec<WorkspaceInfo>>(&out) {
+            workspaces.sort_by_key(|w| w.id);
+            return workspaces;
+        }
+    }
+    Vec::new()
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3041,41 +3078,4 @@ mod tests {
         assert!(parse_hypr_clients_classes("not json").is_empty());
         assert!(parse_hypr_clients_classes("[]").is_empty());
     }
-}
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceInfo {
-    pub id: i32,
-    pub name: String,
-    pub monitor: String,
-    pub windows: i32,
-}
-
-pub fn get_active_workspaces() -> std::collections::HashMap<String, i32> {
-    if let Ok(output) = std::process::Command::new("hyprctl").args(["monitors", "-j"]).output() {
-        let out = String::from_utf8_lossy(&output.stdout);
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out) {
-            if let Some(arr) = v.as_array() {
-                let mut map = std::collections::HashMap::new();
-                for mon in arr {
-                    if let (Some(name), Some(ws)) = (mon["name"].as_str(), mon["activeWorkspace"]["id"].as_i64()) {
-                        map.insert(name.to_string(), ws as i32);
-                    }
-                }
-                return map;
-            }
-        }
-    }
-    std::collections::HashMap::new()
-}
-
-pub fn get_workspaces() -> Vec<WorkspaceInfo> {
-    if let Ok(output) = std::process::Command::new("hyprctl").args(["workspaces", "-j"]).output() {
-        let out = String::from_utf8_lossy(&output.stdout);
-        if let Ok(mut workspaces) = serde_json::from_str::<Vec<WorkspaceInfo>>(&out) {
-            workspaces.sort_by_key(|w| w.id);
-            return workspaces;
-        }
-    }
-    Vec::new()
 }

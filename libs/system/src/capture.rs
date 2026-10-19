@@ -325,11 +325,10 @@ pub fn take_screenshot(target: &CaptureTarget, options: &CaptureOptions) -> Resu
     }
 
     let mut copied = false;
-    if options.copy_to_clipboard {
-        if copy_image_to_clipboard(&file_path).is_ok() {
+    if options.copy_to_clipboard
+        && copy_image_to_clipboard(&file_path).is_ok() {
             copied = true;
         }
-    }
 
     send_notification(
         "Screenshot Captured",

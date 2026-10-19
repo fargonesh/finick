@@ -63,7 +63,7 @@ impl Component for AppearanceDetailPage {
                                             .horizontal()
                                             .cross_align(Alignment::Center)
                                             .spacing(8.)
-                                            .maybe_child(theme_lock.as_ref().map(|l| lock_badge(l)))
+                                            .maybe_child(theme_lock.as_ref().map(lock_badge))
                                             .child(
                                                 rect()
                                                     .opacity(if is_theme_locked { 0.45 } else { 1.0 })
@@ -101,7 +101,7 @@ impl Component for AppearanceDetailPage {
                                         .cross_align(Alignment::Center)
                                         .spacing(8.)
                                         .child(field_label("Accent colour"))
-                                        .maybe_child(accent_lock.as_ref().map(|l| lock_badge(l))),
+                                        .maybe_child(accent_lock.as_ref().map(lock_badge)),
                                 )
                                 .child(
                                     rect()
@@ -173,7 +173,7 @@ impl Component for AppearanceDetailPage {
                                             .child(tile_head(
                                                 Some(PICTURE),
                                                 "Wallpaper",
-                                                wp_lock.as_ref().map(|l| lock_badge(l)),
+                                                wp_lock.as_ref().map(lock_badge),
                                             ))
                                             .child(
                                                 rect()
@@ -220,7 +220,6 @@ impl Component for AppearanceDetailPage {
                                                                 });
                                                             }))
                                                             .maybe(is_custom_image, |el| {
-                                                                let store = store;
                                                                 el.child(secondary_button("Reset", move || {
                                                                     if !is_wp_locked {
                                                                         store.set(SettingKey::Wallpaper, "#1e1e2e".to_string());
@@ -264,7 +263,6 @@ impl Component for AppearanceDetailPage {
                                                                         }
                                                                     }))
                                                                     .maybe(!store.wallpaper_folder.read().is_empty(), |el| {
-                                                                        let store = store;
                                                                         el.child(ghost_button("Clear", move || {
                                                                             let mut f = store.wallpaper_folder;
                                                                             f.set(String::new());
@@ -353,7 +351,6 @@ impl Component for AppearanceDetailPage {
                                                                     .spacing(8.)
                                                                     .child(field_label("Slideshow interval"))
                                                                     .child({
-                                                                        let store = store;
                                                                         segmented_control(
                                                                             vec![("Off", 0), ("30s", 1), ("5m", 2), ("15m", 3), ("1h", 4)],
                                                                             *store.wallpaper_interval.read(),
@@ -385,7 +382,7 @@ impl Component for AppearanceDetailPage {
                                                     .cross_align(Alignment::Center)
                                                     .spacing(8.)
                                                     .child(field_label("Show scrollbars"))
-                                                    .maybe_child(scroll_lock.as_ref().map(|l| lock_badge(l))),
+                                                    .maybe_child(scroll_lock.as_ref().map(lock_badge)),
                                             )
                                             .child(
                                                 rect()
@@ -414,7 +411,7 @@ impl Component for AppearanceDetailPage {
                                                     .cross_align(Alignment::Center)
                                                     .spacing(8.)
                                                     .child(field_label("Sidebar icon size"))
-                                                    .maybe_child(icon_lock.as_ref().map(|l| lock_badge(l))),
+                                                    .maybe_child(icon_lock.as_ref().map(lock_badge)),
                                             )
                                             .child(
                                                 rect()
@@ -524,7 +521,7 @@ impl Component for WifiDetailPage {
             .iter()
             .find(|n| Some(&n.ssid) == net.active_ssid.as_ref())
             .map(|n| n.security.clone())
-            .unwrap_or_else(|| if wifi_on { "—".to_string() } else { "—".to_string() });
+            .unwrap_or_else(|| "—".to_string());
 
         let modal_el =
             if let Some(target) = wifi_modal_target.read().clone() {
@@ -686,9 +683,8 @@ impl Component for WifiDetailPage {
                                         .horizontal()
                                         .cross_align(Alignment::Center)
                                         .spacing(8.)
-                                        .maybe_child(wifi_lock.as_ref().map(|l| lock_badge(l)))
+                                        .maybe_child(wifi_lock.as_ref().map(lock_badge))
                                         .child(rect().opacity(if is_wifi_locked { 0.45 } else { 1.0 }).child({
-                                            let store = store;
                                             pill_switch(wifi_on, move |v| {
                                                 if !is_wifi_locked {
                                                     store.set(SettingKey::WifiEnabled, v);
@@ -827,7 +823,6 @@ impl Component for WifiDetailPage {
                                     false,
                                     store.lock_label(&SettingKey::WifiNetwork),
                                     {
-                                        let store = store;
                                         let is_locked = store.is_locked(&SettingKey::WifiNetwork);
                                         let val = *store.ask_to_join.read();
                                         pill_switch(val, move |v| {
@@ -1637,9 +1632,8 @@ impl Component for BluetoothDetailPage {
                                         .horizontal()
                                         .cross_align(Alignment::Center)
                                         .spacing(8.)
-                                        .maybe_child(bt_lock.as_ref().map(|l| lock_badge(l)))
+                                        .maybe_child(bt_lock.as_ref().map(lock_badge))
                                         .child(rect().opacity(if is_bt_locked { 0.45 } else { 1.0 }).child({
-                                            let store = store;
                                             pill_switch(bt_on, move |v| {
                                                 if !is_bt_locked {
                                                     store.set(SettingKey::BluetoothEnabled, v);
@@ -1847,7 +1841,7 @@ impl Component for DisplayDetailPage {
 
         let cur_selected_name: Option<String> = {
             let s = selected_name.read().clone();
-            if s.as_ref().map_or(false, |name| displays_list.iter().any(|d| &d.name == name)) {
+            if s.as_ref().is_some_and(|name| displays_list.iter().any(|d| &d.name == name)) {
                 s
             } else {
                 displays_list.first().map(|d| d.name.clone())
@@ -2273,7 +2267,7 @@ impl Component for DisplayDetailPage {
             };
 
             tile()
-                .child(tile_head(None, format!("Display Settings — {sel_desc}"), res_lock.as_ref().map(|l| lock_badge(l))))
+                .child(tile_head(None, format!("Display Settings — {sel_desc}"), res_lock.as_ref().map(lock_badge)))
                 .child(setting_row(
                     "Current mode",
                     None::<String>,
@@ -2499,16 +2493,15 @@ impl Component for DisplayDetailPage {
                     // Wide: Arrangement — interactive draggable (top priority)
                     .child(arrangement_tile)
                     // Wide: Per-display configuration (Resolution & Rotation)
-                    .maybe_child((displays_len > 0).then(|| selected_tile))
+                    .maybe_child((displays_len > 0).then_some(selected_tile))
                     // Wide: Brightness (hidden when unavailable)
                     .maybe_child({
                         let has_backlight = system::HyprlandBackend.supports_brightness();
                         has_backlight.then(|| {
                             let opacity = if is_br_locked { 0.45 } else { 1.0 };
                             tile()
-                                .child(tile_head(None, "Brightness", br_lock.as_ref().map(|l| lock_badge(l))))
+                                .child(tile_head(None, "Brightness", br_lock.as_ref().map(lock_badge)))
                                 .child(rect().opacity(opacity).child({
-                                    let store = store;
                                     slider_row(Some(SUN), *store.brightness.read(), move |v| {
                                         if !is_br_locked {
                                             store.set(SettingKey::DisplayBrightness, v);
@@ -2517,7 +2510,6 @@ impl Component for DisplayDetailPage {
                                     })
                                 }))
                                 .child(setting_row_locked("Auto-brightness", None::<String>, false, auto_br_lock, {
-                                    let store = store;
                                     pill_switch(*store.auto_brightness.read(), move |v| {
                                         if !is_auto_br_locked {
                                             store.set(SettingKey::DisplayAutoBrightness, v);
@@ -2537,9 +2529,8 @@ impl Component for DisplayDetailPage {
                                         .horizontal()
                                         .cross_align(Alignment::Center)
                                         .spacing(8.)
-                                        .maybe_child(ns_lock.as_ref().map(|l| lock_badge(l)))
+                                        .maybe_child(ns_lock.as_ref().map(lock_badge))
                                         .child(rect().opacity(if is_ns_locked { 0.45 } else { 1.0 }).child({
-                                            let store = store;
                                             let local_ct = local_color_temp;
                                             pill_switch(*store.night_shift.read(), move |v| {
                                                 if !is_ns_locked {
@@ -2710,10 +2701,9 @@ impl Component for DisplayDetailPage {
                                     .cross_align(Alignment::Center)
                                     .spacing(8.)
                                     .child(field_label("Colour temperature"))
-                                    .maybe_child(ct_lock.as_ref().map(|l| lock_badge(l))),
+                                    .maybe_child(ct_lock.as_ref().map(lock_badge)),
                             )
                             .child(rect().opacity(if is_ct_locked { 0.45 } else { 1.0 }).child({
-                                let store = store;
                                 let mut local_ct = local_color_temp;
                                 let is_ns_active = *store.night_shift.read();
                                 let gen_arc = ct_gen.read().clone();
@@ -2934,8 +2924,8 @@ impl Component for SoundDetailPage {
                                     .horizontal()
                                     .cross_align(Alignment::Center)
                                     .spacing(8.)
-                                    .maybe_child(vol_lock.as_ref().map(|l| lock_badge(l)))
-                                    .maybe_child(mute_lock.as_ref().map(|l| lock_badge(l)))
+                                    .maybe_child(vol_lock.as_ref().map(lock_badge))
+                                    .maybe_child(mute_lock.as_ref().map(lock_badge))
                                     .child(tile_sub(if sink_name.is_empty() {
                                         "Studio Speakers".to_string()
                                     } else {
@@ -2944,7 +2934,6 @@ impl Component for SoundDetailPage {
                             ),
                         ))
                         .child(rect().opacity(if is_vol_locked && is_mute_locked { 0.45 } else { 1.0 }).child({
-                            let store = store;
                             let muted = *store.is_mute.read();
                             let vol = *store.volume.read();
                             slider_row_with_mute(
@@ -3177,7 +3166,7 @@ impl Component for FocusDetailPage {
                     .spacing(GAP)
                     // Wide: Focus mode selector
                     .child(
-                        tile().child(tile_head(None, "Focus mode", dnd_lock.as_ref().map(|l| lock_badge(l)))).child(
+                        tile().child(tile_head(None, "Focus mode", dnd_lock.as_ref().map(lock_badge))).child(
                             rect()
                                 .width(Size::fill())
                                 .horizontal()
@@ -3185,7 +3174,6 @@ impl Component for FocusDetailPage {
                                 .content(Content::Flex)
                                 .opacity(if is_dnd_locked { 0.45 } else { 1.0 })
                                 .child({
-                                    let store = store;
                                     focus_pill("Off", *store.focus_mode.read() == "off", move || {
                                         if !is_dnd_locked {
                                             store.set(SettingKey::DoNotDisturb, "off");
@@ -3193,7 +3181,6 @@ impl Component for FocusDetailPage {
                                     })
                                 })
                                 .child({
-                                    let store = store;
                                     focus_pill("Work", *store.focus_mode.read() == "work", move || {
                                         if !is_dnd_locked {
                                             store.set(SettingKey::DoNotDisturb, "work");
@@ -3201,7 +3188,6 @@ impl Component for FocusDetailPage {
                                     })
                                 })
                                 .child({
-                                    let store = store;
                                     focus_pill("Personal", *store.focus_mode.read() == "personal", move || {
                                         if !is_dnd_locked {
                                             store.set(SettingKey::DoNotDisturb, "personal");
@@ -3209,7 +3195,6 @@ impl Component for FocusDetailPage {
                                     })
                                 })
                                 .child({
-                                    let store = store;
                                     focus_pill("Sleep", *store.focus_mode.read() == "sleep", move || {
                                         if !is_dnd_locked {
                                             store.set(SettingKey::DoNotDisturb, "sleep");
@@ -3243,7 +3228,6 @@ impl Component for FocusDetailPage {
                                     pill_switch(*sleep_sched.read(), move |v| ss.set(v))
                                 }))
                                 .maybe_child((*show_modal.read()).then({
-                                    let t = t;
                                     move || {
                                         let mut sm = show_modal;
                                         rect()
@@ -3372,9 +3356,8 @@ impl Component for NotificationsDetailPage {
                                         .horizontal()
                                         .cross_align(Alignment::Center)
                                         .spacing(8.)
-                                        .maybe_child(notif_lock.as_ref().map(|l| lock_badge(l)))
+                                        .maybe_child(notif_lock.as_ref().map(lock_badge))
                                         .child(rect().opacity(if is_notif_locked { 0.45 } else { 1.0 }).child({
-                                            let store = store;
                                             pill_switch(*store.allow_notif.read(), move |v| {
                                                 if !is_notif_locked {
                                                     store.set(SettingKey::NotificationBanners, v);
@@ -3418,7 +3401,6 @@ impl Component for NotificationsDetailPage {
                             tile()
                                 .child(tile_head(None, "Do Not Disturb", None::<String>))
                                 .child(setting_row_locked("Silence during sleep", None::<String>, false, silence_lock, {
-                                    let store = store;
                                     pill_switch(*store.silence_sleep.read(), move |v| {
                                         if !is_silence_locked {
                                             store.set(SettingKey::NotificationSounds, v);
@@ -3475,7 +3457,6 @@ impl Component for GeneralDetailPage {
                             tile()
                                 .child(tile_head(None, "Date & time", None::<String>))
                                 .child(setting_row_locked("24-hour time", None::<String>, false, t24_lock, {
-                                    let store = store;
                                     pill_switch(*store.time_24h.read(), move |v| {
                                         if !is_t24_locked {
                                             store.set(SettingKey::TimeFormat24h, v);
@@ -3493,7 +3474,6 @@ impl Component for GeneralDetailPage {
                             tile()
                                 .child(tile_head(None, "Software update", Some(status_chip("Up to date", false, None))))
                                 .child(setting_row_locked("Automatic updates", None::<String>, false, updates_lock, {
-                                    let store = store;
                                     pill_switch(*store.auto_updates.read(), move |v| {
                                         if !is_updates_locked {
                                             store.set(SettingKey::SystemAutoUpdates, v);
@@ -3510,6 +3490,7 @@ impl Component for GeneralDetailPage {
 pub fn general_detail_page(store: SettingsStore) -> GeneralDetailPage { GeneralDetailPage { store } }
 
 #[derive(Clone, PartialEq)]
+#[allow(dead_code)] // Storage page scaffold; wired into the router as a follow-up.
 struct StorageStats {
     total: String,
     used: String,
@@ -3521,6 +3502,7 @@ struct StorageStats {
     percentages: Vec<f32>,
 }
 
+#[allow(dead_code)] // Storage page scaffold; wired into the router as a follow-up.
 fn query_storage_stats() -> StorageStats {
     let mut total_str = "1 TB".to_string();
     let mut used_str = "0 GB".to_string();
@@ -3549,8 +3531,8 @@ fn query_storage_stats() -> StorageStats {
     let mut photos_bytes: u64 = 0;
     let mut docs_bytes: u64 = 0;
 
-    if db_path.exists() {
-        if let Ok(out) = std::process::Command::new("sqlite3")
+    if db_path.exists()
+        && let Ok(out) = std::process::Command::new("sqlite3")
             .args([
                 db_path.to_str().unwrap_or(""),
                 "SELECT COALESCE(SUM(CASE WHEN desktop = 1 OR executable = 1 THEN size ELSE 0 END), 0), COALESCE(SUM(CASE \
@@ -3569,7 +3551,6 @@ fn query_storage_stats() -> StorageStats {
                 docs_bytes = parts[2].trim().parse().unwrap_or(0);
             }
         }
-    }
 
     if apps_bytes == 0 && photos_bytes == 0 && docs_bytes == 0 && used_bytes > 0 {
         apps_bytes = (used_bytes as f64 * 0.38) as u64;
@@ -3611,6 +3592,7 @@ fn format_storage_size(b: u64) -> String {
 }
 
 #[derive(PartialEq)]
+#[allow(dead_code)] // Storage page scaffold; wired into the router as a follow-up.
 pub struct StorageDetailPage {
     pub store: SettingsStore,
 }
@@ -3641,7 +3623,7 @@ impl Component for StorageDetailPage {
                             ))
                             .child(multi_segment_bar(
                                 vec![
-                                    (stats.percentages.get(0).copied().unwrap_or(38.), t.accent),
+                                    (stats.percentages.first().copied().unwrap_or(38.), t.accent),
                                     (stats.percentages.get(1).copied().unwrap_or(21.), t.bg_active),
                                     (stats.percentages.get(2).copied().unwrap_or(14.), t.text_dim),
                                     (stats.percentages.get(3).copied().unwrap_or(27.), t.track),
@@ -3663,7 +3645,6 @@ impl Component for StorageDetailPage {
                                 false,
                                 trash_lock,
                                 {
-                                    let store = store;
                                     pill_switch(*store.empty_trash_auto.read(), move |v| {
                                         if !is_trash_locked {
                                             store.set(SettingKey::StorageEmptyTrashAuto, v);
@@ -3705,6 +3686,7 @@ impl Component for StorageDetailPage {
     }
 }
 
+#[allow(dead_code)] // Storage page scaffold; wired into the router as a follow-up.
 pub fn storage_detail_page(store: SettingsStore) -> StorageDetailPage { StorageDetailPage { store } }
 
 #[derive(PartialEq)]
@@ -3827,9 +3809,8 @@ impl Component for BatteryDetailPage {
                         )
                         .child(grid2([
                             rect().width(Size::flex(1.)).child(
-                                tile().child(tile_head(None, "Power mode", pwr_lock.as_ref().map(|l| lock_badge(l)))).child(
+                                tile().child(tile_head(None, "Power mode", pwr_lock.as_ref().map(lock_badge))).child(
                                     rect().opacity(if is_pwr_locked { 0.45 } else { 1.0 }).child({
-                                        let store = store;
                                         let cur_mode = match *store.battery_mode.read() {
                                             "low" | "power-saver" => "low",
                                             "high" | "performance" => "high",
@@ -3892,7 +3873,7 @@ impl Component for BatteryDetailPage {
                                     .horizontal()
                                     .cross_align(Alignment::Center)
                                     .spacing(8.)
-                                    .maybe_child(pwr_lock.as_ref().map(|l| lock_badge(l)))
+                                    .maybe_child(pwr_lock.as_ref().map(lock_badge))
                                     .child(tile_sub(format!("{cap} · {status}"))),
                             ),
                         ))
@@ -4255,9 +4236,8 @@ impl Component for AccessibilityDetailPage {
                     .spacing(GAP)
                     .child(
                         tile()
-                            .child(tile_head(None, "Text size", txt_lock.as_ref().map(|l| lock_badge(l))))
+                            .child(tile_head(None, "Text size", txt_lock.as_ref().map(lock_badge)))
                             .child(rect().opacity(if is_txt_locked { 0.45 } else { 1.0 }).child({
-                                let store = store;
                                 slider_row(None, *store.text_size.read(), move |v| {
                                     if !is_txt_locked {
                                         store.set(SettingKey::AccessibilityTextSize, v);
@@ -4286,7 +4266,6 @@ impl Component for AccessibilityDetailPage {
                                 false,
                                 motion_lock,
                                 {
-                                    let store = store;
                                     pill_switch(*store.reduce_motion.read(), move |v| {
                                         if !is_motion_locked {
                                             store.set(SettingKey::AccessibilityReduceMotion, v);
@@ -4314,7 +4293,6 @@ impl Component for AccessibilityDetailPage {
                                 true,
                                 contrast_lock,
                                 {
-                                    let store = store;
                                     pill_switch(*store.increase_contrast.read(), move |v| {
                                         if !is_contrast_locked {
                                             store.set(SettingKey::AccessibilityIncreaseContrast, v);
@@ -4335,7 +4313,6 @@ impl Component for AccessibilityDetailPage {
                                 true,
                                 transp_lock,
                                 {
-                                    let store = store;
                                     pill_switch(*store.reduce_transparency.read(), move |v| {
                                         if !is_transp_locked {
                                             store.set(SettingKey::AccessibilityReduceTransparency, v);
@@ -4439,9 +4416,8 @@ impl Component for ScreenTimeDetailPage {
                                         .horizontal()
                                         .cross_align(Alignment::Center)
                                         .spacing(8.)
-                                        .maybe_child(st_lock.as_ref().map(|l| lock_badge(l)))
+                                        .maybe_child(st_lock.as_ref().map(lock_badge))
                                         .child(rect().opacity(if is_st_locked { 0.45 } else { 1.0 }).child({
-                                            let store = store;
                                             pill_switch(enabled, move |v| {
                                                 if !is_st_locked {
                                                     store.set(SettingKey::ScreenTimeEnabled, v);
@@ -4517,12 +4493,11 @@ impl Component for ScreenTimeDetailPage {
                     )
                     .child(grid2([
                         rect().width(Size::flex(1.)).child(
-                            tile().child(tile_head(None, "App Limits", st_lock.as_ref().map(|l| lock_badge(l)))).child(
+                            tile().child(tile_head(None, "App Limits", st_lock.as_ref().map(lock_badge))).child(
                                 rect()
                                     .opacity(if !enabled { 0.45 } else { 1.0 })
                                     .vertical()
                                     .child(setting_row("Limits enabled", None::<String>, false, {
-                                        let store = store;
                                         pill_switch(app_limits_on, move |v| {
                                             if !is_st_locked && enabled {
                                                 store.set(
@@ -4584,12 +4559,11 @@ impl Component for ScreenTimeDetailPage {
                             ),
                         ),
                         rect().width(Size::flex(1.)).child(
-                            tile().child(tile_head(None, "Downtime", st_lock.as_ref().map(|l| lock_badge(l)))).child(
+                            tile().child(tile_head(None, "Downtime", st_lock.as_ref().map(lock_badge))).child(
                                 rect()
                                     .opacity(if !enabled { 0.45 } else { 1.0 })
                                     .vertical()
                                     .child(setting_row("Downtime", None::<String>, false, {
-                                        let store = store;
                                         pill_switch(downtime_on, move |v| {
                                             if !is_st_locked && enabled {
                                                 store.set(
@@ -4656,7 +4630,6 @@ impl Component for DesktopDetailPage {
                             .child(tile_head(None, "Window Management", None::<String>))
                             .child(field_label("Layout"))
                             .child({
-                                let store = store;
                                 segmented_control(vec![("Master", 0), ("Dwindle", 1), ("Floating", 2)], layout, move |v| {
                                     let mut s = store.window_layout;
                                     s.set(v);
@@ -4674,7 +4647,6 @@ impl Component for DesktopDetailPage {
                                     .child(field_label(format!("Workspace gap · {} px", gap as i32))),
                             )
                             .child({
-                                let store = store;
                                 slider_row(None, gap, move |v| {
                                     let mut s = store.workspace_gap;
                                     s.set(v);
@@ -4694,7 +4666,6 @@ impl Component for DesktopDetailPage {
                                     .child(field_label(format!("Inner gap · {} px", *inner_gap.read() as i32))),
                             )
                             .child({
-                                let store = store;
                                 let mut ig = inner_gap;
                                 slider_row(None, *inner_gap.read(), move |v| {
                                     ig.set(v);
@@ -4714,7 +4685,6 @@ impl Component for DesktopDetailPage {
                             .child(tile_head(None, "Topbar UI", None::<String>))
                             .child(field_label("Appearance"))
                             .child({
-                                let store = store;
                                 let current = store.topbar_theme.read().clone();
                                 let label = match current.as_str() {
                                     "light" => "Light",
@@ -4746,7 +4716,6 @@ impl Component for DesktopDetailPage {
                                     .child(field_label(format!("Text size · {} px", *store.topbar_text_size.read() as i32))),
                             )
                             .child({
-                                let store = store;
                                 slider_row(None, *store.topbar_text_size.read(), move |v| {
                                     let v = v.clamp(10.0, 18.0);
                                     let mut s = store.topbar_text_size;
@@ -4756,7 +4725,6 @@ impl Component for DesktopDetailPage {
                             })
                             .child(rect().margin((10., 0., 0., 0.)).child(field_label("Text colour")))
                             .child({
-                                let store = store;
                                 let current = store.topbar_text_color.read().clone();
                                 let opts: Vec<ui::DropdownOption> = vec!["Default", "Accent", "Muted"]
                                     .into_iter()
@@ -4772,7 +4740,6 @@ impl Component for DesktopDetailPage {
                             })
                             .child(rect().margin((10., 0., 0., 0.)).child(field_label("Light theme text")))
                             .child({
-                                let store = store;
                                 let current = store.topbar_text_color_light.read().clone();
                                 let opts: Vec<ui::DropdownOption> = vec!["Inherit", "Default", "Accent", "Muted"]
                                     .into_iter()
@@ -4788,7 +4755,6 @@ impl Component for DesktopDetailPage {
                             })
                             .child(rect().margin((10., 0., 0., 0.)).child(field_label("Dark theme text")))
                             .child({
-                                let store = store;
                                 let current = store.topbar_text_color_dark.read().clone();
                                 let opts: Vec<ui::DropdownOption> = vec!["Inherit", "Default", "Accent", "Muted"]
                                     .into_iter()
@@ -4808,7 +4774,6 @@ impl Component for DesktopDetailPage {
                                     .child(field_label(format!("Icon size · {} px", *store.topbar_icon_size.read() as i32))),
                             )
                             .child({
-                                let store = store;
                                 slider_row(None, *store.topbar_icon_size.read(), move |v| {
                                     let v = v.clamp(12.0, 20.0);
                                     let mut s = store.topbar_icon_size;
@@ -4822,7 +4787,6 @@ impl Component for DesktopDetailPage {
                                     .child(field_label(format!("Icon weight · {:.1}", *store.topbar_icon_stroke.read()))),
                             )
                             .child({
-                                let store = store;
                                 slider_row(None, *store.topbar_icon_stroke.read(), move |v| {
                                     let v = v.clamp(1.0, 3.0);
                                     let mut s = store.topbar_icon_stroke;
@@ -4836,36 +4800,30 @@ impl Component for DesktopDetailPage {
                             .child(tile_head(None, "Topbar icons", None::<String>))
                             .child(tile_sub("Choose which icons appear in the top bar"))
                             .child(setting_row("Wi-Fi", None::<String>, false, {
-                                let store = store;
                                 let cur = *store.topbar_show_wifi.read();
                                 pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_wifi".to_string()), v))
                             }))
                             .child(setting_row("Wired", None::<String>, true, {
-                                let store = store;
                                 let cur = *store.topbar_show_wired.read();
                                 pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_wired".to_string()), v))
                             }))
                             .child(setting_row("Bluetooth", None::<String>, true, {
-                                let store = store;
                                 let cur = *store.topbar_show_bluetooth.read();
                                 pill_switch(cur, move |v| {
                                     store.set(SettingKey::Custom("topbar.show_bluetooth".to_string()), v)
                                 })
                             }))
                             .child(setting_row("Sound", None::<String>, true, {
-                                let store = store;
                                 let cur = *store.topbar_show_sound.read();
                                 pill_switch(cur, move |v| store.set(SettingKey::Custom("topbar.show_sound".to_string()), v))
                             }))
                             .child(setting_row("Battery", None::<String>, true, {
-                                let store = store;
                                 let cur = *store.topbar_show_battery.read();
                                 pill_switch(cur, move |v| {
                                     store.set(SettingKey::Custom("topbar.show_battery".to_string()), v)
                                 })
                             }))
                             .child(setting_row("Notifications", None::<String>, true, {
-                                let store = store;
                                 let cur = *store.topbar_show_notifications.read();
                                 pill_switch(cur, move |v| {
                                     store.set(SettingKey::Custom("topbar.show_notifications".to_string()), v)
@@ -4879,6 +4837,7 @@ impl Component for DesktopDetailPage {
 pub fn desktop_detail_page(store: SettingsStore) -> DesktopDetailPage { DesktopDetailPage { store } }
 
 #[derive(PartialEq)]
+#[allow(dead_code)] // About page scaffold; wired into the router as a follow-up.
 pub struct AboutDetailPage;
 
 impl Component for AboutDetailPage {
@@ -4941,4 +4900,5 @@ impl Component for AboutDetailPage {
     }
 }
 
+#[allow(dead_code)] // About page scaffold; wired into the router as a follow-up.
 pub fn about_detail_page() -> AboutDetailPage { AboutDetailPage }

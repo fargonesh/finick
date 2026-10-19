@@ -378,10 +378,10 @@ fn places_path() -> PathBuf {
 
 fn load_pinned() -> Vec<(String, String)> {
     let p = places_path();
-    if let Ok(s) = std::fs::read_to_string(p) {
-        if let Ok(v) = serde_json::from_str::<Vec<(String, String)>>(&s) {
-            return v;
-        }
+    if let Ok(s) = std::fs::read_to_string(p)
+        && let Ok(v) = serde_json::from_str::<Vec<(String, String)>>(&s)
+    {
+        return v;
     }
     Vec::new()
 }
@@ -408,10 +408,10 @@ fn recent_path() -> PathBuf {
 
 fn load_recent() -> Vec<String> {
     let p = recent_path();
-    if let Ok(s) = std::fs::read_to_string(p) {
-        if let Ok(v) = serde_json::from_str::<Vec<String>>(&s) {
-            return v.into_iter().filter(|d| Path::new(d).is_dir()).take(20).collect();
-        }
+    if let Ok(s) = std::fs::read_to_string(p)
+        && let Ok(v) = serde_json::from_str::<Vec<String>>(&s)
+    {
+        return v.into_iter().filter(|d| Path::new(d).is_dir()).take(20).collect();
     }
     Vec::new()
 }
@@ -1149,27 +1149,26 @@ fn fetch_via_index(req: index::ty::Request, fallback_dir: Option<String>, mut it
                 op_err = Some(String::from("Search unavailable"));
             }
         }
-        if let Some(dir) = fallback_dir.as_deref() {
-            if result.is_empty() || res.is_err() {
-                if let Ok(entries) = std::fs::read_dir(dir) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let md = entry.metadata().ok();
-                        let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                        let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
-                        let modified = md
-                            .as_ref()
-                            .and_then(|m| m.modified().ok())
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs());
-                        result.push(Item {
-                            ty: if is_dir { ItemType::Folder } else { ItemType::File },
-                            name: entry.file_name().to_string_lossy().to_string(),
-                            path: entry.path().to_string_lossy().to_string(),
-                            size,
-                            modified,
-                        });
-                    }
-                }
+        if let Some(dir) = fallback_dir.as_deref()
+            && (result.is_empty() || res.is_err())
+            && let Ok(entries) = std::fs::read_dir(dir)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let md = entry.metadata().ok();
+                let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
+                let modified = md
+                    .as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs());
+                result.push(Item {
+                    ty: if is_dir { ItemType::Folder } else { ItemType::File },
+                    name: entry.file_name().to_string_lossy().to_string(),
+                    path: entry.path().to_string_lossy().to_string(),
+                    size,
+                    modified,
+                });
             }
         }
         result.sort_by(|a, b| match (&a.ty, &b.ty) {
@@ -1409,6 +1408,7 @@ fn copy_dir_recursive_cancel_progress(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn selection_handle_press(
     path: String,
     item: Item,
@@ -1421,18 +1421,18 @@ fn selection_handle_press(
 ) {
     let mut cur = selected_paths.read().clone();
     if shift {
-        if let Some(a) = anchor.read().clone() {
-            if let (Some(ai), Some(ci)) = (ordered.iter().position(|p| p == &a), ordered.iter().position(|p| p == &path)) {
-                let (lo, hi) = if ai <= ci { (ai, ci) } else { (ci, ai) };
-                for p in &ordered[lo..=hi] {
-                    if !cur.contains(p) {
-                        cur.push(p.clone());
-                    }
+        if let Some(a) = anchor.read().clone()
+            && let (Some(ai), Some(ci)) = (ordered.iter().position(|p| p == &a), ordered.iter().position(|p| p == &path))
+        {
+            let (lo, hi) = if ai <= ci { (ai, ci) } else { (ci, ai) };
+            for p in &ordered[lo..=hi] {
+                if !cur.contains(p) {
+                    cur.push(p.clone());
                 }
-                selected_paths.set(cur);
-                focus.set(Some(item));
-                return;
             }
+            selected_paths.set(cur);
+            focus.set(Some(item));
+            return;
         }
         if !cur.contains(&path) {
             cur.push(path.clone());
@@ -1574,7 +1574,7 @@ fn file_type_label(name: &str, is_dir: bool) -> String {
         "zip" | "tar" | "gz" | "xz" | "7z" | "rar" => String::from("Archive"),
         "rs" | "ts" | "js" | "py" | "go" | "c" | "cpp" | "sh" | "toml" | "json" | "yaml" => String::from("Code"),
         "txt" | "md" | "log" | "csv" => String::from("Text"),
-        ext if ext.is_empty() => String::from("File"),
+        "" => String::from("File"),
         ext => format!("{} file", ext.to_uppercase()),
     }
 }
@@ -2218,7 +2218,7 @@ fn files_root(initial_path: Option<String>) -> Element {
 
     let pinned_val = pinned.read().clone();
     if !pinned_val.is_empty() {
-        let _ = save_pinned(&pinned_val);
+        save_pinned(&pinned_val);
     }
     let starred_val = starred.read().clone();
     if !starred_val.is_empty() {
@@ -2496,7 +2496,7 @@ fn files_root(initial_path: Option<String>) -> Element {
 
     let show_sidebar_val = *show_sidebar.read();
     let view_mode_val = view_mode.read().clone();
-    let icon_size_val = icon_size.read().clone();
+    let icon_size_val = *icon_size.read();
     let grid_active = view_mode_val == ViewMode::Grid;
     let list_active = view_mode_val == ViewMode::List;
 
@@ -2512,7 +2512,6 @@ fn files_root(initial_path: Option<String>) -> Element {
         }))
         .child(tool_button(CHEVRON_LEFT, t.text, {
             let mut current = current_path;
-            let items = items;
             let h = history;
             let mut hi = hist_idx;
             let mut hn = hist_nav;
@@ -2530,7 +2529,6 @@ fn files_root(initial_path: Option<String>) -> Element {
         }))
         .child(tool_button(CHEVRON_RIGHT, t.text, {
             let mut current = current_path;
-            let items = items;
             let h = history;
             let mut hi = hist_idx;
             let mut hn = hist_nav;
@@ -2548,14 +2546,12 @@ fn files_root(initial_path: Option<String>) -> Element {
         }))
         .child(tool_button(REFRESH_CW, t.text, {
             let current = current_path;
-            let items = items;
             move || {
                 load_dir(current.read().clone(), items);
             }
         }))
         .child(tool_button(ARROW_LEFT, t.text, {
             let mut current = current_path;
-            let items = items;
             move || {
                 let path = PathBuf::from(current.read().clone());
                 if let Some(parent) = path.parent() {
@@ -3127,8 +3123,8 @@ fn files_root(initial_path: Option<String>) -> Element {
                 let shift = shift_held;
                 move |e: Event<PointerEventData>| {
                     let p = e.data().element_location();
-                    ds.set(Some((p.x as f64, p.y as f64)));
-                    dc.set(Some((p.x as f64, p.y as f64)));
+                    ds.set(Some((p.x, p.y)));
+                    dc.set(Some((p.x, p.y)));
                     if !*ctrl.read() && !*shift.read() {
                         sel.set(None);
                         multi.set(Vec::new());
@@ -3141,7 +3137,7 @@ fn files_root(initial_path: Option<String>) -> Element {
                 move |e: Event<PointerEventData>| {
                     if ds.read().is_some() {
                         let p = e.data().element_location();
-                        dc.set(Some((p.x as f64, p.y as f64)));
+                        dc.set(Some((p.x, p.y)));
                     }
                 }
             })
@@ -5164,10 +5160,10 @@ fn files_root(initial_path: Option<String>) -> Element {
                     match e.data().key {
                         Key::Character(ref s) if s == "c" => {
                             let mut v = multi.read().clone();
-                            if v.is_empty() {
-                                if let Some(it) = sel.read().clone() {
-                                    v = vec![it.path];
-                                }
+                            if v.is_empty()
+                                && let Some(it) = sel.read().clone()
+                            {
+                                v = vec![it.path];
                             }
                             if !v.is_empty() {
                                 clip.set(Some((v, false)));
@@ -5175,10 +5171,10 @@ fn files_root(initial_path: Option<String>) -> Element {
                         }
                         Key::Character(ref s) if s == "x" => {
                             let mut v = multi.read().clone();
-                            if v.is_empty() {
-                                if let Some(it) = sel.read().clone() {
-                                    v = vec![it.path];
-                                }
+                            if v.is_empty()
+                                && let Some(it) = sel.read().clone()
+                            {
+                                v = vec![it.path];
                             }
                             if !v.is_empty() {
                                 clip.set(Some((v, true)));
@@ -5260,10 +5256,10 @@ fn files_root(initial_path: Option<String>) -> Element {
                         }
                         Key::Named(NamedKey::Delete) => {
                             let mut paths = multi.read().clone();
-                            if paths.is_empty() {
-                                if let Some(it) = sel.read().clone() {
-                                    paths = vec![it.path];
-                                }
+                            if paths.is_empty()
+                                && let Some(it) = sel.read().clone()
+                            {
+                                paths = vec![it.path];
                             }
                             if !paths.is_empty() {
                                 confirm_trash_delete_multi(
@@ -5449,7 +5445,7 @@ fn files_root(initial_path: Option<String>) -> Element {
                         )
                         .child(bottom_bar),
                 )
-                .maybe_child(selected_item.read().is_some().then(|| drawer)),
+                .maybe_child(selected_item.read().is_some().then_some(drawer)),
         )
         .child(add_place_modal)
         .child(connect_modal)

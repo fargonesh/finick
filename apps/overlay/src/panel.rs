@@ -227,8 +227,8 @@ pub fn control_panel_app() -> Element {
         if !wifi_on {
             card = card.child(tile_sub("Wi-Fi off"));
         } else {
-            if let Some(ssid) = current_wifi.ssid.clone() {
-                if current_wifi.connected {
+            if let Some(ssid) = current_wifi.ssid.clone()
+                && current_wifi.connected {
                     let iface = current_wifi.interface.clone();
                     let display = trunc(&ssid, 18);
                     card = card.child(
@@ -256,7 +256,6 @@ pub fn control_panel_app() -> Element {
                             )),
                     );
                 }
-            }
             let mut rows: Vec<Element> = Vec::new();
             let iface_clone = current_wifi.interface.clone();
             let mut shown = 0;

@@ -105,8 +105,8 @@ impl Component for DraggableDisplaysMock {
                         let displays_for_check = self.displays.clone();
                         move |e: Event<PointerEventData>| {
                             let active = dragged.read().clone();
-                            if let Some(name) = active {
-                                if let Some((sx, sy)) = *start.read() {
+                            if let Some(name) = active
+                                && let Some((sx, sy)) = *start.read() {
                                     let cur = e.data().global_location();
                                     let dx = cur.x as f32 - sx;
                                     let dy = cur.y as f32 - sy;
@@ -149,7 +149,6 @@ impl Component for DraggableDisplaysMock {
                                     }
                                     e.prevent_default();
                                 }
-                            }
                         }
                     })
                     .child(
@@ -207,12 +206,11 @@ impl Component for DraggableDisplaysMock {
                                     })
                                     .on_pointer_enter(move |_| {
                                         let active = dragged_state_enter.read().clone();
-                                        if let Some(from_name) = active {
-                                            if from_name != dname_enter {
+                                        if let Some(from_name) = active
+                                            && from_name != dname_enter {
                                                 on_swap_clone.call((from_name, dname_enter.clone()));
                                             }
-                                        }
-                                    })
+                                        })
                                     .child(
                                         rect()
                                             .width(Size::fill())

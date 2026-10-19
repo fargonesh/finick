@@ -445,18 +445,15 @@ fn settings_root(initial_route: Route) -> impl IntoElement {
     // (matches the sidebar rendering below). Keyboard nav must follow this order.
     let visible_routes: Vec<RouteInfo> = {
         let mut v: Vec<RouteInfo> = filtered_routes.iter().copied().filter(|i| i.route != Route::About).collect();
-        if filtered_routes.iter().any(|i| i.route == Route::About) {
-            if let Some(about) = filtered_routes.iter().copied().find(|i| i.route == Route::About) {
-                v.push(about);
-            }
+        if filtered_routes.iter().any(|i| i.route == Route::About)
+            && let Some(about) = filtered_routes.iter().copied().find(|i| i.route == Route::About)
+        {
+            v.push(about);
         }
         v
     };
-    let active_focus_idx = if visible_routes.is_empty() {
-        0
-    } else {
-        (*focused_nav_idx.read()).min(visible_routes.len() - 1)
-    };
+    let active_focus_idx =
+        if visible_routes.is_empty() { 0 } else { (*focused_nav_idx.read()).min(visible_routes.len() - 1) };
 
     let picker_req_key = picker_req;
     let mut picker_apply_theme = theme_state;
@@ -671,9 +668,7 @@ fn settings_root(initial_route: Route) -> impl IntoElement {
                                     .width(Size::fill())
                                     .corner_radius(6.)
                                     .border(Border::new().width(1.).fill(focus_border))
-                                    .child(nav_item(ABOUT, "About", is_active || is_focused, move || {
-                                        cr.set(Route::About)
-                                    }))
+                                    .child(nav_item(ABOUT, "About", is_active || is_focused, move || cr.set(Route::About)))
                             }),
                     ),
             )

@@ -288,10 +288,9 @@ pub fn fuzzy_score(query: &str, name: &str, path: &str, is_desktop: bool, is_exe
         };
         if let Some(s) = subseq(&n) {
             score = s.max(1);
-        } else if let Some(s) = subseq(&p) {
-            score = (s - 80).max(1);
         } else {
-            return None;
+            let s = subseq(&p)?;
+            score = (s - 80).max(1);
         }
     }
     if is_desktop {
@@ -394,7 +393,7 @@ pub fn load_recents() -> Vec<RecentEntry> {
         return Vec::new();
     };
     let mut entries: Vec<RecentEntry> = serde_json::from_str(&content).unwrap_or_default();
-    entries.sort_by(|a, b| b.count.cmp(&a.count));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.count));
     entries.truncate(20);
     entries
 }
@@ -418,7 +417,7 @@ pub fn bump_recent(r: &SearchResult) {
             is_dir: r.is_dir,
         });
     }
-    entries.sort_by(|a, b| b.count.cmp(&a.count));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.count));
     entries.truncate(20);
     let p = recents_path();
     if let Some(parent) = p.parent() {

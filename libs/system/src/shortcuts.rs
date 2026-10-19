@@ -27,13 +27,11 @@ fn get_shortcuts_file() -> Option<PathBuf> {
 }
 
 pub fn load_custom_shortcuts() -> Vec<KeyboardShortcut> {
-    if let Some(path) = get_shortcuts_file() {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(list) = serde_json::from_str::<Vec<KeyboardShortcut>>(&content) {
+    if let Some(path) = get_shortcuts_file()
+        && let Ok(content) = fs::read_to_string(&path)
+            && let Ok(list) = serde_json::from_str::<Vec<KeyboardShortcut>>(&content) {
                 return list;
             }
-        }
-    }
     Vec::new()
 }
 
@@ -50,7 +48,7 @@ pub fn save_custom_shortcuts(shortcuts: &[KeyboardShortcut]) -> Result<(), Strin
 fn normalize_mods(mods_raw: &str) -> Vec<String> {
     let clean = mods_raw.replace('$', "");
     let mut parts: Vec<String> = clean
-        .split(|c: char| c == '_' || c == ' ' || c == '+')
+        .split(['_', ' ', '+'])
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|s| match s.to_uppercase().as_str() {
@@ -238,9 +236,9 @@ pub fn parse_hyprland_shortcuts() -> Vec<KeyboardShortcut> {
     }
 
     // 3. If hyprland config was sparse, augment from `hyprctl binds -j`
-    if shortcuts.len() < 5 {
-        if let Ok(output) = Command::new("hyprctl").args(["binds", "-j"]).output() {
-            if let Ok(json) = serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout) {
+    if shortcuts.len() < 5
+        && let Ok(output) = Command::new("hyprctl").args(["binds", "-j"]).output()
+            && let Ok(json) = serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout) {
                 for bind in json {
                     let key = bind["key"].as_str().unwrap_or("").to_string();
                     let dispatcher = bind["dispatcher"].as_str().unwrap_or("").to_string();
@@ -283,8 +281,6 @@ pub fn parse_hyprland_shortcuts() -> Vec<KeyboardShortcut> {
                     }
                 }
             }
-        }
-    }
 
     shortcuts
 }

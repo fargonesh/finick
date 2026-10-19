@@ -74,13 +74,11 @@ in
 
 fn read_cache(name: &str) -> Option<String> {
     let path = cache_dir().join(name);
-    if let Ok(meta) = std::fs::metadata(&path) {
-        if let Ok(mtime) = meta.modified() {
-            if mtime.elapsed().map(|e| e.as_secs() > CACHE_TTL_SECS).unwrap_or(false) {
+    if let Ok(meta) = std::fs::metadata(&path)
+        && let Ok(mtime) = meta.modified()
+            && mtime.elapsed().map(|e| e.as_secs() > CACHE_TTL_SECS).unwrap_or(false) {
                 return None;
             }
-        }
-    }
     std::fs::read_to_string(path).ok()
 }
 
@@ -148,12 +146,11 @@ pub fn module_for_attr(attr: &str) -> Option<String> {
     let mut best_len = 0usize;
     for m in modules {
         let ml = m.to_lowercase();
-        if norm.contains(&ml) || ml.contains(&norm) {
-            if m.len() > best_len {
+        if (norm.contains(&ml) || ml.contains(&norm))
+            && m.len() > best_len {
                 best_len = m.len();
                 best = Some(m);
             }
-        }
     }
     best
 }

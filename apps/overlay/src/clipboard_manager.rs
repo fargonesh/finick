@@ -187,7 +187,6 @@ impl Component for ClipboardManager {
                                                             PIN,
                                                             if pinned { t.accent } else { t.text_dim },
                                                             {
-                                                                let id = id;
                                                                 move || {
                                                                     let _ = ipsea::clipboard::toggle_pin_item(
                                                                         CLIPBOARD_SOCKET_NAME,
@@ -197,7 +196,6 @@ impl Component for ClipboardManager {
                                                             },
                                                         ))
                                                         .child(tool_button(COPY, t.text, {
-                                                            let id = id;
                                                             move || {
                                                                 let _ =
                                                                     ipsea::clipboard::select_item(CLIPBOARD_SOCKET_NAME, id);
@@ -407,11 +405,10 @@ pub fn clipboard_window_config() -> WindowConfig {
         .with_resizable(false)
         .with_background(Color::TRANSPARENT)
         .with_on_close(|ctx, _wid| {
-            if let Some(cw) = ctx.global_contexts.try_get_context::<crate::ClipboardWindowId>() {
-                if let Ok(mut g) = cw.0.lock() {
+            if let Some(cw) = ctx.global_contexts.try_get_context::<crate::ClipboardWindowId>()
+                && let Ok(mut g) = cw.0.lock() {
                     *g = None;
                 }
-            }
             CloseDecision::Close
         })
 }

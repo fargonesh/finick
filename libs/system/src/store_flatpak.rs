@@ -31,11 +31,10 @@ pub fn ensure_flathub_remote() -> Result<(), String> {
     if !flatpak_available() {
         return Err("flatpak not installed".to_string());
     }
-    if let Some(out) = run_flatpak(&["remotes", "--columns=name"]) {
-        if out.lines().any(|l| l.trim() == "flathub") {
+    if let Some(out) = run_flatpak(&["remotes", "--columns=name"])
+        && out.lines().any(|l| l.trim() == "flathub") {
             return Ok(());
         }
-    }
     Command::new("flatpak")
         .args(["remote-add", "--user", "--if-not-exists", "flathub", "https://flathub.org/repo/flathub.flatpakrepo"])
         .output()

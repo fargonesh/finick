@@ -37,6 +37,7 @@ impl NotificationServer {
 #[interface(name = "org.freedesktop.Notifications")]
 impl NotificationServer {
     /// Send a notification to the desktop.
+    #[allow(clippy::too_many_arguments)]
     async fn notify(
         &mut self,
         app_name: String,

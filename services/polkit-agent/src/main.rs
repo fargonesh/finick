@@ -6,6 +6,7 @@ use {
 };
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Retained auth context for in-flight prompts (surfaced in future UI).
 struct PendingAuth {
     action_id: String,
     message: String,
@@ -142,10 +143,9 @@ async fn register_agent(conn: &zbus::Connection, object_path: &str) -> zbus::Res
 async fn main() {
     pretty_env_logger::init();
     let pending: Arc<Mutex<HashMap<String, PendingAuth>>> = Arc::new(Mutex::new(HashMap::new()));
-    let agent = Agent { pending: pending.clone() };
     let object_path = "/org/freedesktop/PolicyKit1/AuthenticationAgent";
     loop {
-        match try_run_agent(agent_pending_clone(&pending), object_path).await {
+        match try_run_agent(pending.clone(), object_path).await {
             Ok(_) => break,
             Err(e) => {
                 error!("polkit agent error: {} — retrying in 2s", e);
@@ -153,10 +153,6 @@ async fn main() {
             }
         }
     }
-}
-
-fn agent_pending_clone(pending: &Arc<Mutex<HashMap<String, PendingAuth>>>) -> Arc<Mutex<HashMap<String, PendingAuth>>> {
-    pending.clone()
 }
 
 async fn try_run_agent(pending: Arc<Mutex<HashMap<String, PendingAuth>>>, object_path: &str) -> zbus::Result<()> {

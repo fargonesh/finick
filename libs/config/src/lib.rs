@@ -237,7 +237,7 @@ mod tests {
         assert!(setting.is_locked());
         assert!(!setting.is_unlocked());
         assert!(setting.is_nix_locked());
-        assert_eq!(*setting, true);
+        assert!(*setting);
         assert_eq!(setting.lock_message(), Some("Configured in configuration.nix"));
 
         // get_mut returns None when locked
@@ -248,7 +248,7 @@ mod tests {
         assert!(err.to_string().contains("Nix"));
 
         // Value remains unchanged
-        assert_eq!(*setting, true);
+        assert!(*setting);
 
         // Serializes with lock metadata
         let json = serde_json::to_string(&setting).unwrap();
@@ -259,14 +259,14 @@ mod tests {
         // Roundtrip deserialization preserves lock state
         let deserialized: Setting<bool> = serde_json::from_str(&json).unwrap();
         assert!(deserialized.is_locked());
-        assert_eq!(*deserialized, true);
+        assert!(*deserialized);
         assert!(deserialized.is_nix_locked());
 
         // Unlocking allows mutations again
         setting.unlock();
         assert!(setting.is_unlocked());
         assert!(setting.set(false).is_ok());
-        assert_eq!(*setting, false);
+        assert!(!(*setting));
     }
 
     #[test]
@@ -289,7 +289,7 @@ mod tests {
         let mut payload = SettingsPayload::new();
         assert_eq!(payload.schema_version, 1);
         assert_eq!(*payload.personalization.appearance.mode, ThemeMode::Auto);
-        assert_eq!(*payload.connectivity.wifi.enabled, true);
+        assert!(*payload.connectivity.wifi.enabled);
         assert_eq!(*payload.personalization.sound.volume, 65);
 
         // Lock a setting via path

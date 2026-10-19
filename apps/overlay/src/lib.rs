@@ -5,12 +5,12 @@ pub mod launcher;
 mod date_panel;
 mod notification_panel;
 mod notification_popup;
-mod toasts;
 pub mod osd;
 mod panel;
 pub mod screenshot;
 pub mod session;
 mod state;
+mod toasts;
 
 pub use notification_popup::*;
 #[allow(unused_imports)]
@@ -61,10 +61,10 @@ fn panel_window_config() -> WindowConfig {
         .with_resizable(false)
         .with_background(Color::TRANSPARENT)
         .with_on_close(|ctx, _wid| {
-            if let Some(panel) = ctx.global_contexts.try_get_context::<PanelWindowId>() {
-                if let Ok(mut g) = panel.0.lock() {
-                    *g = None;
-                }
+            if let Some(panel) = ctx.global_contexts.try_get_context::<PanelWindowId>()
+                && let Ok(mut g) = panel.0.lock()
+            {
+                *g = None;
             }
             CloseDecision::Close
         })
@@ -125,18 +125,14 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                         .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-panel)$' }))"])
                         .output();
                 }
-                if let Some(notif_ctx) = GlobalContexts::get().try_get_context::<crate::NotificationPanelWindowId>() {
-                    if let Ok(mut g) = notif_ctx.0.lock() {
-                        if let Some(nid) = g.take() {
-                            Platform::get().close_window(nid);
-                            let _ = std::process::Command::new("hyprctl")
-                                .args([
-                                    "eval",
-                                    "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-notifications)$' }))",
-                                ])
-                                .output();
-                        }
-                    }
+                if let Some(notif_ctx) = GlobalContexts::get().try_get_context::<crate::NotificationPanelWindowId>()
+                    && let Ok(mut g) = notif_ctx.0.lock()
+                    && let Some(nid) = g.take()
+                {
+                    Platform::get().close_window(nid);
+                    let _ = std::process::Command::new("hyprctl")
+                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-notifications)$' }))"])
+                        .output();
                 }
                 if let Some(cal_ctx) = GlobalContexts::get().try_get_context::<crate::CalendarPanelWindowId>() {
                     if let Ok(mut g) = cal_ctx.0.lock() {
@@ -171,6 +167,16 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                 let _ = std::process::Command::new("hyprctl")
                     .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-screenshot)$' }))"])
                     .output();
+                if let Some(cw) = GlobalContexts::get().try_get_context::<crate::ClipboardWindowId>()
+                    && let Ok(mut g) = cw.0.lock()
+                {
+                    *g = None;
+                }
+                if let Some(sw) = GlobalContexts::get().try_get_context::<crate::ScreenshotWindowId>()
+                    && let Ok(mut g) = sw.0.lock()
+                {
+                    *g = None;
+                }
 
                 let current_mon = get_monitor_state(&mon_name);
                 let panel_x = current_mon.x + current_mon.width as i32 - 460 - 12;
@@ -292,10 +298,10 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                         .output();
                 }
                 if let Some(panel_ctx) = GlobalContexts::get().try_get_context::<PanelWindowId>() {
-                    if let Ok(mut g) = panel_ctx.0.lock() {
-                        if let Some(pid) = g.take() {
-                            Platform::get().close_window(pid);
-                        }
+                    if let Ok(mut g) = panel_ctx.0.lock()
+                        && let Some(pid) = g.take()
+                    {
+                        Platform::get().close_window(pid);
                     }
                     let _ = std::process::Command::new("hyprctl")
                         .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-panel)$' }))"])
@@ -331,6 +337,16 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                 let _ = std::process::Command::new("hyprctl")
                     .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-screenshot)$' }))"])
                     .output();
+                if let Some(cw) = GlobalContexts::get().try_get_context::<crate::ClipboardWindowId>()
+                    && let Ok(mut g) = cw.0.lock()
+                {
+                    *g = None;
+                }
+                if let Some(sw) = GlobalContexts::get().try_get_context::<crate::ScreenshotWindowId>()
+                    && let Ok(mut g) = sw.0.lock()
+                {
+                    *g = None;
+                }
 
                 let current_mon = get_monitor_state(&mon_name);
                 let panel_x = current_mon.x + current_mon.width as i32 - 400 - 12;
@@ -537,8 +553,8 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
     let battery_pct = use_state(|| 0u8);
     let battery_status = use_state(|| "Unknown".to_string());
     let notifications = use_state(Vec::<state::Notification>::new);
-    let workspaces = use_state(|| system::get_workspaces());
-    let active_workspaces = use_state(|| system::get_active_workspaces());
+    let workspaces = use_state(system::get_workspaces);
+    let active_workspaces = use_state(system::get_active_workspaces);
 
     use_hook(move || {
         let mut fmt = use_24h;
@@ -928,11 +944,7 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                                                 .font_size(9.)
                                                 .font_weight(FontWeight::BOLD)
                                                 .color(Color::WHITE)
-                                                .text(if count > 99 {
-                                                    "99+".to_string()
-                                                } else {
-                                                    count.to_string()
-                                                }),
+                                                .text(if count > 99 { "99+".to_string() } else { count.to_string() }),
                                         ),
                                 )
                             })
@@ -1418,15 +1430,14 @@ fn get_socket2_path() -> Option<std::path::PathBuf> {
             let mut candidates = Vec::new();
             for entry in entries.flatten() {
                 let sock = entry.path().join(".socket2.sock");
-                if sock.exists() {
-                    if let Ok(meta) = sock.metadata() {
-                        if let Ok(mtime) = meta.modified() {
-                            candidates.push((mtime, sock));
-                        }
-                    }
+                if sock.exists()
+                    && let Ok(meta) = sock.metadata()
+                    && let Ok(mtime) = meta.modified()
+                {
+                    candidates.push((mtime, sock));
                 }
             }
-            candidates.sort_by(|a, b| b.0.cmp(&a.0));
+            candidates.sort_by_key(|b| std::cmp::Reverse(b.0));
             if let Some((_, newest)) = candidates.into_iter().next() {
                 return Some(newest);
             }
@@ -1473,10 +1484,10 @@ async fn reconcile_monitors(
         .unwrap_or_default();
 
     for (name, wid) in &active_windows {
-        if !known_monitors.contains_key(name) {
-            if let Some(mon) = current_monitors.iter().find(|m| &m.name == name) {
-                known_monitors.insert(name.clone(), (*wid, mon.clone()));
-            }
+        if !known_monitors.contains_key(name)
+            && let Some(mon) = current_monitors.iter().find(|m| &m.name == name)
+        {
+            known_monitors.insert(name.clone(), (*wid, mon.clone()));
         }
     }
 
@@ -1656,11 +1667,11 @@ async fn run_monitor_listener(proxy: LaunchProxy, initial_monitors: Vec<MonitorS
     }
 
     let mut socket_reader = None;
-    if let Some(path) = get_socket2_path() {
-        if let Ok(stream) = tokio::net::UnixStream::connect(path).await {
-            use tokio::io::AsyncBufReadExt;
-            socket_reader = Some(tokio::io::BufReader::new(stream).lines());
-        }
+    if let Some(path) = get_socket2_path()
+        && let Ok(stream) = tokio::net::UnixStream::connect(path).await
+    {
+        use tokio::io::AsyncBufReadExt;
+        socket_reader = Some(tokio::io::BufReader::new(stream).lines());
     }
 
     let mut ticker = tokio::time::interval(std::time::Duration::from_millis(500));
@@ -1689,18 +1700,17 @@ async fn run_monitor_listener(proxy: LaunchProxy, initial_monitors: Vec<MonitorS
                     }
                     reconcile_monitors(&proxy, &mut known_monitors).await;
                 } else {
-                    if let Some(path) = get_socket2_path() {
-                        if let Ok(stream) = tokio::net::UnixStream::connect(path).await {
+                    if let Some(path) = get_socket2_path()
+                        && let Ok(stream) = tokio::net::UnixStream::connect(path).await {
                             use tokio::io::AsyncBufReadExt;
                             socket_reader = Some(tokio::io::BufReader::new(stream).lines());
                         }
-                    }
                 }
             }
             _ = ticker.tick() => {
-                if socket_reader.is_none() {
-                    if let Some(path) = get_socket2_path() {
-                        if let Ok(stream) = tokio::net::UnixStream::connect(path).await {
+                if socket_reader.is_none()
+                    && let Some(path) = get_socket2_path()
+                        && let Ok(stream) = tokio::net::UnixStream::connect(path).await {
                             use tokio::io::AsyncBufReadExt;
                             socket_reader = Some(tokio::io::BufReader::new(stream).lines());
                         }
@@ -1978,9 +1988,8 @@ pub fn run() {
                             let _ = proxy.post_callback(move |ctx| {
                                 let cfg = crate::clipboard_manager::clipboard_window_config();
                                 let wid = ctx.launch_window(cfg);
-                                if let Some(cw) = ctx.global_contexts.try_get_context::<crate::ClipboardWindowId>() {
-                                    if let Ok(mut g) = cw.0.lock() { *g = Some(wid); }
-                                }
+                                if let Some(cw) = ctx.global_contexts.try_get_context::<crate::ClipboardWindowId>()
+                                    && let Ok(mut g) = cw.0.lock() { *g = Some(wid); }
                             }).await;
                             crate::state::note_clipboard_opened();
                             let _ = tx2.send(ipsea::modals::ModalResponse::Success { data: None });
@@ -2096,9 +2105,8 @@ pub fn run() {
                             let _ = proxy.post_callback(move |ctx| {
                                 let cfg = crate::screenshot::screenshot_window_config();
                                 let wid = ctx.launch_window(cfg);
-                                if let Some(sw) = ctx.global_contexts.try_get_context::<crate::ScreenshotWindowId>() {
-                                    if let Ok(mut g) = sw.0.lock() { *g = Some(wid); }
-                                }
+                                if let Some(sw) = ctx.global_contexts.try_get_context::<crate::ScreenshotWindowId>()
+                                    && let Ok(mut g) = sw.0.lock() { *g = Some(wid); }
                             }).await;
                             crate::state::note_screenshot_opened();
                             let _ = tx2.send(ipsea::modals::ModalResponse::Success { data: None });
@@ -2147,9 +2155,8 @@ pub fn run() {
                                         .with_transparency(true)
                                         .with_background(Color::TRANSPARENT)
                                 );
-                                if let Some(modal_ctx) = ctx.global_contexts.try_get_context::<modal::ModalState>() {
-                                    if let Ok(mut g) = modal_ctx.req.lock() { *g = Some((req_clone.clone(), tx.clone(), window_id)); }
-                                }
+                                if let Some(modal_ctx) = ctx.global_contexts.try_get_context::<modal::ModalState>()
+                                    && let Ok(mut g) = modal_ctx.req.lock() { *g = Some((req_clone.clone(), tx.clone(), window_id)); }
                             }).await;
                             tokio::spawn(async move {
                                 for delay in [30, 80, 180, 350] {
@@ -2210,39 +2217,41 @@ mod tests {
     fn spawn_toggle_server(socket: &str, wifi: Arc<Mutex<bool>>) {
         let socket = socket.to_string();
         std::thread::spawn(move || {
-            let _ = ipc::start_server(
-                socket,
-                move |req: SettingsRequest, sender: std::sync::mpsc::Sender<SettingsResponse>| match req {
-                    SettingsRequest::Get { key } => {
-                        if key == SettingKey::WifiEnabled {
-                            let on = *wifi.lock().expect("lock");
-                            let _ = sender.send(SettingsResponse::Setting(SettingEntry::new(key, SettingValue::Bool(on))));
-                        } else {
-                            let _ = sender.send(SettingsResponse::NotFound { key });
-                        }
-                    }
-                    SettingsRequest::GetAll => {
-                        let on = *wifi.lock().expect("lock");
-                        let entries = vec![SettingEntry::new(SettingKey::WifiEnabled, SettingValue::Bool(on))];
-                        for e in entries {
-                            let _ = sender.send(SettingsResponse::Setting(e));
-                        }
-                    }
-                    SettingsRequest::SetAndApply { key, value, source } => {
-                        if key == SettingKey::WifiEnabled {
-                            if let Some(on) = value.as_bool() {
-                                *wifi.lock().expect("lock") = on;
-                                let _ = sender.send(SettingsResponse::Ok);
-                                let _ = sender.send(SettingsResponse::Event(SettingsEvent::Changed { key, value, source }));
+            let _ =
+                ipc::start_server(socket, move |req: SettingsRequest, sender: std::sync::mpsc::Sender<SettingsResponse>| {
+                    match req {
+                        SettingsRequest::Get { key } => {
+                            if key == SettingKey::WifiEnabled {
+                                let on = *wifi.lock().expect("lock");
+                                let _ =
+                                    sender.send(SettingsResponse::Setting(SettingEntry::new(key, SettingValue::Bool(on))));
+                            } else {
+                                let _ = sender.send(SettingsResponse::NotFound { key });
                             }
-                        } else {
-                            let _ = sender.send(SettingsResponse::Ok);
                         }
+                        SettingsRequest::GetAll => {
+                            let on = *wifi.lock().expect("lock");
+                            let entries = vec![SettingEntry::new(SettingKey::WifiEnabled, SettingValue::Bool(on))];
+                            for e in entries {
+                                let _ = sender.send(SettingsResponse::Setting(e));
+                            }
+                        }
+                        SettingsRequest::SetAndApply { key, value, source } => {
+                            if key == SettingKey::WifiEnabled {
+                                if let Some(on) = value.as_bool() {
+                                    *wifi.lock().expect("lock") = on;
+                                    let _ = sender.send(SettingsResponse::Ok);
+                                    let _ =
+                                        sender.send(SettingsResponse::Event(SettingsEvent::Changed { key, value, source }));
+                                }
+                            } else {
+                                let _ = sender.send(SettingsResponse::Ok);
+                            }
+                        }
+                        SettingsRequest::Subscribe { .. } => {}
+                        _ => {}
                     }
-                    SettingsRequest::Subscribe { .. } => {}
-                    _ => {}
-                },
-            );
+                });
         });
         std::thread::sleep(std::time::Duration::from_millis(150));
     }

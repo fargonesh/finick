@@ -120,17 +120,16 @@ pub fn scan_installed_apps() -> Vec<InstalledApp> {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("desktop") {
-                    if let Some(app) = parse_desktop_file(&path) {
+                if path.extension().and_then(|s| s.to_str()) == Some("desktop")
+                    && let Some(app) = parse_desktop_file(&path) {
                         apps_map.entry(app.desktop_id.clone()).or_insert(app);
                     }
-                }
             }
         }
     }
 
     let mut apps: Vec<InstalledApp> = apps_map.into_values().collect();
-    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.sort_by_key(|a| a.name.to_lowercase());
     apps
 }
 
@@ -176,8 +175,6 @@ fn read_mimeapps_defaults() -> HashMap<String, String> {
                 if !first.is_empty() {
                     map.entry(k.trim().to_string()).or_insert_with(|| first.to_string());
                 }
-            }
-        }
     }
     map
 }
@@ -187,7 +184,6 @@ fn query_xdg_mime_with_cache(mime: &str, cache: &HashMap<String, String>) -> Opt
         if !desktop.is_empty() {
             return Some(desktop.clone());
         }
-    }
     if let Ok(output) = Command::new("xdg-mime").args(["query", "default", mime]).output() {
         let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !out.is_empty() {
@@ -219,11 +215,10 @@ fn query_xdg_browser_with_cache(cache: &HashMap<String, String>) -> Option<Strin
 fn query_finick_defaults() -> HashMap<String, String> {
     let home = std::env::var("HOME").unwrap_or_default();
     let path = PathBuf::from(format!("{home}/.config/finick/defaults.json"));
-    if let Ok(content) = fs::read_to_string(path) {
-        if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&content) {
+    if let Ok(content) = fs::read_to_string(path)
+        && let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&content) {
             return map;
         }
-    }
     HashMap::new()
 }
 
@@ -302,7 +297,7 @@ pub fn get_default_apps() -> Vec<DefaultAppCategoryInfo> {
                 desktop_id
                     .trim_end_matches(".desktop")
                     .split('.')
-                    .last()
+                    .next_back()
                     .unwrap_or(desktop_id)
                     .to_string()
             })
@@ -575,7 +570,7 @@ pub fn set_default_app(category_id: &str, desktop_id: &str) -> Result<(), String
             let exec_cmd = desktop_id
                 .trim_end_matches(".desktop")
                 .split('.')
-                .last()
+                .next_back()
                 .unwrap_or(desktop_id);
             let _ = Command::new("hyprctl")
                 .args(["keyword", "$terminal", exec_cmd])

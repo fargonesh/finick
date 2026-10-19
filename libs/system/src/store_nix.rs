@@ -61,11 +61,10 @@ pub fn search(query: &str) -> Vec<NixPackage> {
     if q.is_empty() || !nix_available() {
         return Vec::new();
     }
-    if nqx_available() {
-        if let Some(hits) = nqx_search(q) {
+    if nqx_available()
+        && let Some(hits) = nqx_search(q) {
             return hits;
         }
-    }
     nix_search(q)
 }
 
@@ -88,7 +87,7 @@ fn nqx_search(query: &str) -> Option<Vec<NixPackage>> {
         }
         hits.push(NixPackage {
             attr: attr.clone(),
-            pname: attr.split('.').last().unwrap_or(&attr).to_string(),
+            pname: attr.split('.').next_back().unwrap_or(&attr).to_string(),
             installed: installed.contains(&attr),
             ..Default::default()
         });
@@ -112,7 +111,7 @@ fn nix_search(query: &str) -> Vec<NixPackage> {
                 .get("pname")
                 .and_then(|p| p.as_str())
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| attr.split('.').last().unwrap_or(&attr).to_string());
+                .unwrap_or_else(|| attr.split('.').next_back().unwrap_or(&attr).to_string());
             NixPackage {
                 attr: attr.clone(),
                 pname,
@@ -136,7 +135,7 @@ pub fn eval_meta(attr: &str) -> Option<NixPackage> {
         .unwrap_or_default();
     Some(NixPackage {
         attr: a.to_string(),
-        pname: a.split('.').last().unwrap_or(a).to_string(),
+        pname: a.split('.').next_back().unwrap_or(a).to_string(),
         description: v.get("description").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
         long_description: v.get("longDescription").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
         homepage: v
@@ -154,7 +153,7 @@ pub fn package_details(attr: &str) -> NixPackage {
         attr: attr.trim().trim_start_matches("nixpkgs#").to_string(),
         ..Default::default()
     });
-    base.pname = base.attr.split('.').last().unwrap_or(&base.attr).to_string();
+    base.pname = base.attr.split('.').next_back().unwrap_or(&base.attr).to_string();
     base.installed = installed_attrs().contains(&base.attr);
     if base.version.is_empty() {
         let expr = format!("nixpkgs#{}", base.attr);

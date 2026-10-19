@@ -76,7 +76,7 @@ impl Component for OverviewPage {
                             .horizontal()
                             .cross_align(Alignment::Center)
                             .spacing(8.)
-                            .maybe_child(theme_lock.as_ref().map(|l| lock_badge(l)))
+                            .maybe_child(theme_lock.as_ref().map(lock_badge))
                             .child(
                                 rect()
                                     .opacity(if is_theme_locked { 0.45 } else { 1.0 })
@@ -117,7 +117,7 @@ impl Component for OverviewPage {
                         .cross_align(Alignment::Center)
                         .spacing(8.)
                         .child(field_label("Accent colour"))
-                        .maybe_child(accent_lock.as_ref().map(|l| lock_badge(l))),
+                        .maybe_child(accent_lock.as_ref().map(lock_badge)),
                 )
                 .child(
                     rect()
@@ -153,7 +153,7 @@ impl Component for OverviewPage {
                         .cross_align(Alignment::Center)
                         .spacing(8.)
                         .child(field_label("Desktop background"))
-                        .maybe_child(wp_lock.as_ref().map(|l| lock_badge(l))),
+                        .maybe_child(wp_lock.as_ref().map(lock_badge)),
                 )
                 .child(
                     rect()
@@ -185,7 +185,7 @@ impl Component for OverviewPage {
                             .horizontal()
                             .cross_align(Alignment::Center)
                             .spacing(8.)
-                            .maybe_child(wifi_lock.as_ref().map(|l| lock_badge(l)))
+                            .maybe_child(wifi_lock.as_ref().map(lock_badge))
                             .child(
                                 rect()
                                     .opacity(if is_wifi_locked { 0.45 } else { 1.0 })
@@ -271,7 +271,7 @@ impl Component for OverviewPage {
                             .horizontal()
                             .cross_align(Alignment::Center)
                             .spacing(8.)
-                            .maybe_child(bt_lock.as_ref().map(|l| lock_badge(l)))
+                            .maybe_child(bt_lock.as_ref().map(lock_badge))
                             .child(
                                 rect()
                                     .opacity(if is_bt_locked { 0.45 } else { 1.0 })
@@ -318,7 +318,7 @@ impl Component for OverviewPage {
                             .horizontal()
                             .cross_align(Alignment::Center)
                             .spacing(8.)
-                            .maybe_child(dnd_lock.as_ref().map(|l| lock_badge(l)))
+                            .maybe_child(dnd_lock.as_ref().map(lock_badge))
                             .child(
                                 rect()
                                     .cursor(CursorIcon::Pointer)
@@ -385,7 +385,7 @@ impl Component for OverviewPage {
                             .horizontal()
                             .cross_align(Alignment::Center)
                             .spacing(8.)
-                            .maybe_child(br_lock.as_ref().map(|l| lock_badge(l)))
+                            .maybe_child(br_lock.as_ref().map(lock_badge))
                             .child(
                                 rect()
                                     .cursor(CursorIcon::Pointer)
@@ -440,7 +440,7 @@ impl Component for OverviewPage {
                             .horizontal()
                             .cross_align(Alignment::Center)
                             .spacing(8.)
-                            .maybe_child(vol_lock.as_ref().map(|l| lock_badge(l)))
+                            .maybe_child(vol_lock.as_ref().map(lock_badge))
                             .child(
                                 rect()
                                     .cursor(CursorIcon::Pointer)
@@ -491,8 +491,8 @@ impl Component for OverviewPage {
                 ))
                 .child(multi_segment_bar(vec![(used_pct, t.accent), (free_pct, t.track)], false))
                 .child(storage_legend(vec![
-                    StorageLegendItem { label: "Used", value: storage.used.clone().into(), color: t.accent },
-                    StorageLegendItem { label: "Available", value: storage.available.clone().into(), color: t.track },
+                    StorageLegendItem { label: "Used", value: storage.used.clone(), color: t.accent },
+                    StorageLegendItem { label: "Available", value: storage.available.clone(), color: t.track },
                 ]))
         };
 
@@ -533,7 +533,7 @@ impl Component for OverviewPage {
                             .horizontal()
                             .cross_align(Alignment::Center)
                             .spacing(8.)
-                            .maybe_child(pwr_lock.as_ref().map(|l| lock_badge(l)))
+                            .maybe_child(pwr_lock.as_ref().map(lock_badge))
                             .child(
                                 rect()
                                     .cursor(CursorIcon::Pointer)

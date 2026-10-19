@@ -29,7 +29,7 @@ pub struct StoreEntry {
 
 impl StoreEntry {
     pub fn nix(attr: &str, summary: &str, installed: bool) -> Self {
-        let pname = attr.split('.').last().unwrap_or(attr).to_string();
+        let pname = attr.split('.').next_back().unwrap_or(attr).to_string();
         Self {
             id: format!("nixpkgs#{attr}"),
             name: pname,
@@ -112,7 +112,7 @@ pub fn list_installed() -> Vec<StoreEntry> {
         if !out.iter().any(|e| e.id == id) {
             out.push(StoreEntry {
                 id: id.clone(),
-                name: clean.split('.').last().unwrap_or(&clean).to_string(),
+                name: clean.split('.').next_back().unwrap_or(&clean).to_string(),
                 summary: String::new(),
                 source: StoreSource::Nixpkgs,
                 installed: true,
@@ -121,7 +121,7 @@ pub fn list_installed() -> Vec<StoreEntry> {
             });
         }
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     out
 }
 
@@ -154,8 +154,8 @@ pub fn search_all(query: &str) -> Vec<StoreEntry> {
         });
     }
     for app in desktop_apps::scan_installed_apps() {
-        if app.name.to_lowercase().contains(&q) || app.desktop_id.to_lowercase().contains(&q) {
-            if !out.iter().any(|e| e.id == app.desktop_id) {
+        if (app.name.to_lowercase().contains(&q) || app.desktop_id.to_lowercase().contains(&q))
+            && !out.iter().any(|e| e.id == app.desktop_id) {
                 out.push(StoreEntry {
                     id: app.desktop_id.clone(),
                     name: app.name,
@@ -165,7 +165,6 @@ pub fn search_all(query: &str) -> Vec<StoreEntry> {
                     ..Default::default()
                 });
             }
-        }
     }
     out.truncate(80);
     out

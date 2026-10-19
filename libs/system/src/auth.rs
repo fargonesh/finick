@@ -77,12 +77,10 @@ fn verify_via_shadow(username: &str, password: &str) -> bool {
             if let Ok(out) = Command::new("python3")
                 .args(["-c", &format!("import crypt; print(crypt.crypt('{pw}', '{hash}'))", pw = password.replace('\'', "'\\''"), hash = hash)])
                 .output()
-            {
-                if out.status.success() {
+                && out.status.success() {
                     let computed = String::from_utf8_lossy(&out.stdout).trim().to_string();
                     return computed == hash;
                 }
-            }
             if let Ok(out) = Command::new("openssl").args(["passwd", "-5", password]).output() {
                 let _ = out;
             }
@@ -481,13 +479,12 @@ pub fn authenticate_user(username: &str, password: &str) -> bool {
     if let Ok(allow) = std::env::var("FINICK_LOCKER_PASSWORD") {
         return password == allow;
     }
-    if let Some(service) = pam_service_available() {
-        if pam_authenticate(&service, username, password) {
+    if let Some(service) = pam_service_available()
+        && pam_authenticate(&service, username, password) {
             return true;
         }
         // PAM denied: fall through to the legacy chain (e.g. minimal
         // containers where the stack exists but can't backing-store auth).
-    }
     verify_password(username, password)
 }
 

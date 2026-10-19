@@ -494,10 +494,9 @@ fn calc_result(query: &str) -> Option<index::ty::SearchResult> {
     let t = query.trim();
     let expr = if let Some(rest) = t.strip_prefix('=') {
         rest.trim()
-    } else if let Some(rest) = t.strip_prefix("calc ") {
-        rest.trim()
     } else {
-        return None;
+        let rest = t.strip_prefix("calc ")?;
+        rest.trim()
     };
     let v = try_eval_expr(expr)?;
     let s = format_calc(v);
@@ -628,11 +627,10 @@ fn tryexec_ok(val: &str) -> bool {
 }
 
 fn default_terminal() -> String {
-    if let Ok(t) = std::env::var("TERMINAL") {
-        if !t.trim().is_empty() {
+    if let Ok(t) = std::env::var("TERMINAL")
+        && !t.trim().is_empty() {
             return t;
         }
-    }
     for cand in ["foot", "ghostty", "kitty", "alacritty", "x-terminal-emulator", "xterm"] {
         if let Ok(path_var) = std::env::var("PATH") {
             for dir in std::env::split_paths(&path_var) {
@@ -675,11 +673,10 @@ fn parse_desktop_launch(desktop_path: &str) -> Option<DesktopLaunch> {
             }
         }
     }
-    if let Some(te) = try_exec {
-        if !tryexec_ok(&te) {
+    if let Some(te) = try_exec
+        && !tryexec_ok(&te) {
             return None;
         }
-    }
     let raw = exec?;
     let mut args: Vec<String> = split_exec_quoted(&raw).into_iter().filter(|a| !is_field_code(a)).collect();
     if args.is_empty() {
@@ -840,7 +837,7 @@ fn search(query: String, results: State<Vec<index::ty::SearchResult>>, selected:
     std::thread::spawn(move || {
         let (inner_tx, inner_rx) = std::sync::mpsc::channel();
         let inner_tx2 = inner_tx.clone();
-        let res = ipc::send_command(
+        let _ = ipc::send_command(
             App::IndexService,
             &index::ty::Request::Search { query: q },
             Some(move |r: index::ty::SearchResult| {
@@ -849,7 +846,6 @@ fn search(query: String, results: State<Vec<index::ty::SearchResult>>, selected:
         );
         drop(inner_tx);
         let mut items: Vec<index::ty::SearchResult> = inner_rx.into_iter().collect();
-        if res.is_err() {}
         items.truncate(50);
         let _ = tx.send((providers, items));
     });
@@ -1083,24 +1079,22 @@ fn launcher_root(initial_query: String) -> Element {
                         }
                     }
                     Key::Named(NamedKey::Tab) => {
-                        if let Some(item) = res_state.read().get(cur).cloned() {
-                            if !item.path.starts_with("calc:")
+                        if let Some(item) = res_state.read().get(cur).cloned()
+                            && !item.path.starts_with("calc:")
                                 && !item.path.starts_with("finick:")
                                 && !item.path.starts_with("shell:")
                             {
                                 q_state.set(item.name.clone());
                             }
-                        }
                     }
                     Key::Named(NamedKey::Enter) => {
                         if e.data().modifiers.shift() {
-                            if let Some(item) = res_state.read().get(cur).cloned() {
-                                if !launch_item_secondary(&item) {
+                            if let Some(item) = res_state.read().get(cur).cloned()
+                                && !launch_item_secondary(&item) {
                                     err_state.set(Some("Could not reveal — xdg-open failed.".to_string()));
                                 } else {
                                     dismiss_state.set(true);
                                 }
-                            }
                             return;
                         }
                         if let Some(item) = res_state.read().get(cur).cloned() {

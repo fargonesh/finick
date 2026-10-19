@@ -36,11 +36,10 @@ pub fn generated_file() -> PathBuf {
 
 pub fn load_decls() -> StoreDecls {
     let path = state_path();
-    if let Ok(content) = fs::read_to_string(&path) {
-        if let Ok(decls) = serde_json::from_str::<StoreDecls>(&content) {
+    if let Ok(content) = fs::read_to_string(&path)
+        && let Ok(decls) = serde_json::from_str::<StoreDecls>(&content) {
             return decls;
         }
-    }
     StoreDecls::default()
 }
 
@@ -342,25 +341,6 @@ fn append_import_fallback(hm_file: &str, target: &str) -> Result<(), String> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn quotes_bare_at_path_in_imports() {
-        let input = "{\n  imports = [\n    ./phone-stuff.nix\n    /home/flora.hill@rmhedge.com/.config/finick/store/apps.nix\n  ];\n}\n";
-        let fixed = quote_at_paths(input);
-        assert!(fixed.contains("\"/home/flora.hill@rmhedge.com/.config/finick/store/apps.nix\""));
-        assert!(fixed.contains("./phone-stuff.nix"));
-    }
-
-    #[test]
-    fn leaves_quoted_and_plain_paths_alone() {
-        let input = "{\n  imports = [ \"/home/a@b/apps.nix\" ./local.nix /nix/store/plain ];\n}\n";
-        assert_eq!(quote_at_paths(input), input);
-    }
-}
-
 pub fn apply_home_manager() -> Result<String, String> {
     // Absolute store imports (`"/home/user@host/.config/..."`) need impure
     // evaluation; try `--impure` variants before pure fallbacks.
@@ -382,4 +362,23 @@ pub fn apply_home_manager() -> Result<String, String> {
         }
     }
     Err("no home-manager switch backend found (nh / home-manager)".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quotes_bare_at_path_in_imports() {
+        let input = "{\n  imports = [\n    ./phone-stuff.nix\n    /home/flora.hill@rmhedge.com/.config/finick/store/apps.nix\n  ];\n}\n";
+        let fixed = quote_at_paths(input);
+        assert!(fixed.contains("\"/home/flora.hill@rmhedge.com/.config/finick/store/apps.nix\""));
+        assert!(fixed.contains("./phone-stuff.nix"));
+    }
+
+    #[test]
+    fn leaves_quoted_and_plain_paths_alone() {
+        let input = "{\n  imports = [ \"/home/a@b/apps.nix\" ./local.nix /nix/store/plain ];\n}\n";
+        assert_eq!(quote_at_paths(input), input);
+    }
 }

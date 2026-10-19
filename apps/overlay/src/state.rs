@@ -195,6 +195,7 @@ pub fn parse_capacity_pct(capacity: &str) -> u8 {
     capacity.trim().trim_end_matches('%').parse::<u8>().unwrap_or(0).min(100)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn load_initial_batch(
     wifi: State<bool>,
     bt: State<bool>,
@@ -335,6 +336,7 @@ fn apply_topbar_custom(ts: &mut TopbarSettings, k: &str, value: &SettingValue) -
     false
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn subscribe_live(
     wifi: State<bool>,
     bt: State<bool>,
@@ -581,6 +583,7 @@ pub fn arm_travel_guard(panel_x: f64, panel_y: f64, panel_w: f64, panel_h: f64, 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn point_in_triangle(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64) -> bool {
     let sign = |x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64| (x1 - x3) * (y2 - y3) - (x2 - x3) * (y1 - y3);
     let d1 = sign(px, py, ax, ay, bx, by);
