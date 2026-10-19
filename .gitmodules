@@ -1,0 +1,3 @@
+[submodule "libs/freya"]
+	path = libs/freya
+	url = https://github.com/fargonesh/freya.git
