@@ -9,9 +9,7 @@ config = { path = "../../libs/config" }
 index = { path = "../../services/index" }
 
 serde_json = "1.0.139"
-freya = { git = "https://github.com/marc2332/freya", branch = "main", features = [
-    "all",
-] }
+freya = { workspace = true }
 chrono = "0.4.45"
 image = "0.25.10"
 bytes = "1.12.1"

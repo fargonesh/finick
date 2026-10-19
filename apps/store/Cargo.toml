@@ -12,9 +12,9 @@ tokio = { version = "1.43", features = ["full"] }
 ui = { version = "0.1.0", path = "../../libs/ui" }
 system = { path = "../../libs/system" }
 
-freya = { git = "https://github.com/marc2332/freya", branch = "main", features = ["all"] }
-freya-performance-plugin = { git = "https://github.com/marc2332/freya", branch = "main"}
-freya-devtools = { git = "https://github.com/marc2332/freya", branch = "main", features = ["server"] }
+freya = { workspace = true }
+freya-performance-plugin = { workspace = true }
+freya-devtools = { workspace = true }
 
 [[bin]]
 name = "store"

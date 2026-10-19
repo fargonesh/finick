@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 overlay = { path = "../overlay" }
 tokio = { version = "1.43", features = ["full"] }
-freya = { git = "https://github.com/marc2332/freya", branch = "main", features = ["all"] }
+freya = { workspace = true }
 
 [[bin]]
 name = "launcher"

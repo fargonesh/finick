@@ -1,0 +1,424 @@
+#![doc(
+    html_logo_url = "https://freyaui.dev/logo.svg",
+    html_favicon_url = "https://freyaui.dev/logo.svg"
+)]
+#![cfg_attr(feature = "docs", feature(doc_cfg))]
+//! # Freya
+//!
+//! **Freya** is a declarative, cross-platform GUI 🦀 Rust library, powered by 🎨 [Skia](https://skia.org/).
+//!
+//! #### Example
+//!
+//! ```rust, no_run
+//! # use freya::prelude::*;
+//! fn main() {
+//!     // *Start* your app with a window and its root component
+//!     launch(LaunchConfig::new().with_window(WindowConfig::new(app)))
+//! }
+//!
+//! fn app() -> impl IntoElement {
+//!     // Define a reactive *state*
+//!     let mut count = use_state(|| 0);
+//!
+//!     // Declare the *UI*
+//!     rect()
+//!         .width(Size::fill())
+//!         .height(Size::fill())
+//!         .background((35, 35, 35))
+//!         .color(Color::WHITE)
+//!         .padding(Gaps::new_all(12.))
+//!         .on_mouse_up(move |_| *count.write() += 1)
+//!         .child(format!("Click to increase -> {}", count.read()))
+//! }
+//! ```
+//!
+//! ### Basics
+//! - [UI and Components](self::_docs::ui_and_components)
+//! - [Elements](self::elements)
+//! - [Events](self::_docs::events)
+//! - [Hooks](self::_docs::hooks)
+//! - [State](self::_docs::state_management)
+//! - [Async](self::_docs::_async)
+//! - [Layers](self::_docs::layers)
+//! - [Platforms](self::_docs::platforms)
+//! - [Development Setup](self::_docs::development_setup)
+//! - [Extending Components](self::_docs::extending_components)
+//!
+//! ### Learn
+//! - [Built-in Components](crate::components)
+//! - [Built-in Components Gallery](crate::components::gallery)
+//! - [i18n](freya_i18n)
+//! - [Animation](freya_animation)
+//! - [Routing](freya_router)
+//! - [Clipboard](freya_clipboard)
+//! - [Icons](freya_icons)
+//! - [Material Design](freya_material_design)
+//! - [Plotters](freya_plotters_backend)
+//! - [Testing](freya_testing)
+//! - [WebView](freya_webview)
+//! - [Terminal](freya_terminal)
+//! - [Camera](freya_camera)
+//! - [Video](freya_video)
+//! - [Freya Query](freya_query)
+//! - [Tokio Integration](self::_docs::tokio_integration)
+//! - [Borderless Windows](self::_docs::borderless)
+//! - [Devtools](self::_docs::devtools)
+//! - [Hot Reload](self::_docs::hot_reload)
+//!
+//! ## Features flags
+//!
+//! - `all`: Enables all the features listed below
+//! - `winit`: Reexports [freya_winit] and enables the launch entrypoint. Enabled by default.
+//! - `wayland-layer-shell`: Enables the standalone SCTK wlr-layer-shell client on Linux.
+//! - `wayland-session-lock`: Enables the dedicated ext-session-lock-v1 client on Linux.
+//! - `router`: Reexport [freya_router] under [router]
+//! - `i18n`: Reexport [freya_i18n] under [i18n]
+//! - `remote-asset`: Enables support for **HTTP** asset sources for [ImageViewer](components::ImageViewer) and [GifViewer](components::GifViewer) components.
+//! - `tray`: Enables tray support using the [tray_icon] crate.
+//! - `sdk`: Reexport [freya_sdk] under [sdk].
+//! - `sdk-tokio`: Enables the Tokio utilities from [freya_sdk]. Implies `sdk`.
+//! - `gif`: Enables the [GifViewer](components::GifViewer) component.
+//! - `video`: Reexport [freya_video] under [video].
+//! - `plot`: Reexport of plotters under [plot].
+//! - `material-design`: Reexport [freya_material_design] under [material_design].
+//! - `calendar`: Enables the [Calendar](components::Calendar) component.
+//! - `icons`: Reexport of [freya_icons] under [icons].
+//! - `icons-lucide`: Enables the Lucide icons from [freya_icons]. Implies `icons`.
+//! - `radio`: Reexport [freya_radio] under [radio].
+//! - `query`: Reexport [freya_query] under [query].
+//! - `markdown`: Reexport [freya_markdown] under [markdown].
+//! - `webview`: Reexport [freya_webview] under [webview].
+//! - `titlebar`: Enables the [TitlebarButton](components::TitlebarButton) component.
+//! - `borderless`: Reexport [freya_borderless_plugin] under [borderless]. See [Borderless Windows](self::_docs::borderless).
+//! - `terminal`: Reexport [freya_terminal] under [terminal].
+//! - `code-editor`: Reexport [freya_code_editor] under [code_editor].
+//! - `camera`: Reexport [freya_camera] under [camera].
+//!
+//! ## Misc features
+//! - `devtools`: Enables devtools support.
+//! - `performance`: Reexports the performance overlay plugin. The plugin is auto-added in debug builds.
+//! - `vulkan`: Enables Vulkan rendering support.
+//! - `hotpath`: Enables Freya's internal usage of hotpath.
+//! - `hotreload`: Enables hot reload support via the `dx` CLI from `dioxus-cli`. See [Hot Reload](self::_docs::hot_reload).
+//! - `zoom-shortcuts`: Enables `Ctrl`/`Cmd` + `+`/`-`/`0` to zoom the app.
+
+/// Common imports to build Freya apps, use it with `use freya::prelude::*;`.
+pub mod prelude {
+    pub use freya_core::prelude::*;
+    pub use freya_edit::{
+        Clipboard,
+        ClipboardError,
+    };
+    #[cfg_attr(feature = "docs", doc(cfg(feature = "winit")))]
+    #[cfg(feature = "winit")]
+    pub use freya_winit::{
+        WindowDragExt,
+        WinitPlatformExt,
+        config::{
+            CloseDecision,
+            LaunchConfig,
+            RendererPreference,
+            WindowConfig,
+        },
+        renderer::{
+            LaunchProxy,
+            NativeEvent,
+            RendererContext,
+        },
+    };
+
+    pub use crate::components::*;
+    #[cfg_attr(feature = "docs", doc(cfg(feature = "markdown")))]
+    #[cfg(feature = "markdown")]
+    pub use crate::markdown::*;
+
+    #[cfg_attr(feature = "docs", doc(cfg(feature = "winit")))]
+    #[cfg(feature = "winit")]
+    pub fn launch(launch_config: LaunchConfig) {
+        #[cfg(feature = "devtools")]
+        let launch_config = launch_config.with_plugin(freya_devtools::DevtoolsPlugin::default());
+        #[cfg(debug_assertions)]
+        let launch_config = launch_config
+            .with_plugin(freya_performance_plugin::PerformanceOverlayPlugin::default());
+        freya_winit::launch(launch_config)
+    }
+
+    #[cfg(all(feature = "wayland-layer-shell", target_os = "linux"))]
+    pub use freya_winit::wayland_layer_shell;
+    #[cfg(all(feature = "wayland-session-lock", target_os = "linux"))]
+    pub use freya_winit::wayland_session_lock;
+
+    #[cfg_attr(feature = "docs", doc(cfg(feature = "router")))]
+    #[cfg(feature = "router")]
+    pub use freya_router;
+    pub use torin::{
+        alignment::Alignment,
+        content::Content,
+        direction::Direction,
+        gaps::Gaps,
+        geometry::{
+            Area,
+            CursorPoint,
+            Size2D,
+        },
+        position::Position,
+        size::Size,
+        visible_size::VisibleSize,
+    };
+}
+/// Built-in elements like `rect`, `label` or `paragraph`.
+pub mod elements {
+    pub use freya_core::elements::*;
+}
+
+/// Built-in components like `Button`, `Input` or `ScrollView`.
+pub mod components {
+    #[cfg_attr(feature = "docs", doc(cfg(feature = "gif")))]
+    #[cfg(feature = "gif")]
+    pub use freya_components::gif_viewer::*;
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "router")] {
+            #[cfg_attr(feature = "docs", doc(cfg(feature = "router")))]
+            pub use freya_components::activable_route::*;
+            pub use freya_components::link::*;
+            pub use freya_components::native_router::*;
+            pub use freya_components::animated_router::*;
+        }
+    }
+    #[cfg_attr(feature = "docs", doc(cfg(feature = "remote-asset")))]
+    #[cfg(feature = "remote-asset")]
+    pub use freya_components::Url;
+    #[cfg_attr(feature = "docs", doc(cfg(feature = "calendar")))]
+    #[cfg(feature = "calendar")]
+    pub use freya_components::calendar::*;
+    #[cfg(feature = "titlebar")]
+    pub use freya_components::titlebar::*;
+    pub use freya_components::{
+        accordion::*,
+        activable::*,
+        activable_context::*,
+        attached::*,
+        button::*,
+        cache::*,
+        canvas::*,
+        card::*,
+        checkbox::*,
+        chip::*,
+        color_picker::*,
+        context_menu::*,
+        define_theme,
+        docking::*,
+        drag_drop::*,
+        draggable_canvas::*,
+        element_expansions::*,
+        floating_tab::*,
+        gallery,
+        get_theme,
+        icons::{
+            arrow::*,
+            tick::*,
+        },
+        image_viewer::*,
+        input::*,
+        lazy::*,
+        loader::*,
+        menu::*,
+        overflowed_content::*,
+        popup::*,
+        portal::*,
+        progressbar::*,
+        radio_item::*,
+        resizable_container::*,
+        scrollviews::*,
+        segmented_button::*,
+        select::*,
+        selectable_text::*,
+        sidebar::*,
+        skeleton::*,
+        slider::*,
+        svg_viewer::*,
+        switch::*,
+        table::*,
+        theming::{
+            component_themes::{
+                ColorsSheet,
+                Theme,
+            },
+            extensions::*,
+            hooks::*,
+            macros::Preference,
+            themes::*,
+        },
+        tile::*,
+        tooltip::*,
+        typography::*,
+    };
+}
+
+/// Reexport `freya-edit`, the text editing APIs.
+pub mod text_edit {
+    pub use freya_edit::*;
+}
+
+/// Reexport `freya-clipboard`.
+pub mod clipboard {
+    pub use freya_clipboard::prelude::*;
+}
+
+/// Reexport `freya-animation`.
+pub mod animation {
+    pub use freya_animation::prelude::*;
+}
+
+/// Reexport `freya-plotters-backend` and `plotters` when the `plot` feature is enabled.
+#[cfg_attr(feature = "docs", doc(cfg(feature = "plot")))]
+#[cfg(feature = "plot")]
+pub mod plot {
+    pub use freya_plotters_backend::*;
+    pub use plotters;
+}
+
+/// Reexport `freya-router` when the `router` feature is enabled.
+#[cfg_attr(feature = "docs", doc(cfg(feature = "router")))]
+#[cfg(feature = "router")]
+pub mod router {
+    pub use freya_router::prelude::*;
+}
+
+/// Reexport `freya-i18n` when the `i18n` feature is enabled.
+#[cfg_attr(feature = "docs", doc(cfg(feature = "i18n")))]
+#[cfg(feature = "i18n")]
+pub mod i18n {
+    pub use freya_i18n::prelude::*;
+}
+
+/// Reexport `freya-engine` when the `engine` feature is enabled.
+#[cfg_attr(feature = "docs", doc(cfg(feature = "engine")))]
+#[cfg(feature = "engine")]
+pub mod engine {
+    pub use freya_engine::*;
+}
+
+/// Reexport `winit` when the `winit` feature is enabled.
+#[cfg_attr(feature = "docs", doc(cfg(feature = "winit")))]
+#[cfg(feature = "winit")]
+pub mod winit {
+    pub use freya_winit::winit::*;
+}
+
+/// Helpers to build elements out of plain functions.
+pub mod helpers {
+    pub use freya_core::helpers::*;
+}
+
+/// Reexport `tray-icon` when the `tray` feature is enabled.
+#[cfg_attr(feature = "docs", doc(cfg(feature = "tray")))]
+#[cfg(feature = "tray")]
+pub mod tray {
+    pub use freya_winit::tray::*;
+}
+
+/// Reexport `freya-sdk` when the `sdk` feature is enabled.
+#[cfg_attr(feature = "docs", doc(cfg(feature = "sdk")))]
+#[cfg(feature = "sdk")]
+pub mod sdk {
+    pub use freya_sdk::prelude::*;
+}
+
+/// Reexport `freya-material-design` when the `material-design` feature is enabled.
+#[cfg_attr(feature = "docs", doc(cfg(feature = "material-design")))]
+#[cfg(feature = "material-design")]
+pub mod material_design {
+    pub use freya_material_design::prelude::*;
+}
+
+/// Reexport `freya-icons` when the `icons` feature is enabled.
+#[cfg_attr(feature = "docs", doc(cfg(feature = "icons")))]
+#[cfg(feature = "icons")]
+pub mod icons {
+    pub use freya_icons::*;
+}
+
+/// Reexport `freya-radio` when the `radio` feature is enabled.
+#[cfg(feature = "radio")]
+#[cfg_attr(feature = "docs", doc(cfg(feature = "radio")))]
+pub mod radio {
+    pub use freya_radio::prelude::*;
+}
+
+/// Reexport `freya-query` when the `query` feature is enabled.
+#[cfg(feature = "query")]
+#[cfg_attr(feature = "docs", doc(cfg(feature = "query")))]
+pub mod query {
+    pub use freya_query::prelude::*;
+}
+
+/// Reexport `freya-webview` when the `webview` feature is enabled.
+#[cfg(feature = "webview")]
+#[cfg_attr(feature = "docs", doc(cfg(feature = "webview")))]
+pub mod webview {
+    pub use freya_webview::prelude::*;
+}
+
+/// Reexport `freya-terminal` when the `terminal` feature is enabled.
+#[cfg(feature = "terminal")]
+#[cfg_attr(feature = "docs", doc(cfg(feature = "terminal")))]
+pub mod terminal {
+    pub use freya_terminal::prelude::*;
+}
+
+/// Reexport `freya-code-editor` when the `code-editor` feature is enabled.
+#[cfg(feature = "code-editor")]
+#[cfg_attr(feature = "docs", doc(cfg(feature = "code-editor")))]
+pub mod code_editor {
+    pub use freya_code_editor::prelude::*;
+}
+
+/// Reexport `freya-camera` when the `camera` feature is enabled.
+#[cfg(feature = "camera")]
+#[cfg_attr(feature = "docs", doc(cfg(feature = "camera")))]
+pub mod camera {
+    pub use freya_camera::{
+        init,
+        nokhwa,
+        prelude::*,
+    };
+}
+
+/// Reexport `freya-video` when the `video` feature is enabled.
+#[cfg(feature = "video")]
+#[cfg_attr(feature = "docs", doc(cfg(feature = "video")))]
+pub mod video {
+    pub use freya_video::*;
+}
+
+/// Reexport `freya-performance-plugin` when the `performance` feature is enabled.
+#[cfg(feature = "performance")]
+#[cfg_attr(feature = "docs", doc(cfg(feature = "performance")))]
+pub mod performance {
+    pub use freya_performance_plugin::*;
+}
+
+/// Reexport `freya-borderless-plugin` when the `borderless` feature is enabled.
+#[cfg(feature = "borderless")]
+#[cfg_attr(feature = "docs", doc(cfg(feature = "borderless")))]
+pub mod borderless {
+    pub use freya_borderless_plugin::*;
+}
+
+/// Reexport `freya-markdown` when the `markdown` feature is enabled.
+#[cfg(feature = "markdown")]
+#[cfg_attr(feature = "docs", doc(cfg(feature = "markdown")))]
+pub mod markdown {
+    pub use freya_markdown::*;
+}
+
+/// Reexport `freya-android` when targeting Android.
+#[cfg(target_os = "android")]
+pub mod android {
+    pub use freya_android::*;
+}
+
+/// Freya guides.
+#[cfg(doc)]
+pub mod _docs;
