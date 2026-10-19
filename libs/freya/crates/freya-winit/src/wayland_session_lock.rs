@@ -3,7 +3,12 @@
 //! This is intentionally separate from Winit windows and layer-shell surfaces.
 //! The compositor must acknowledge the lock before the call can report success.
 //! The initial API renders frames but does not dispatch keyboard or pointer
-//! input; unlock must come from another thread through the atomic control flag.
+//! input or mount a Freya `App`/`Runner`; unlock must come from another thread
+//! through the atomic control flag, and the caller supplies the Skia draw callback.
+//! After requesting a lock, local setup errors do not cancel that request:
+//! the client keeps dispatching until `locked` or `finished`. If dispatch itself
+//! cannot recover before either event, this function stays alive rather than
+//! dropping a pending session lock.
 
 use std::{
     sync::{
@@ -89,6 +94,12 @@ pub fn run_session_lock(
             "Session lock requires at least one Wayland output".into(),
         ));
     }
+    let mut event_loop: EventLoop<LockClient> = EventLoop::try_new()
+        .map_err(|error| NativeWaylandError(format!("Wayland event loop failed: {error}")))?;
+    WaylandSource::new(connection.clone(), event_queue)
+        .insert(event_loop.handle())
+        .map_err(|error| NativeWaylandError(format!("Wayland event source failed: {error}")))?;
+
     let session_lock_state = SessionLockState::new(&globals, &qh);
     let session_lock = session_lock_state
         .lock(&qh)
@@ -111,59 +122,48 @@ pub fn run_session_lock(
     for output in outputs {
         client.add_output(&qh, output);
     }
-    connection
-        .flush()
-        .map_err(|error| NativeWaylandError(format!("Wayland flush failed: {error}")))?;
-
-    let mut event_loop: EventLoop<LockClient> = EventLoop::try_new()
-        .map_err(|error| NativeWaylandError(format!("Wayland event loop failed: {error}")))?;
-    WaylandSource::new(connection.clone(), event_queue)
-        .insert(event_loop.handle())
-        .map_err(|error| NativeWaylandError(format!("Wayland event source failed: {error}")))?;
 
     loop {
         if let Err(error) = event_loop.dispatch(Duration::from_millis(50), &mut client) {
             client.protocol_error = Some(format!("Wayland dispatch failed: {error}"));
-            break;
+            if client.phase == LockPhase::Requested {
+                std::thread::sleep(Duration::from_millis(50));
+                continue;
+            }
         }
 
         match client.phase {
             LockPhase::Finished => break,
+            LockPhase::Locked if client.protocol_error.is_some() => break,
             LockPhase::Locked if unlock_requested.load(Ordering::Acquire) => break,
             LockPhase::Requested | LockPhase::Locked => {}
             LockPhase::Unlocked => break,
         }
     }
 
-    if client.phase == LockPhase::Locked {
-        if let Some(lock) = client.session_lock.take() {
-            lock.unlock();
-        }
-        connection
-            .flush()
-            .map_err(|error| NativeWaylandError(format!("Session unlock flush failed: {error}")))?;
-        connection
-            .roundtrip()
-            .map_err(|error| NativeWaylandError(format!("Session unlock sync failed: {error}")))?;
-        client.lock_surfaces.clear();
-        connection
-            .flush()
-            .map_err(|error| NativeWaylandError(format!("Lock-surface flush failed: {error}")))?;
-        connection
-            .roundtrip()
-            .map_err(|error| NativeWaylandError(format!("Lock-surface sync failed: {error}")))?;
-        client.phase = LockPhase::Unlocked;
-    } else {
-        client.session_lock.take();
-        client.lock_surfaces.clear();
-        let _ = connection.flush();
-        let _ = connection.roundtrip();
+    let phase_at_shutdown = client.phase;
+    if let Some(lock) = client.session_lock.take() {
+        lock.unlock();
     }
+    let unlock_sync = flush_and_sync(&connection, "Session unlock");
+    client.lock_surfaces.clear();
+    let surfaces_sync = flush_and_sync(&connection, "Lock surfaces");
+    if phase_at_shutdown == LockPhase::Locked {
+        client.phase = LockPhase::Unlocked;
+    }
+    let teardown_error = unlock_sync.and(surfaces_sync).err();
 
-    if client.phase == LockPhase::Finished {
+    if phase_at_shutdown == LockPhase::Finished {
+        let message = teardown_error.map_or_else(
+            || "Compositor denied or finished the session lock".to_string(),
+            |error| format!("Compositor denied or finished the session lock; {error}"),
+        );
         return Err(NativeWaylandError(
-            "Compositor denied or finished the session lock".into(),
+            message,
         ));
+    }
+    if let Some(error) = teardown_error {
+        return Err(error);
     }
     if let Some(error) = client.protocol_error.take() {
         return Err(NativeWaylandError(error));
@@ -174,6 +174,17 @@ pub fn run_session_lock(
         )));
     }
     Ok(())
+}
+
+fn flush_and_sync(connection: &Connection, operation: &str) -> Result<(), NativeWaylandError> {
+    let flush = connection
+        .flush()
+        .map_err(|error| format!("{operation} flush failed: {error}"));
+    let sync = connection
+        .roundtrip()
+        .map(|_| ())
+        .map_err(|error| format!("{operation} sync failed: {error}"));
+    flush.and(sync).map_err(NativeWaylandError)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,7 +268,7 @@ impl SessionLockHandler for LockClient {
         if self.phase == LockPhase::Finished {
             return;
         }
-        if let Err(error) = attach_shm_frame(
+        match attach_shm_frame(
             &self.shm,
             qh,
             lock_surface.wl_surface(),
@@ -265,7 +276,9 @@ impl SessionLockHandler for LockClient {
             configure.new_size.1,
             &mut self.render,
         ) {
-            self.render_error = Some(error.to_string());
+            Ok(None) => {}
+            Ok(Some(error)) => self.render_error = Some(error),
+            Err(error) => self.protocol_error = Some(error.to_string()),
         }
     }
 }

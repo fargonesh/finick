@@ -29,6 +29,8 @@ impl From<String> for NativeWaylandError {
 pub type NativeRenderCallback =
     Box<dyn FnMut((u32, u32), &mut SkiaSurface) -> Result<(), String> + 'static>;
 
+const MAX_SHM_FRAME_BYTES: usize = 256 * 1024 * 1024;
+
 pub(super) fn attach_shm_frame<D>(
     shm: &Shm,
     qh: &QueueHandle<D>,
@@ -36,7 +38,7 @@ pub(super) fn attach_shm_frame<D>(
     width: u32,
     height: u32,
     render: &mut NativeRenderCallback,
-) -> Result<(), NativeWaylandError>
+) -> Result<Option<String>, NativeWaylandError>
 where
     D: Dispatch<wl_buffer::WlBuffer, ()> + 'static,
 {
@@ -66,6 +68,11 @@ where
     let bytes = (stride as usize)
         .checked_mul(height as usize)
         .ok_or_else(|| NativeWaylandError("SHM buffer size overflow".into()))?;
+    if bytes > MAX_SHM_FRAME_BYTES || bytes > i32::MAX as usize {
+        return Err(NativeWaylandError(
+            "Compositor configured an SHM buffer above the 256 MiB limit".into(),
+        ));
+    }
     let mut pool = RawPool::new(bytes, shm)
         .map_err(|error| NativeWaylandError(format!("Failed to create SHM pool: {error}")))?;
     pool.mmap()
@@ -94,5 +101,5 @@ where
     surface.damage_buffer(0, 0, width as i32, height as i32);
     surface.commit();
     buffer.destroy();
-    render_result.map_err(NativeWaylandError)
+    Ok(render_result.err())
 }

@@ -3,7 +3,8 @@
 //! This path does not create or alter a Winit window. It runs a native Wayland
 //! event loop and renders each compositor-configured frame through Skia.
 //! The callback runs at initial configure and later size changes; this first
-//! version does not yet forward keyboard or pointer events.
+//! version does not yet forward keyboard or pointer events, or mount a Freya
+//! `App`/`Runner`; the caller supplies the Skia draw callback.
 
 use std::time::Duration;
 
@@ -77,6 +78,11 @@ pub fn run_layer_shell(
     config: LayerShellConfig,
     render: impl FnMut((u32, u32), &mut freya_engine::prelude::Surface) -> Result<(), String> + 'static,
 ) -> Result<(), NativeWaylandError> {
+    if config.width == 0 || config.height == 0 {
+        return Err(NativeWaylandError(
+            "Layer-shell requested size must be non-zero".into(),
+        ));
+    }
     let connection = Connection::connect_to_env()
         .map_err(|error| NativeWaylandError(format!("Wayland connection failed: {error}")))?;
     let (globals, event_queue) = registry_queue_init(&connection)
@@ -111,6 +117,7 @@ pub fn run_layer_shell(
         output_state: OutputState::new(&globals, &qh),
         shm,
         render: Box::new(render),
+        requested_size: (config.width, config.height),
         _layer: layer,
         error: None,
         closed: false,
@@ -140,6 +147,7 @@ struct LayerClient {
     output_state: OutputState,
     shm: Shm,
     render: NativeRenderCallback,
+    requested_size: (u32, u32),
     _layer: LayerSurface,
     error: Option<NativeWaylandError>,
     closed: bool,
@@ -196,10 +204,18 @@ impl LayerShellHandler for LayerClient {
     ) {
         let (width, height) = configure.new_size;
         let size = (
-            if width == 0 { 1 } else { width },
-            if height == 0 { 1 } else { height },
+            if width == 0 {
+                self.requested_size.0
+            } else {
+                width
+            },
+            if height == 0 {
+                self.requested_size.1
+            } else {
+                height
+            },
         );
-        if let Err(error) = attach_shm_frame(
+        match attach_shm_frame(
             &self.shm,
             qh,
             layer.wl_surface(),
@@ -207,8 +223,15 @@ impl LayerShellHandler for LayerClient {
             size.1,
             &mut self.render,
         ) {
-            self.error = Some(error);
-            self.closed = true;
+            Ok(None) => {}
+            Ok(Some(error)) => {
+                self.error = Some(NativeWaylandError(error));
+                self.closed = true;
+            }
+            Err(error) => {
+                self.error = Some(error);
+                self.closed = true;
+            }
         }
     }
 }

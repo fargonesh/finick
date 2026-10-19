@@ -17,3 +17,21 @@ pub(crate) fn with_raster_surface<T>(
         wrap_pixels(&info, pixels, Some(row_bytes), None).ok_or("Failed to wrap raster pixels")?;
     Ok(render(&mut surface))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::with_raster_surface;
+
+    #[test]
+    fn software_surface_wraps_and_draws_into_caller_pixels() {
+        let mut pixels = [0; 16];
+        with_raster_surface(&mut pixels, 2, 2, |surface| {
+            surface.canvas().clear(freya_core::prelude::Color::BLACK);
+        })
+        .unwrap();
+        assert_eq!(
+            pixels,
+            [0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]
+        );
+    }
+}
