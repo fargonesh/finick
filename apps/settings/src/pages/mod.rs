@@ -2,6 +2,7 @@
 #![allow(unused_imports)]
 
 pub mod network;
+pub mod mouse;
 pub mod bluetooth;
 pub mod storage;
 pub mod about;
@@ -13,6 +14,7 @@ pub mod shortcuts;
 pub mod default_apps;
 
 pub use network::Network;
+pub use mouse::Mouse;
 pub use bluetooth::Bluetooth;
 pub use storage::Storage;
 pub use about::About;

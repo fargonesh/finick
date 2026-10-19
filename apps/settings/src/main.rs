@@ -2,6 +2,7 @@
 
 use {
     freya::prelude::*,
+    ipsea::settings::SettingKey,
     system::{HyprlandBackend, SystemBackend},
     ui::*,
 };
@@ -27,6 +28,7 @@ pub enum Route {
     General,
     Storage,
     Battery,
+    Mouse,
     Accessibility,
     About,
     Desktop,
@@ -145,6 +147,13 @@ pub const ALL_NAV_ROUTES: &[RouteInfo] = &[
         keywords: "battery power charge low power balanced high performance",
     },
     RouteInfo {
+        route: Route::Mouse,
+        title: "Mouse & Touchpad",
+        icon_svg: GENERAL,
+        group: Some("System"),
+        keywords: "mouse touchpad pointer speed accel natural scroll tap click trackpad sensitivity",
+    },
+    RouteInfo {
         route: Route::Accessibility,
         title: "Accessibility",
         icon_svg: ACCESSIBILITY,
@@ -239,6 +248,9 @@ fn app() -> impl IntoElement {
     // Centralized SettingsStore initialized and connected to daemon via IPC
     let store = use_init_settings_store();
 
+    // Window-wide custom colour picker (accent + background), opened from swatch rows.
+    let picker_req = use_init_color_picker();
+
     // Local schedule preferences
     let work_sched = use_state(|| true);
     let sleep_sched = use_state(|| true);
@@ -274,7 +286,50 @@ fn app() -> impl IntoElement {
         (*focused_nav_idx.read()).min(visible_routes.len() - 1)
     };
 
-    responsive_view(780.0, move |compact| {
+    let picker_req_key = picker_req;
+    let mut picker_apply_theme = theme_state;
+    let picker_apply_store = store;
+    let picker_modal = ColorPickerModal {
+        on_apply: (move |(target, hex): (ColorPickerTarget, String)| {
+            match target {
+                ColorPickerTarget::Accent => {
+                    if picker_apply_store.is_locked(&SettingKey::AccentColor) {
+                        return;
+                    }
+                    if let Some(c) = hex_to_color(&hex) {
+                        let acc = Accent {
+                            name: Box::leak(format!("Custom {hex}").into_boxed_str()),
+                            hex: Box::leak(hex.clone().into_boxed_str()),
+                            color: c,
+                        };
+                        let new_t = picker_apply_theme.read().with_accent(acc);
+                        picker_apply_theme.set(new_t);
+                        set_theme(&new_t);
+                        picker_apply_store.set(SettingKey::AccentColor, hex.clone());
+                        let clean_hex = hex.trim_start_matches('#');
+                        let _ = std::process::Command::new("hyprctl")
+                            .args(["keyword", "general:col.active_border", &format!("0xff{clean_hex}")])
+                            .status();
+                    }
+                    let mut r = picker_req_key;
+                    r.set(None);
+                }
+                ColorPickerTarget::Wallpaper => {
+                    if !picker_apply_store.is_locked(&SettingKey::Wallpaper) {
+                        picker_apply_store.set(SettingKey::Wallpaper, hex);
+                    }
+                    let mut r = picker_req_key;
+                    r.set(None);
+                }
+            }
+        })
+        .into(),
+    };
+
+    rect()
+        .width(Size::fill())
+        .height(Size::fill())
+        .child(responsive_view(780.0, move |compact| {
         let sidebar_w = if compact { 180. } else { 232. };
         let content_pad = if compact { (18., 16., 32., 16.) } else { (30., 34., 64., 34.) };
         let top_pad = if compact { (0., 14.) } else { (0., 24.) };
@@ -290,6 +345,7 @@ fn app() -> impl IntoElement {
                 let mut current_route = current_route;
                 let mut search_query = search_query;
                 let mut focused_nav_idx = focused_nav_idx;
+                let mut picker_req = picker_req;
                 let search_focus = search_focus;
                 let search_a11y_id = search_a11y_id;
                 // Keyboard order follows visual sidebar order (About last).
@@ -305,6 +361,10 @@ fn app() -> impl IntoElement {
                             search_a11y_id.request_focus();
                         }
                         Key::Named(NamedKey::Escape) => {
+                            if picker_req.read().is_some() {
+                                picker_req.set(None);
+                                return;
+                            }
                             search_a11y_id.request_unfocus();
                             if !search_query.read().is_empty() {
                                 search_query.set(String::new());
@@ -519,6 +579,7 @@ fn app() -> impl IntoElement {
                                     Route::General => general_detail_page(store).into_element(),
                                     Route::Storage => pages::Storage.into_element(),
                                     Route::Battery => battery_detail_page(store).into_element(),
+                                    Route::Mouse => pages::Mouse.into_element(),
                                     Route::Accessibility => accessibility_detail_page(store).into_element(),
                                     Route::About => pages::About.into_element(),
                                     Route::DateTime => pages::DateTime.into_element(),
@@ -609,4 +670,6 @@ fn app() -> impl IntoElement {
                     )),
             )
     })
+    )
+    .child(picker_modal)
 }

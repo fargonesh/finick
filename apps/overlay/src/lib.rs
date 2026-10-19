@@ -86,21 +86,19 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
     let toggle_panel = {
         let panel_ctx = panel_ctx.clone();
         std::rc::Rc::new(move || {
+            if !crate::state::rate_limit_ok(&crate::state::LAST_PANEL_TOGGLE_MS, 350) {
+                return;
+            }
+            let is_open = panel_ctx.0.lock().map(|g| g.is_some()).unwrap_or(false);
+            if is_open {
+                // Animated close: the panel maps this to its local dismiss
+                // so the PanelShell exit runs instead of popping.
+                crate::state::request_panel_close();
+                return;
+            }
             let panel_ctx = panel_ctx.clone();
             let mon_name = mon_name_for_panel.clone();
             spawn(async move {
-                // If we already have a window open, close it immediately
-                let existing = panel_ctx.0.lock().map(|mut g| g.take()).unwrap_or(None);
-                if let Some(id) = existing {
-                    Platform::get().close_window(id);
-                    let _ = std::process::Command::new("hyprctl")
-                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-panel)$' }))"])
-                        .output();
-                    let _ = std::process::Command::new("hyprctl")
-                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(topbar-panel)$' }))"])
-                        .output();
-                    return;
-                }
                 if let Some(notif_ctx) = GlobalContexts::get().try_get_context::<crate::NotificationPanelWindowId>() {
                     if let Ok(mut g) = notif_ctx.0.lock() {
                         if let Some(nid) = g.take() {
@@ -114,22 +112,26 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                         }
                     }
                 }
+                if let Some(cw) = GlobalContexts::get().try_get_context::<crate::ClipboardWindowId>() {
+                    if let Ok(mut g) = cw.0.lock() {
+                        if let Some(id) = g.take() {
+                            Platform::get().close_window(id);
+                        }
+                    }
+                }
+                if let Some(sw) = GlobalContexts::get().try_get_context::<crate::ScreenshotWindowId>() {
+                    if let Ok(mut g) = sw.0.lock() {
+                        if let Some(id) = g.take() {
+                            Platform::get().close_window(id);
+                        }
+                    }
+                }
                 let _ = std::process::Command::new("hyprctl")
                     .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-clipboard)$' }))"])
                     .output();
                 let _ = std::process::Command::new("hyprctl")
                     .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-screenshot)$' }))"])
                     .output();
-                if let Some(cw) = GlobalContexts::get().try_get_context::<crate::ClipboardWindowId>() {
-                    if let Ok(mut g) = cw.0.lock() {
-                        *g = None;
-                    }
-                }
-                if let Some(sw) = GlobalContexts::get().try_get_context::<crate::ScreenshotWindowId>() {
-                    if let Ok(mut g) = sw.0.lock() {
-                        *g = None;
-                    }
-                }
 
                 let current_mon = get_monitor_state(&mon_name);
                 let panel_x = current_mon.x + current_mon.width as i32 - 460 - 12;
@@ -221,17 +223,17 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
     let toggle_notifications = {
         let notif_panel_ctx = notif_panel_ctx.clone();
         std::rc::Rc::new(move || {
+            if !crate::state::rate_limit_ok(&crate::state::LAST_NOTIF_TOGGLE_MS, 350) {
+                return;
+            }
+            let is_open = notif_panel_ctx.0.lock().map(|g| g.is_some()).unwrap_or(false);
+            if is_open {
+                crate::state::request_notifications_close();
+                return;
+            }
             let notif_panel_ctx = notif_panel_ctx.clone();
             let mon_name = mon_name_for_notif.clone();
             spawn(async move {
-                let existing = notif_panel_ctx.0.lock().map(|mut g| g.take()).unwrap_or(None);
-                if let Some(id) = existing {
-                    Platform::get().close_window(id);
-                    let _ = std::process::Command::new("hyprctl")
-                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-notifications)$' }))"])
-                        .output();
-                    return;
-                }
                 if let Some(panel_ctx) = GlobalContexts::get().try_get_context::<PanelWindowId>() {
                     if let Ok(mut g) = panel_ctx.0.lock() {
                         if let Some(pid) = g.take() {
@@ -242,22 +244,26 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                         .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-panel)$' }))"])
                         .output();
                 }
+                if let Some(cw) = GlobalContexts::get().try_get_context::<crate::ClipboardWindowId>() {
+                    if let Ok(mut g) = cw.0.lock() {
+                        if let Some(id) = g.take() {
+                            Platform::get().close_window(id);
+                        }
+                    }
+                }
+                if let Some(sw) = GlobalContexts::get().try_get_context::<crate::ScreenshotWindowId>() {
+                    if let Ok(mut g) = sw.0.lock() {
+                        if let Some(id) = g.take() {
+                            Platform::get().close_window(id);
+                        }
+                    }
+                }
                 let _ = std::process::Command::new("hyprctl")
                     .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-clipboard)$' }))"])
                     .output();
                 let _ = std::process::Command::new("hyprctl")
                     .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-screenshot)$' }))"])
                     .output();
-                if let Some(cw) = GlobalContexts::get().try_get_context::<crate::ClipboardWindowId>() {
-                    if let Ok(mut g) = cw.0.lock() {
-                        *g = None;
-                    }
-                }
-                if let Some(sw) = GlobalContexts::get().try_get_context::<crate::ScreenshotWindowId>() {
-                    if let Ok(mut g) = sw.0.lock() {
-                        *g = None;
-                    }
-                }
 
                 let current_mon = get_monitor_state(&mon_name);
                 let panel_x = current_mon.x + current_mon.width as i32 - 400 - 12;
@@ -575,11 +581,14 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                         .on_pointer_enter(move |_| h.set(true))
                         .on_pointer_leave(move |_| h2.set(false))
                         .on_press(|_| {
+                            if !crate::state::rate_limit_ok(&crate::state::LAST_CLIPBOARD_TOGGLE_MS, 350) {
+                                return;
+                            }
                             std::thread::spawn(|| {
                                 let _ = ipsea::modals::send_modal_request(ipsea::modals::ModalRequest::Clipboard);
                             });
                         })
-                        .child(icon_stroked(COPY, sz - 1., sw, if is_h { Color::WHITE } else { base }))
+                        .child(icon_stroked(COPY, sz, sw, if is_h { Color::WHITE } else { base }))
                 })
                 .child({
                     let mut h = ss_hover;
@@ -599,11 +608,14 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                         .on_pointer_enter(move |_| h.set(true))
                         .on_pointer_leave(move |_| h2.set(false))
                         .on_press(|_| {
+                            if !crate::state::rate_limit_ok(&crate::state::LAST_SCREENSHOT_TOGGLE_MS, 350) {
+                                return;
+                            }
                             std::thread::spawn(|| {
                                 let _ = ipsea::modals::send_modal_request(ipsea::modals::ModalRequest::Screenshot);
                             });
                         })
-                        .child(icon_stroked(CAMERA, sz - 1., sw, base))
+                        .child(icon_stroked(CAMERA, sz, sw, base))
                 })
                 .child({
                     let mut h = icon_hover;
@@ -652,7 +664,7 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                         })
                         .maybe(show_batt, |el| {
                             let base = tb_base;
-                            let sz = (tb_icon_size - 1.) as f32;
+                            let sz = tb_icon_size as f32;
                             let sw = tb_icon_stroke;
                             el.child(
                                 rect()
@@ -693,7 +705,7 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                                 let tn = toggle_notifications.clone();
                                 move |_| tn()
                             })
-                            .child(icon_stroked(NOTIFICATIONS, sz - 1., sw, if has_notif { t.accent } else { base }))
+                            .child(icon_stroked(NOTIFICATIONS, sz, sw, if has_notif { t.accent } else { base }))
                             .maybe(has_notif, |el| {
                                 el.child(
                                     rect()
@@ -943,7 +955,142 @@ pub fn clear_hyprland_reserved_space_for_monitor(name: &str) {
         .output();
 }
 
-/// Binds SUPER+L to the finick locker if no binding already uses it.
+/// Lua audit that keeps the fake layer-shell topbar exclusive.
+///
+/// The topbar is a normal window dressed up with `float`/`pin` plus
+/// `hl.monitor reserved top=36` and `hl.window_rule`s, all installed via
+/// `hyprctl eval`. Hyprland drops eval-installed reservations and rules on
+/// `reload`, monitor sleep/wake, and hotplug. When the reservation is gone,
+/// maximized windows fill y=0..H and paint underneath the transparent
+/// topbar window, so the bar looks like it "lost its privileges".
+/// This script re-asserts the reservation on every monitor and re-floats /
+/// re-pins / re-moves / re-sizes any overlay window that went astray.
+fn topbar_audit_lua() -> &'static str {
+    r#"
+        for _, mon in ipairs(hl.get_monitors()) do
+            hl.monitor({ output = mon.name, reserved = { top = 36 } })
+            for _, w in ipairs(hl.get_windows()) do
+                if w.title == 'overlay-' .. mon.name or w.title == 'topbar-' .. mon.name then
+                    local addr = 'address:' .. tostring(w.address)
+                    if not w.floating or not w.pinned or math.floor(w.size.x) ~= math.floor(mon.width) or math.floor(w.size.y) ~= 36 or math.floor(w.at.x) ~= math.floor(mon.x) or math.floor(w.at.y) ~= math.floor(mon.y) then
+                        hl.dispatch(hl.dsp.window.float({ window = addr }))
+                        hl.dispatch(hl.dsp.window.pin({ window = addr }))
+                        hl.dispatch(hl.dsp.window.resize({ window = addr, x = math.floor(mon.width), y = 36 }))
+                        hl.dispatch(hl.dsp.window.move({ window = addr, x = math.floor(mon.x), y = math.floor(mon.y) }))
+                    end
+                end
+            end
+        end
+    "#
+}
+
+/// Re-installs the ephemeral `hl.window_rule`s (base + per-monitor).
+///
+/// Rules installed via `hyprctl eval` vanish on Hyprland `reload`, and the
+/// overlay service can start before Hyprland accepts `eval` at all, so the
+/// one-shot install in `run()` is not enough. Socket events (notably
+/// `configreloaded`) force a re-apply; the 500ms ticker only re-applies at
+/// most every 10s to avoid spamming `hyprctl`.
+fn reapply_topbar_rules_if_due(last_applied: &mut Option<std::time::Instant>, force: bool) {
+    const RULE_REAPPLY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+    if !force {
+        if let Some(last) = last_applied {
+            if last.elapsed() < RULE_REAPPLY_INTERVAL {
+                return;
+            }
+        }
+    }
+    apply_hyprland_base_rules();
+    for mon in get_monitor_states() {
+        apply_hyprland_monitor_rules(&mon);
+    }
+    *last_applied = Some(std::time::Instant::now());
+}
+
+/// Parses `hyprctl clients -j` + `hyprctl monitors -j` output.
+///
+/// Returns `(hidden, known)`: monitors hosting a mapped, real-fullscreen
+/// window, and all known monitor names. Only mode >= 2 counts — 1 is
+/// maximize, which keeps gaps and bars, so the topbar must stay visible.
+/// `known` lets callers match only exact `overlay-{monitor}` topbar windows
+/// and never touch panels, modals, or other overlay windows.
+fn parse_fullscreen_monitors(
+    clients_json: &str,
+    monitors_json: &str,
+) -> (std::collections::HashSet<String>, std::collections::HashSet<String>) {
+    let mut hidden = std::collections::HashSet::new();
+    let mut known = std::collections::HashSet::new();
+    let mut id_to_name = std::collections::HashMap::new();
+    if let Ok(mons) = serde_json::from_str::<serde_json::Value>(monitors_json) {
+        if let Some(arr) = mons.as_array() {
+            for m in arr {
+                if let (Some(id), Some(name)) = (m["id"].as_i64(), m["name"].as_str()) {
+                    id_to_name.insert(id, name.to_string());
+                    known.insert(name.to_string());
+                }
+            }
+        }
+    }
+    if let Ok(clients) = serde_json::from_str::<serde_json::Value>(clients_json) {
+        if let Some(arr) = clients.as_array() {
+            for c in arr {
+                let mapped = c["mapped"].as_bool().unwrap_or(true);
+                let fs = c["fullscreen"].as_i64().unwrap_or(0);
+                let fsm = c["fullscreenMode"].as_i64().unwrap_or(0);
+                if mapped && (fs >= 2 || fsm >= 2) {
+                    if let Some(mon_id) = c["monitor"].as_i64() {
+                        if let Some(name) = id_to_name.get(&mon_id) {
+                            hidden.insert(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (hidden, known)
+}
+
+/// Monitors that currently host a real-fullscreen window (YouTube-style).
+/// Empty (never panics) when Hyprland is unreachable or output is unexpected.
+fn fullscreen_monitor_names() -> (std::collections::HashSet<String>, std::collections::HashSet<String>) {
+    let empty = (std::collections::HashSet::new(), std::collections::HashSet::new());
+    let clients_out = match std::process::Command::new("hyprctl").args(["clients", "-j"]).output() {
+        Ok(o) if o.status.success() => o,
+        _ => return empty,
+    };
+    let monitors_out = match std::process::Command::new("hyprctl").args(["monitors", "-j"]).output() {
+        Ok(o) if o.status.success() => o,
+        _ => return empty,
+    };
+    parse_fullscreen_monitors(&String::from_utf8_lossy(&clients_out.stdout), &String::from_utf8_lossy(&monitors_out.stdout))
+}
+
+/// Hides the Freya topbar window on monitors with a real-fullscreen window
+/// and re-shows the rest. A pinned floating window renders above fullscreen,
+/// so without this the bar sits on top of fullscreen video. No-op unless the
+/// hidden set changed since the last call.
+async fn sync_topbar_fullscreen_visibility(proxy: &LaunchProxy, last_hidden: &mut std::collections::HashSet<String>) {
+    let (hidden, known) = fullscreen_monitor_names();
+    if hidden == *last_hidden {
+        return;
+    }
+    *last_hidden = hidden.clone();
+    let _ = proxy
+        .post_callback(move |ctx| {
+            for app in ctx.windows().values() {
+                let title = app.window().title();
+                if let Some(name) = title.strip_prefix("overlay-").or_else(|| title.strip_prefix("topbar-")) {
+                    if known.contains(name) {
+                        app.window().set_visible(!hidden.contains(name));
+                    }
+                }
+            }
+        })
+        .await;
+}
+
+/// Binds SUPER+L to the finick session locker (`finick-lock`, Freya
+/// `locker` as fallback) if no binding already uses it.
 /// Retries until Hyprland is reachable (systemd services often start before
 /// `HYPRLAND_INSTANCE_SIGNATURE` is usable) so the bind is not silently lost.
 pub fn ensure_super_l_lock_binding() {
@@ -962,6 +1109,31 @@ pub fn ensure_super_l_lock_binding() {
         }
         eprintln!("[finick] giving up binding SUPER+L: hyprland unreachable");
     });
+}
+
+/// Binds SUPER+SPACE to the finick launcher if no binding already uses it.
+/// Same retry strategy as the locker bind so early startup never drops it.
+pub fn ensure_super_space_launcher_binding() {
+    std::thread::spawn(|| {
+        for _ in 0..60 {
+            match try_ensure_super_space_once() {
+                Ok(true) => return,
+                Ok(false) => {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+                Err(e) => {
+                    eprintln!("[finick] SUPER+SPACE bind attempt failed: {e}");
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            }
+        }
+        eprintln!("[finick] giving up binding SUPER+SPACE: hyprland unreachable");
+    });
+}
+
+pub fn ensure_finick_default_bindings() {
+    ensure_super_l_lock_binding();
+    ensure_super_space_launcher_binding();
 }
 
 fn try_ensure_super_l_once() -> Result<bool, String> {
@@ -985,11 +1157,44 @@ fn try_ensure_super_l_once() -> Result<bool, String> {
         return Ok(true);
     }
     let locker_cmd =
-        system::locker_binary().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "locker".to_string());
+        system::locker_binary().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "finick-lock".to_string());
     // Hyprland >=0.55 uses the Lua parser: `keyword bind` is rejected with
     // "keyword can't work with non-legacy parsers. Use eval."
     let escaped = locker_cmd.replace('\\', "\\\\").replace('"', "\\\"");
     let lua = format!(r#"hl.bind("SUPER + L", hl.dsp.exec_cmd("{escaped}"))"#);
+    let out = std::process::Command::new("hyprctl")
+        .args(["eval", &lua])
+        .output()
+        .map_err(|e| format!("hyprctl eval bind failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("hyprctl eval bind failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(true)
+}
+
+fn try_ensure_super_space_once() -> Result<bool, String> {
+    let out = std::process::Command::new("hyprctl")
+        .args(["binds", "-j"])
+        .output()
+        .map_err(|e| format!("hyprctl binds failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("hyprctl binds failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    let binds: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("hyprctl binds parse failed: {e}"))?;
+    let already_bound = binds.as_array().is_some_and(|binds| {
+        binds.iter().any(|b| {
+            let key = b["key"].as_str().unwrap_or_default();
+            let modmask = b["modmask"].as_i64().unwrap_or(0);
+            key.eq_ignore_ascii_case("space") && (modmask & 64 != 0)
+        })
+    });
+    if already_bound {
+        return Ok(true);
+    }
+    let launcher_cmd = system::launcher_exec_cmd();
+    let escaped = launcher_cmd.replace('\\', "\\\\").replace('"', "\\\"");
+    let lua = format!(r#"hl.bind("SUPER + SPACE", hl.dsp.exec_cmd("{escaped}"))"#);
     let out = std::process::Command::new("hyprctl")
         .args(["eval", &lua])
         .output()
@@ -1218,23 +1423,9 @@ async fn reconcile_monitors(
         }
     }
 
-    // Ensure all overlay windows in Hyprland match monitor bounds, are floated and pinned
-    let audit_lua = r#"
-        for _, w in ipairs(hl.get_windows()) do
-            for _, mon in ipairs(hl.get_monitors()) do
-                if w.title == 'overlay-' .. mon.name or w.title == 'topbar-' .. mon.name then
-                    local addr = 'address:' .. tostring(w.address)
-                    if not w.floating or not w.pinned or math.floor(w.size.x) ~= math.floor(mon.width) or math.floor(w.size.y) ~= 36 or math.floor(w.at.x) ~= math.floor(mon.x) or math.floor(w.at.y) ~= math.floor(mon.y) then
-                        hl.dispatch(hl.dsp.window.float({ window = addr }))
-                        hl.dispatch(hl.dsp.window.pin({ window = addr }))
-                        hl.dispatch(hl.dsp.window.resize({ window = addr, x = math.floor(mon.width), y = 36 }))
-                        hl.dispatch(hl.dsp.window.move({ window = addr, x = math.floor(mon.x), y = math.floor(mon.y) }))
-                    end
-                end
-            end
-        end
-    "#;
-    let _ = std::process::Command::new("hyprctl").args(["eval", audit_lua]).output();
+    // Ensure reservations survive reload/hotplug and overlay windows keep
+    // their float/pin/size/position privileges (see `topbar_audit_lua`).
+    let _ = std::process::Command::new("hyprctl").args(["eval", topbar_audit_lua()]).output();
 }
 
 async fn run_monitor_listener(proxy: LaunchProxy, initial_monitors: Vec<MonitorState>) {
@@ -1304,11 +1495,29 @@ async fn run_monitor_listener(proxy: LaunchProxy, initial_monitors: Vec<MonitorS
     }
 
     let mut ticker = tokio::time::interval(std::time::Duration::from_millis(500));
+    // Starts unset so the first reconcile installs the eval rules even if
+    // Hyprland was not reachable yet when `run()` applied them at startup.
+    let mut last_rules_applied: Option<std::time::Instant> = None;
+    // Monitors whose topbar is currently hidden for fullscreen. Starts empty
+    // so a pre-existing fullscreen (e.g. resumed session) hides the bar on
+    // the first periodic sync below.
+    let mut last_hidden: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Fullscreen checks cost two `hyprctl -j` queries, so the ticker only
+    // re-checks every 2s; `fullscreen>>` socket events sync immediately.
+    let mut last_fs_check = std::time::Instant::now() - std::time::Duration::from_secs(10);
 
     loop {
         tokio::select! {
             line = read_socket_event(&mut socket_reader) => {
-                if let Some(_event_line) = line {
+                if let Some(event_line) = line {
+                    // A reload wipes eval-installed rules/reservations, so
+                    // re-apply immediately instead of waiting for the throttle.
+                    let reloaded = event_line.contains("configreloaded");
+                    reapply_topbar_rules_if_due(&mut last_rules_applied, reloaded);
+                    if event_line.starts_with("fullscreen>>") {
+                        sync_topbar_fullscreen_visibility(&proxy, &mut last_hidden).await;
+                        last_fs_check = std::time::Instant::now();
+                    }
                     reconcile_monitors(&proxy, &mut known_monitors).await;
                 } else {
                     if let Some(path) = get_socket2_path() {
@@ -1327,6 +1536,11 @@ async fn run_monitor_listener(proxy: LaunchProxy, initial_monitors: Vec<MonitorS
                             socket_reader = Some(tokio::io::BufReader::new(stream).lines());
                         }
                     }
+                }
+                reapply_topbar_rules_if_due(&mut last_rules_applied, false);
+                if last_fs_check.elapsed() >= std::time::Duration::from_secs(2) {
+                    sync_topbar_fullscreen_visibility(&proxy, &mut last_hidden).await;
+                    last_fs_check = std::time::Instant::now();
                 }
                 reconcile_monitors(&proxy, &mut known_monitors).await;
             }
@@ -1381,7 +1595,7 @@ pub fn run() {
 
     apply_hyprland_base_rules();
     crate::clipboard_manager::start_clipboard_service();
-    ensure_super_l_lock_binding();
+    ensure_finick_default_bindings();
     let initial_monitors = get_monitor_states();
     for mon in &initial_monitors {
         apply_hyprland_monitor_rules(mon);
@@ -1455,24 +1669,18 @@ pub fn run() {
                         let h = handle.clone();
                         let tx2 = tx.clone();
                         h.spawn(async move {
-                            let was_open = proxy.post_callback(|ctx| {
-                                let mut was_open = false;
-                                if let Some(cw) = ctx.global_contexts.try_get_context::<crate::ClipboardWindowId>() {
-                                    if let Ok(mut g) = cw.0.lock() {
-                                        if let Some(id) = g.take() {
-                                            if ctx.windows().contains_key(&id) {
-                                                ctx.windows_mut().remove(&id);
-                                                was_open = true;
-                                            }
-                                        }
-                                    }
-                                }
-                                was_open
+                            let is_open = proxy.post_callback(|ctx| {
+                                ctx.global_contexts
+                                    .try_get_context::<crate::ClipboardWindowId>()
+                                    .and_then(|cw| cw.0.lock().ok().and_then(|g| *g))
+                                    .is_some_and(|id| ctx.windows().contains_key(&id))
                             }).await.unwrap_or(false);
-                            if was_open {
-                                let _ = std::process::Command::new("hyprctl")
-                                    .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-clipboard)$' }))"])
-                                    .output();
+                            if is_open {
+                                crate::state::request_clipboard_close();
+                                let _ = tx2.send(ipsea::modals::ModalResponse::Success { data: None });
+                                return;
+                            }
+                            if crate::state::clipboard_opened_recently() {
                                 let _ = tx2.send(ipsea::modals::ModalResponse::Success { data: None });
                                 return;
                             }
@@ -1521,6 +1729,7 @@ pub fn run() {
                                     if let Ok(mut g) = cw.0.lock() { *g = Some(wid); }
                                 }
                             }).await;
+                            crate::state::note_clipboard_opened();
                             let _ = tx2.send(ipsea::modals::ModalResponse::Success { data: None });
                             tokio::spawn(async move {
                                 for delay in [30, 80] {
@@ -1549,24 +1758,18 @@ pub fn run() {
                         let h = handle.clone();
                         let tx2 = tx.clone();
                         h.spawn(async move {
-                            let was_open = proxy.post_callback(|ctx| {
-                                let mut was_open = false;
-                                if let Some(sw) = ctx.global_contexts.try_get_context::<crate::ScreenshotWindowId>() {
-                                    if let Ok(mut g) = sw.0.lock() {
-                                        if let Some(id) = g.take() {
-                                            if ctx.windows().contains_key(&id) {
-                                                ctx.windows_mut().remove(&id);
-                                                was_open = true;
-                                            }
-                                        }
-                                    }
-                                }
-                                was_open
+                            let is_open = proxy.post_callback(|ctx| {
+                                ctx.global_contexts
+                                    .try_get_context::<crate::ScreenshotWindowId>()
+                                    .and_then(|sw| sw.0.lock().ok().and_then(|g| *g))
+                                    .is_some_and(|id| ctx.windows().contains_key(&id))
                             }).await.unwrap_or(false);
-                            if was_open {
-                                let _ = std::process::Command::new("hyprctl")
-                                    .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-screenshot)$' }))"])
-                                    .output();
+                            if is_open {
+                                crate::state::request_screenshot_close();
+                                let _ = tx2.send(ipsea::modals::ModalResponse::Success { data: None });
+                                return;
+                            }
+                            if crate::state::screenshot_opened_recently() {
                                 let _ = tx2.send(ipsea::modals::ModalResponse::Success { data: None });
                                 return;
                             }
@@ -1615,6 +1818,7 @@ pub fn run() {
                                     if let Ok(mut g) = sw.0.lock() { *g = Some(wid); }
                                 }
                             }).await;
+                            crate::state::note_screenshot_opened();
                             let _ = tx2.send(ipsea::modals::ModalResponse::Success { data: None });
                             tokio::spawn(async move {
                                 for delay in [30, 80] {
@@ -1779,6 +1983,14 @@ mod tests {
     }
 
     #[test]
+    fn test_rate_limit_ok_debounces() {
+        let last = std::sync::atomic::AtomicU64::new(0);
+        assert!(crate::state::rate_limit_ok(&last, 350));
+        assert!(!crate::state::rate_limit_ok(&last, u64::MAX));
+        assert!(crate::state::rate_limit_ok(&last, 0));
+    }
+
+    #[test]
     fn test_topbar_dead_socket_offline() {
         let res = get_setting("finick-topbar-dead-socket-xyz", SettingKey::WifiEnabled);
         assert!(res.is_err());
@@ -1845,6 +2057,53 @@ mod tests {
         let mon = MonitorState { name: "DP-2".to_string(), x: 0, y: 0, width: 1920.0, height: 1080.0 };
         let cfg = make_topbar_window_config(&mon);
         let _ = cfg;
+    }
+
+    #[test]
+    fn test_topbar_audit_lua_enforces_reserved_and_privileges() {
+        let lua = super::topbar_audit_lua();
+        // Reserved space must be re-asserted: without it maximized windows
+        // paint underneath the transparent topbar window.
+        assert!(lua.contains("reserved") && lua.contains("top = 36"), "audit must enforce reserved top=36");
+        // Lost float/pin/geometry must be restored.
+        for token in ["float", "pin", "resize", "move", "overlay-", "topbar-"] {
+            assert!(lua.contains(token), "audit must handle {token}");
+        }
+    }
+
+    #[test]
+    fn test_parse_fullscreen_monitors_real_fullscreen_hides() {
+        let monitors = r#"[{"id":0,"name":"DP-1"},{"id":1,"name":"HDMI-A-1"}]"#;
+        let clients = r#"[
+            {"address":"0x1","mapped":true,"monitor":1,"class":"firefox","title":"video","fullscreen":2,"fullscreenMode":2}
+        ]"#;
+        let (hidden, known) = super::parse_fullscreen_monitors(clients, monitors);
+        assert!(hidden.contains("HDMI-A-1"));
+        assert!(!hidden.contains("DP-1"));
+        assert!(known.contains("DP-1") && known.contains("HDMI-A-1"));
+    }
+
+    #[test]
+    fn test_parse_fullscreen_monitors_maximize_keeps_bar() {
+        let monitors = r#"[{"id":0,"name":"DP-1"}]"#;
+        let clients = r#"[
+            {"address":"0x1","mapped":true,"monitor":0,"class":"code","title":"ed","fullscreen":1,"fullscreenMode":1}
+        ]"#;
+        let (hidden, _) = super::parse_fullscreen_monitors(clients, monitors);
+        assert!(hidden.is_empty(), "maximize keeps gaps and bars, topbar must stay");
+    }
+
+    #[test]
+    fn test_parse_fullscreen_monitors_ignores_unmapped_and_unknown() {
+        let monitors = r#"[{"id":0,"name":"DP-1"}]"#;
+        let clients = r#"[
+            {"address":"0x1","mapped":false,"monitor":0,"fullscreen":2,"fullscreenMode":2},
+            {"address":"0x2","mapped":true,"monitor":99,"fullscreen":2,"fullscreenMode":2}
+        ]"#;
+        let (hidden, _) = super::parse_fullscreen_monitors(clients, monitors);
+        assert!(hidden.is_empty());
+        let (hidden_bad, known_bad) = super::parse_fullscreen_monitors("not json", "also not json");
+        assert!(hidden_bad.is_empty() && known_bad.is_empty());
     }
 
     #[tokio::test]

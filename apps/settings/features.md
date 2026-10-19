@@ -37,7 +37,7 @@ This document tracks the implementation status of all settings pages and feature
 ## Notifications, Focus & Sound
 - [ ] **Notifications**: Application alert styles, banners, badges, lock screen previews, and scheduled summaries.
 - [~] **Sound**:
-  - **Working**: Real PipeWire/WirePlumber integration via `wpctl`. Master output volume slider runs `wpctl set-volume @DEFAULT_AUDIO_SINK@ <N>%`; mute switch runs `wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle`; default audio sink name parsed live from `wpctl status`.
+  - **Working**: Real PipeWire/WirePlumber integration via `wpctl`. Master output volume slider runs `wpctl set-volume @DEFAULT_AUDIO_SINK@ <0.00-1.50>` (bare float; `N%` would step relatively); mute switch runs `wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle`; default audio sink name parsed live from `wpctl status`.
   - **Not Implemented**: Input levels / microphone gain slider, alert sounds, sound effect themes, and spatial audio configuration.
 - [ ] **Focus**: Do Not Disturb, Focus modes (Work, Personal, Sleep), focus filters, and schedule automations.
 - [ ] **Screen Time**: App usage limits, downtime, communication limits, and cross-device screen time analytics.

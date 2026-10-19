@@ -58,7 +58,7 @@ pub fn setting_row_locked(
         .main_align(Alignment::SpaceBetween)
         .maybe(has_top_border, |el| el.padding((9., 0., 9., 0.)))
         .maybe(!has_top_border, |el| el.padding((0., 0., 9., 0.)))
-        .child(rect().vertical().child(title_row).maybe_child(
+        .child(rect().vertical().width(Size::flex(1.)).child(title_row).maybe_child(
             meta_str.map(|m| rect().margin((1., 0., 0., 0.)).child(label().font_size(12.).color(t.text_dim).text(m))),
         ))
         .child(rect().opacity(if is_locked { 0.45 } else { 1.0 }).child(control))
@@ -84,6 +84,7 @@ pub fn dot_status_row(
         .child(
             rect()
                 .horizontal()
+                .width(Size::flex(1.))
                 .cross_align(Alignment::Center)
                 .spacing(10.)
                 .child(rect().width(Size::px(8.)).height(Size::px(8.)).corner_radius(RADIUS_PILL).background(dot_color))
@@ -122,6 +123,7 @@ pub fn setting_row(
         .child(
             rect()
                 .vertical()
+                .width(Size::flex(1.))
                 .child(label().font_size(13.).font_weight(FontWeight::MEDIUM).color(t.text).text(name_str))
                 .maybe_child(
                     meta_str

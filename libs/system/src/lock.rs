@@ -1,26 +1,41 @@
 use std::process::Command;
 
+/// Preferred lock binaries, in order: the ext-session-lock client first,
+/// then the Freya window-layer locker kept as the `finished`-event fallback.
+const LOCK_BINARIES: [&str; 2] = ["finick-lock", "locker"];
+
+fn join_if_file(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    for name in LOCK_BINARIES {
+        let cand = dir.join(name);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    None
+}
+
 pub fn locker_binary() -> Option<std::path::PathBuf> {
     if let Some(dir) = std::env::var_os("FINICK_LOCKER_BIN").map(std::path::PathBuf::from) {
         if dir.is_file() {
             return Some(dir);
         }
-        let cand = dir.join("locker");
-        if cand.is_file() {
-            return Some(cand);
+        if let Some(found) = join_if_file(&dir) {
+            return Some(found);
         }
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let cand = dir.join("locker");
-            if cand.is_file() {
-                return Some(cand);
+            if let Some(found) = join_if_file(dir) {
+                return Some(found);
             }
         }
     }
     for base in [
+        "/run/current-system/sw/bin/finick-lock",
         "/run/current-system/sw/bin/locker",
+        "/usr/local/bin/finick-lock",
         "/usr/local/bin/locker",
+        "/usr/bin/finick-lock",
         "/usr/bin/locker",
     ] {
         let cand = std::path::PathBuf::from(base);
@@ -29,14 +44,17 @@ pub fn locker_binary() -> Option<std::path::PathBuf> {
         }
     }
     if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
-        for cand in [home.join(".cargo/bin/locker"), home.join(".local/bin/locker")] {
-            if cand.is_file() {
-                return Some(cand);
+        for base in [".cargo/bin", ".local/bin"] {
+            if let Some(found) = join_if_file(&home.join(base)) {
+                return Some(found);
             }
         }
     }
-    std::env::var_os("PATH")
-        .and_then(|paths| std::env::split_paths(&paths).map(|d| d.join("locker")).find(|p| p.is_file()))
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .flat_map(|d| LOCK_BINARIES.iter().map(move |n| d.join(*n)))
+            .find(|p| p.is_file())
+    })
 }
 
 fn spawn_locker(locker: &Option<std::path::PathBuf>) {
@@ -53,9 +71,18 @@ fn spawn_locker(locker: &Option<std::path::PathBuf>) {
     } else {
         eprintln!("[finick] locker binary not found (set FINICK_LOCKER_BIN to override)");
     }
-    let _ = Command::new("hyprctl").args(["dispatch", "exec", "--", "locker"]).spawn();
-    if let Err(e) = Command::new("locker").spawn() {
-        eprintln!("[finick] fallback locker spawn failed: {e}");
+    // PATH fallbacks, session-lock client first.
+    for name in LOCK_BINARIES {
+        if Command::new("hyprctl").args(["dispatch", "exec", "--", name]).spawn().is_ok() {
+            return;
+        }
+    }
+    for name in LOCK_BINARIES {
+        if let Err(e) = Command::new(name).spawn() {
+            eprintln!("[finick] fallback {name} spawn failed: {e}");
+        } else {
+            return;
+        }
     }
 }
 
@@ -94,7 +121,7 @@ pub fn locker_process_alive() -> bool {
     if let Ok(old) = std::fs::read_to_string(locker_lockfile()) {
         if let Ok(pid) = old.trim().parse::<i32>() {
             let cmdline = std::fs::read_to_string(format!("/proc/{pid}/cmdline")).unwrap_or_default();
-            if cmdline.contains("locker") {
+            if LOCK_BINARIES.iter().any(|n| cmdline.contains(n)) {
                 return true;
             }
         }

@@ -159,7 +159,7 @@ fn categorize_shortcut(command: &str) -> (&'static str, String) {
         }
     } else if cmd.contains("grimblast") {
         ("Applications & Tools", "Screenshot Selection".to_string())
-    } else if cmd.contains("hyprlock") || cmd.contains("locker") {
+    } else if cmd.contains("hyprlock") || cmd.contains("finick-lock") || cmd.contains("locker") {
         ("Applications & Tools", "Lock Screen".to_string())
     } else if cmd.contains("ghostty") || cmd.contains("terminal") || cmd.contains("kitty") {
         ("Applications & Tools", "Open Terminal".to_string())
@@ -326,4 +326,134 @@ pub fn remove_shortcut(id: &str) -> Result<(), String> {
             .output();
     }
     Ok(())
+}
+
+const LAUNCHER_BINARIES: [&str; 1] = ["launcher"];
+
+fn join_launcher_if_file(dir: &std::path::Path) -> Option<PathBuf> {
+    for name in LAUNCHER_BINARIES {
+        let cand = dir.join(name);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    None
+}
+
+pub fn launcher_binary() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("FINICK_LAUNCHER_BIN").map(PathBuf::from) {
+        if dir.is_file() {
+            return Some(dir);
+        }
+        if let Some(found) = join_launcher_if_file(&dir) {
+            return Some(found);
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            if let Some(found) = join_launcher_if_file(dir) {
+                return Some(found);
+            }
+        }
+    }
+    for base in ["/run/current-system/sw/bin/launcher", "/usr/local/bin/launcher", "/usr/bin/launcher"] {
+        let cand = PathBuf::from(base);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        for base in [".cargo/bin", ".local/bin"] {
+            if let Some(found) = join_launcher_if_file(&home.join(base)) {
+                return Some(found);
+            }
+        }
+    }
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).flat_map(|d| LAUNCHER_BINARIES.iter().map(move |n| d.join(*n))).find(|p| p.is_file())
+    })
+}
+
+pub fn launcher_exec_cmd() -> String {
+    launcher_binary().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "launcher".to_string())
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FinickBindStatus {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub mods_display: &'static str,
+    pub key_display: &'static str,
+    pub exec_hint: String,
+    pub active: bool,
+}
+
+fn hypr_binds_value() -> Option<Vec<serde_json::Value>> {
+    let out = Command::new("hyprctl").args(["binds", "-j"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout).ok()
+}
+
+fn bind_active_in(binds: &[serde_json::Value], key: &str, need_super: bool) -> bool {
+    binds.iter().any(|b| {
+        let k = b["key"].as_str().unwrap_or_default();
+        let modmask = b["modmask"].as_i64().unwrap_or(0);
+        k.eq_ignore_ascii_case(key) && (!need_super || (modmask & 64 != 0))
+    })
+}
+
+pub fn finick_defaults_status() -> Vec<FinickBindStatus> {
+    let binds = hypr_binds_value().unwrap_or_default();
+    vec![
+        FinickBindStatus {
+            id: "finick_launcher",
+            name: "Open Launcher",
+            mods_display: "Super",
+            key_display: "Space",
+            exec_hint: launcher_exec_cmd(),
+            active: bind_active_in(&binds, "space", true),
+        },
+        FinickBindStatus {
+            id: "finick_lock",
+            name: "Lock Screen",
+            mods_display: "Super",
+            key_display: "L",
+            exec_hint: crate::lock::locker_binary()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "finick-lock".to_string()),
+            active: bind_active_in(&binds, "l", true),
+        },
+    ]
+}
+
+pub fn ensure_finick_bind_now(id: &str) -> Result<bool, String> {
+    let (combo, exec_cmd) = match id {
+        "finick_launcher" => ("SUPER + SPACE", launcher_exec_cmd()),
+        "finick_lock" => (
+            "SUPER + L",
+            crate::lock::locker_binary()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "finick-lock".to_string()),
+        ),
+        _ => return Err(format!("unknown finick bind: {id}")),
+    };
+    if let Some(binds) = hypr_binds_value() {
+        let (key, _) = match id {
+            "finick_launcher" => ("space", true),
+            _ => ("l", true),
+        };
+        if bind_active_in(&binds, key, true) {
+            return Ok(true);
+        }
+    }
+    let escaped = exec_cmd.replace('\\', "\\\\").replace('"', "\\\"");
+    let lua = format!(r#"hl.bind("{combo}", hl.dsp.exec_cmd("{escaped}"))"#);
+    let out =
+        Command::new("hyprctl").args(["eval", &lua]).output().map_err(|e| format!("hyprctl eval bind failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("hyprctl eval bind failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(true)
 }

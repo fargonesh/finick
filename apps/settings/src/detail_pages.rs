@@ -106,8 +106,6 @@ impl Component for AppearanceDetailPage {
                                 .child(
                                     rect()
                                         .opacity(if is_accent_locked { 0.45 } else { 1.0 })
-                                        .vertical()
-                                        .spacing(8.)
                                         .child({
                                             let mut th = theme_state;
                                             let store = store;
@@ -129,7 +127,7 @@ impl Component for AppearanceDetailPage {
                                                     }
                                                 },
                                             )
-                                        })
+                                        }),
 
                                 ),
                         )
@@ -838,6 +836,12 @@ impl Component for WifiDetailPage {
                                     pill_switch(*store.limit_tracking.read(), move |v| lt.set(v))
                                 })),
                         ),
+                    ]))
+                    .child(WiredEditor {})
+                    .child(VpnManager {})
+                    .child(grid2([
+                        rect().width(Size::flex(1.)).child(ProxyEditor {}),
+                        rect().width(Size::flex(1.)).child(MobileBroadband {}),
                     ])),
             )
             .child(modal_el)
@@ -845,6 +849,494 @@ impl Component for WifiDetailPage {
 }
 
 pub fn wifi_detail_page(store: SettingsStore) -> WifiDetailPage { WifiDetailPage { store } }
+
+#[derive(PartialEq)]
+pub struct WiredEditor;
+
+impl Component for WiredEditor {
+    fn render(&self) -> impl IntoElement {
+        let devices: State<Vec<system::WiredDeviceInfo>> = use_state(Vec::new);
+        let loading: State<bool> = use_state(|| true);
+        let op_error: State<Option<String>> = use_state(|| None);
+        use_hook(move || {
+            let mut dev = devices;
+            let mut ld = loading;
+            spawn(async move {
+                let list = tokio::task::spawn_blocking(system::list_wired_devices)
+                    .await
+                    .unwrap_or_default();
+                dev.set(list);
+                ld.set(false);
+            });
+        });
+
+        let list = devices.read().clone();
+        let is_loading = *loading.read();
+        let mut base = tile().child(tile_head(
+            None,
+            "Wired",
+            Some({
+                let mut ld = loading;
+                let mut dev = devices;
+                ghost_button("Refresh", move || {
+                    ld.set(true);
+                    spawn(async move {
+                        let list = tokio::task::spawn_blocking(system::list_wired_devices)
+                            .await
+                            .unwrap_or_default();
+                        dev.set(list);
+                        ld.set(false);
+                    });
+                })
+            }),
+        ));
+        if let Some(e) = op_error.read().clone() {
+            base = base.child(tile_sub(e));
+        }
+        if is_loading {
+            base = base.child(tile_sub("Reading wired devices…"));
+        } else if list.is_empty() {
+            base = base.child(empty_state(
+                WIRED,
+                "No wired hardware found",
+                "No Ethernet interfaces detected via NetworkManager.",
+            ));
+        } else {
+            for d in list.iter().take(6) {
+                let iface = d.interface.clone();
+                let meta = if d.ip.is_empty() {
+                    d.state.clone()
+                } else {
+                    format!("{} · {}", d.state, d.ip)
+                };
+                let dhcp_on = d.dhcp;
+                let err = op_error;
+                base = base.child(setting_row(
+                    iface.clone(),
+                    Some(meta),
+                    false,
+                    pill_switch(dhcp_on, move |v| {
+                        let iface_c = iface.clone();
+                        let mut err = err;
+                        spawn(async move {
+                            let res = tokio::task::spawn_blocking(move || {
+                                system::apply_wired_dhcp(&iface_c, v)
+                            })
+                            .await
+                            .unwrap_or(Err("Task failed".to_string()));
+                            match res {
+                                Ok(()) => err.set(None),
+                                Err(e) => err.set(Some(e)),
+                            }
+                        });
+                    }),
+                ));
+            }
+            base = base.child(tile_sub("Toggle per interface: automatic (DHCP) or manual addressing."));
+        }
+        base
+    }
+}
+
+#[derive(PartialEq)]
+pub struct VpnManager;
+
+impl Component for VpnManager {
+    fn render(&self) -> impl IntoElement {
+        let vpns: State<Vec<system::VpnInfo>> = use_state(Vec::new);
+        let loading: State<bool> = use_state(|| true);
+        let op_error: State<Option<String>> = use_state(|| None);
+        let show_add: State<bool> = use_state(|| false);
+        let vpn_name: State<String> = use_state(String::new);
+        let vpn_gateway: State<String> = use_state(String::new);
+        let vpn_type: State<String> = use_state(|| "vpn".to_string());
+        let creating: State<bool> = use_state(|| false);
+        use_hook(move || {
+            let mut vs = vpns;
+            let mut ld = loading;
+            spawn(async move {
+                let list = tokio::task::spawn_blocking(system::list_vpn_connections)
+                    .await
+                    .unwrap_or_default();
+                vs.set(list);
+                ld.set(false);
+            });
+        });
+        let refresh_vpns = move |mut vs: State<Vec<system::VpnInfo>>, mut ld: State<bool>| {
+            ld.set(true);
+            spawn(async move {
+                let list = tokio::task::spawn_blocking(system::list_vpn_connections)
+                    .await
+                    .unwrap_or_default();
+                vs.set(list);
+                ld.set(false);
+            });
+        };
+
+        let list = vpns.read().clone();
+        let is_loading = *loading.read();
+        let t = use_app_theme();
+        let mut base = tile().child(tile_head(
+            None,
+            "VPN",
+            Some({
+                let mut sa = show_add;
+                ghost_button("Add VPN…", move || sa.set(true))
+            }),
+        ));
+        if let Some(e) = op_error.read().clone() {
+            base = base.child(tile_sub(e));
+        }
+        if is_loading {
+            base = base.child(tile_sub("Reading VPN connections…"));
+        } else if list.is_empty() {
+            base = base.child(empty_state(
+                LOCK,
+                "No VPN connections",
+                "Add one with the button above. WireGuard and OpenVPN via NetworkManager.",
+            ));
+        } else {
+            for v in list.iter().take(8) {
+                let name = v.name.clone();
+                let is_on = v.active;
+                let meta = if v.vpn_type.is_empty() {
+                    "VPN".to_string()
+                } else {
+                    v.vpn_type.clone()
+                };
+                let name_c = name.clone();
+                let err = op_error;
+                let vs = vpns;
+                let ld = loading;
+                base = base.child(setting_row(
+                    name,
+                    Some(meta),
+                    false,
+                    rect()
+                        .horizontal()
+                        .cross_align(Alignment::Center)
+                        .spacing(8.)
+                        .child(status_chip(if is_on { "Up" } else { "Down" }, is_on, None))
+                        .child(secondary_button(if is_on { "Down" } else { "Up" }, move || {
+                            let n = name_c.clone();
+                            let mut vs = vs;
+                            let mut ld = ld;
+                            let mut err = err;
+                            spawn(async move {
+                                let res = tokio::task::spawn_blocking(move || {
+                                    system::apply_vpn_state(&n, !is_on)
+                                })
+                                .await
+                                .unwrap_or(Err("Task failed".to_string()));
+                                match res {
+                                    Ok(()) => {
+                                        err.set(None);
+                                        let list = tokio::task::spawn_blocking(
+                                            system::list_vpn_connections,
+                                        )
+                                        .await
+                                        .unwrap_or_default();
+                                        vs.set(list);
+                                        ld.set(false);
+                                    }
+                                    Err(e) => err.set(Some(e)),
+                                }
+                            });
+                        })),
+                ));
+            }
+        }
+
+        let modal = if *show_add.read() {
+            let is_creating = *creating.read();
+            let err_opt = op_error.read().clone();
+            rect()
+                .position(Position::new_global().top(0.).left(0.))
+                .width(Size::fill())
+                .height(Size::fill())
+                .background(Color::from_argb(140, 0, 0, 0))
+                .center()
+                .content(Content::Flex)
+                .child(
+                    dialog_card(380.)
+                        .spacing(14.)
+                        .child(
+                            rect()
+                                .horizontal()
+                                .main_align(Alignment::SpaceBetween)
+                                .cross_align(Alignment::Center)
+                                .width(Size::fill())
+                                .content(Content::Flex)
+                                .child(
+                                    label()
+                                        .font_size(16.)
+                                        .font_weight(FontWeight::BOLD)
+                                        .color(t.text)
+                                        .text("Add VPN"),
+                                )
+                                .child({
+                                    let mut sa = show_add;
+                                    small_close_button(move || sa.set(false))
+                                }),
+                        )
+                        .child(rect().vertical().spacing(6.).child(field_label("Connection name")).child(
+                            Input::new(vpn_name).width(Size::fill()).placeholder("e.g. Office VPN"),
+                        ))
+                        .child(rect().vertical().spacing(6.).child(field_label("Gateway")).child(
+                            Input::new(vpn_gateway).width(Size::fill()).placeholder("vpn.example.com"),
+                        ))
+                        .child(field_label("Type"))
+                        .child(dropdown_select(
+                            vpn_type.read().clone(),
+                            vec![
+                                ui::DropdownOption { label: "OpenVPN".to_string(), value: "vpn".to_string() },
+                                ui::DropdownOption { label: "WireGuard".to_string(), value: "wireguard".to_string() },
+                            ],
+                            EventHandler::new({
+                                let mut vt = vpn_type;
+                                move |v: String| vt.set(v)
+                            }),
+                        ))
+                        .maybe_child(err_opt.map(|e| {
+                            rect()
+                                .padding((6., 10.))
+                                .corner_radius(6.)
+                                .background(Color::from_argb(35, 235, 80, 80))
+                                .child(label().font_size(12.).color(Color::from_rgb(235, 80, 80)).text(e))
+                        }))
+                        .child(
+                            rect()
+                                .horizontal()
+                                .spacing(10.)
+                                .main_align(Alignment::End)
+                                .content(Content::Flex)
+                                .child(secondary_button("Cancel", {
+                                    let mut sa = show_add;
+                                    move || sa.set(false)
+                                }))
+                                .child(if is_creating {
+                                    secondary_button("Adding…", || {}).into_element()
+                                } else {
+                                    primary_button("Add", {
+                                        let mut sa = show_add;
+                                        let mut cr = creating;
+                                        let mut err = op_error;
+                                        let vs = vpns;
+                                        let ld = loading;
+                                        let name_st = vpn_name;
+                                        let gw_st = vpn_gateway;
+                                        let type_st = vpn_type;
+                                        move || {
+                                            let n = name_st.read().trim().to_string();
+                                            let g = gw_st.read().trim().to_string();
+                                            let ty = type_st.read().clone();
+                                            cr.set(true);
+                                            err.set(None);
+                                            spawn(async move {
+                                                let res = tokio::task::spawn_blocking(move || {
+                                                    system::create_vpn_connection(&n, &ty, &g)
+                                                })
+                                                .await
+                                                .unwrap_or(Err("Task failed".to_string()));
+                                                cr.set(false);
+                                                match res {
+                                                    Ok(()) => {
+                                                        sa.set(false);
+                                                        refresh_vpns(vs, ld);
+                                                    }
+                                                    Err(e) => err.set(Some(e)),
+                                                }
+                                            });
+                                        }
+                                    })
+                                    .into_element()
+                                }),
+                        ),
+                )
+                .into_element()
+        } else {
+            rect().into_element()
+        };
+        rect().width(Size::fill()).vertical().child(base).child(modal)
+    }
+}
+
+#[derive(PartialEq)]
+pub struct ProxyEditor;
+
+impl Component for ProxyEditor {
+    fn render(&self) -> impl IntoElement {
+        let proxy: State<system::ProxySettings> = use_state(system::ProxySettings::default);
+        let loaded: State<bool> = use_state(|| false);
+        let op_error: State<Option<String>> = use_state(|| None);
+        let op_ok: State<bool> = use_state(|| false);
+        let http_host: State<String> = use_state(String::new);
+        let http_port: State<String> = use_state(String::new);
+        use_hook(move || {
+            let mut px = proxy;
+            let mut ld = loaded;
+            let mut hh = http_host;
+            let mut hp = http_port;
+            spawn(async move {
+                let p = tokio::task::spawn_blocking(system::load_proxy_settings)
+                    .await
+                    .unwrap_or_default();
+                if !p.http_host.is_empty() {
+                    hh.set_if_modified(p.http_host.clone());
+                }
+                if p.http_port != 0 {
+                    hp.set_if_modified(p.http_port.to_string());
+                }
+                px.set(p);
+                ld.set(true);
+            });
+        });
+
+        let cur = proxy.read().clone();
+        let mode_label = match cur.mode.as_str() {
+            "auto" => "Automatic".to_string(),
+            "manual" => "Manual".to_string(),
+            _ => "None".to_string(),
+        };
+        let mut base = tile().child(tile_head(None, "Proxy", None::<String>));
+        if !*loaded.read() {
+            base = base.child(tile_sub("Reading proxy settings…"));
+        } else {
+            let is_manual = cur.mode == "manual";
+            base = base
+                .child(field_label("Mode"))
+                .child(dropdown_select(
+                    mode_label,
+                    vec![
+                        ui::DropdownOption { label: "None".to_string(), value: "none".to_string() },
+                        ui::DropdownOption { label: "Automatic".to_string(), value: "auto".to_string() },
+                        ui::DropdownOption { label: "Manual".to_string(), value: "manual".to_string() },
+                    ],
+                    EventHandler::new({
+                        let mut px = proxy;
+                        let mut ok = op_ok;
+                        let err = op_error;
+                        move |v: String| {
+                            let mut p = px.read().clone();
+                            p.mode = v.clone();
+                            px.set(p.clone());
+                            ok.set(false);
+                            let mut err = err;
+                            let mut ok = ok;
+                            spawn(async move {
+                                let res = tokio::task::spawn_blocking(move || {
+                                    system::apply_proxy_settings(&p)
+                                })
+                                .await
+                                .unwrap_or(Err("Task failed".to_string()));
+                                match res {
+                                    Ok(()) => {
+                                        err.set(None);
+                                        ok.set(true);
+                                    }
+                                    Err(e) => {
+                                        ok.set(false);
+                                        err.set(Some(e));
+                                    }
+                                }
+                            });
+                        }
+                    }),
+                ))
+                .maybe(is_manual, |el| {
+                    el.child(field_label("HTTP host"))
+                        .child(Input::new(http_host).width(Size::fill()).placeholder("proxy.example.com"))
+                        .child(field_label("HTTP port"))
+                        .child(Input::new(http_port).width(Size::fill()).placeholder("8080"))
+                        .child(
+                            rect().margin((8., 0., 0., 0.)).child(primary_button("Apply proxy", {
+                                let mut px = proxy;
+                                let hh = http_host;
+                                let hp = http_port;
+                                let mut err = op_error;
+                                let mut ok = op_ok;
+                                move || {
+                                    let mut p = px.read().clone();
+                                    p.http_host = hh.read().trim().to_string();
+                                    p.http_port = hp.read().trim().parse::<u16>().unwrap_or(0);
+                                    p.https_host = p.http_host.clone();
+                                    p.https_port = p.http_port;
+                                    px.set(p.clone());
+                                    ok.set(false);
+                                    spawn(async move {
+                                        let res = tokio::task::spawn_blocking(move || {
+                                            system::apply_proxy_settings(&p)
+                                        })
+                                        .await
+                                        .unwrap_or(Err("Task failed".to_string()));
+                                        match res {
+                                            Ok(()) => {
+                                                err.set(None);
+                                                ok.set(true);
+                                            }
+                                            Err(e) => {
+                                                ok.set(false);
+                                                err.set(Some(e));
+                                            }
+                                        }
+                                    });
+                                }
+                            }))
+                        )
+                });
+            if let Some(e) = op_error.read().clone() {
+                base = base.child(tile_sub(e));
+            } else if *op_ok.read() {
+                base = base.child(tile_sub("Proxy settings applied."));
+            }
+        }
+        base
+    }
+}
+
+#[derive(PartialEq)]
+pub struct MobileBroadband;
+
+impl Component for MobileBroadband {
+    fn render(&self) -> impl IntoElement {
+        let devices: State<Vec<system::MobileDeviceInfo>> = use_state(Vec::new);
+        let loading: State<bool> = use_state(|| true);
+        use_hook(move || {
+            let mut dev = devices;
+            let mut ld = loading;
+            spawn(async move {
+                let list = tokio::task::spawn_blocking(system::list_mobile_devices)
+                    .await
+                    .unwrap_or_default();
+                dev.set(list);
+                ld.set(false);
+            });
+        });
+
+        let list = devices.read().clone();
+        let mut base = tile().child(tile_head(None, "Mobile broadband", None::<String>));
+        if *loading.read() {
+            base = base.child(tile_sub("Reading mobile devices…"));
+        } else if list.is_empty() {
+            base = base.child(empty_state(
+                GENERAL,
+                "No mobile broadband hardware",
+                "No GSM, CDMA or WWAN interfaces detected via NetworkManager.",
+            ));
+        } else {
+            for d in list.iter().take(6) {
+                let connected = d.state.starts_with("connected");
+                base = base.child(setting_row(
+                    d.interface.clone(),
+                    Some(if d.operator.is_empty() { d.state.clone() } else { format!("{} · {}", d.state, d.operator) }),
+                    false,
+                    status_chip(if connected { "Up" } else { "Down" }, connected, None),
+                ));
+            }
+        }
+        base
+    }
+}
 
 #[derive(PartialEq)]
 pub struct BluetoothDetailPage {
@@ -1271,6 +1763,34 @@ impl Component for DisplayDetailPage {
             use_state(|| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
         let ct_last_apply_ms: State<std::sync::Arc<std::sync::atomic::AtomicU64>> =
             use_state(|| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
+        let scale_overrides: State<std::collections::HashMap<String, f64>> = use_state(Default::default);
+        let scale_gen: State<std::sync::Arc<std::sync::atomic::AtomicU64>> =
+            use_state(|| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
+        let scale_err: State<Option<String>> = use_state(|| None);
+        let primary_display: State<String> = use_state(String::new);
+        let primary_err: State<Option<String>> = use_state(|| None);
+        let sched_from: State<String> = use_state(|| "22:00".to_string());
+        let sched_to: State<String> = use_state(|| "06:00".to_string());
+        let sched_err: State<Option<String>> = use_state(|| None);
+        use_hook(move || {
+            let mut prim = primary_display;
+            let mut sf = sched_from;
+            let mut st = sched_to;
+            let mut nm = store.night_shift_mode;
+            spawn(async move {
+                let p = tokio::task::spawn_blocking(system::load_primary_display)
+                    .await
+                    .unwrap_or(None)
+                    .unwrap_or_default();
+                prim.set_if_modified(p);
+                let sched = tokio::task::spawn_blocking(system::load_night_schedule)
+                    .await
+                    .unwrap_or_default();
+                sf.set_if_modified(sched.from);
+                st.set_if_modified(sched.to);
+                nm.set_if_modified(sched.mode);
+            });
+        });
         let t = use_app_theme();
 
         let br_lock = store.lock_label(&SettingKey::DisplayBrightness);
@@ -1743,6 +2263,190 @@ impl Component for DisplayDetailPage {
                         .child(field_label("Orientation / Rotation")),
                 )
                 .child(rect().opacity(if is_res_locked { 0.45 } else { 1.0 }).child(rotation_control))
+                .child(
+                    rect()
+                        .margin((16., 0., 4., 0.))
+                        .horizontal()
+                        .cross_align(Alignment::Center)
+                        .spacing(8.)
+                        .child(field_label("Mode · resolution @ refresh rate")),
+                )
+                .child(rect().opacity(if is_res_locked { 0.45 } else { 1.0 }).child({
+                    let mut ds = displays;
+                    let mut status_state = order_status;
+                    let mut sel = selected_name;
+                    let sel_n = sel_name.clone();
+                    let locked = is_res_locked;
+                    let modes = selected.available_modes.clone();
+                    let current_mode = if sel_res.is_empty() {
+                        "preferred".to_string()
+                    } else if sel_hz.trim().is_empty() {
+                        sel_res.clone()
+                    } else {
+                        format!("{}@{}", sel_res, sel_hz.replace(' ', ""))
+                    };
+                    let mode_opts: Vec<ui::DropdownOption> = if modes.is_empty() {
+                        vec![ui::DropdownOption { label: current_mode.clone(), value: current_mode.clone() }]
+                    } else {
+                        modes
+                            .iter()
+                            .map(|m| {
+                                let pretty = m.replace('@', " @ ");
+                                ui::DropdownOption { label: pretty, value: m.clone() }
+                            })
+                            .collect()
+                    };
+                    let display_label = mode_opts
+                        .iter()
+                        .find(|o| o.value == current_mode)
+                        .map(|o| o.label.clone())
+                        .unwrap_or(current_mode.clone());
+                    dropdown_select(
+                        display_label,
+                        mode_opts,
+                        EventHandler::new(move |chosen: String| {
+                            if locked {
+                                return;
+                            }
+                            status_state.set(None);
+                            let name = sel_n.clone();
+                            sel.set(Some(name.clone()));
+                            freya::prelude::spawn(async move {
+                                let res = tokio::task::spawn_blocking(move || {
+                                    system::HyprlandBackend.set_display_mode(&name, &chosen)
+                                })
+                                .await;
+                                match res {
+                                    Ok(Ok(())) => {
+                                        let updated = tokio::task::spawn_blocking(move || {
+                                            system::HyprlandBackend.get_displays()
+                                        })
+                                        .await
+                                        .unwrap_or_default();
+                                        if !updated.is_empty() {
+                                            ds.set(updated);
+                                        }
+                                        status_state.set(Some(Ok("Mode applied".to_string())));
+                                    }
+                                    Ok(Err(e)) => status_state.set(Some(Err(e))),
+                                    Err(e) => status_state.set(Some(Err(format!("join error: {e}")))),
+                                }
+                            });
+                        }),
+                    )
+                }))
+                .child(
+                    rect()
+                        .margin((16., 0., 4., 0.))
+                        .horizontal()
+                        .cross_align(Alignment::Center)
+                        .spacing(8.)
+                        .child(field_label({
+                            let cur_scale: f64 = scale_overrides
+                                .read()
+                                .get(&sel_name)
+                                .copied()
+                                .or_else(|| selected.scale.parse::<f64>().ok())
+                                .unwrap_or(1.0);
+                            format!("Display scale · {cur_scale:.2}×")
+                        })),
+                )
+                .child(rect().opacity(if is_res_locked { 0.45 } else { 1.0 }).child({
+                    let cur_scale: f64 = scale_overrides
+                        .read()
+                        .get(&sel_name)
+                        .copied()
+                        .or_else(|| selected.scale.parse::<f64>().ok())
+                        .unwrap_or(1.0);
+                    let slider_v = ((cur_scale.clamp(0.5, 3.0) - 0.5) / 2.5 * 100.0).clamp(0.0, 100.0);
+                    let mut overrides = scale_overrides;
+                    let gen_arc = scale_gen.read().clone();
+                    let mut ds = displays;
+                    let mut status_state = order_status;
+                    let mut se = scale_err;
+                    let sel_n = sel_name.clone();
+                    slider_row(None, slider_v, move |v| {
+                        if is_res_locked {
+                            return;
+                        }
+                        let next = ((v / 100.0) * 2.5 + 0.5).clamp(0.5, 3.0);
+                        let snapped = (next * 4.0).round() / 4.0;
+                        let mut map = overrides.read().clone();
+                        map.insert(sel_n.clone(), snapped);
+                        overrides.set(map);
+                        let ctr = gen_arc.clone();
+                        let seq = ctr.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                        status_state.set(None);
+                        se.set(None);
+                        let name = sel_n.clone();
+                        spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                            if ctr.load(std::sync::atomic::Ordering::SeqCst) != seq {
+                                return;
+                            }
+                            let res = tokio::task::spawn_blocking(move || {
+                                system::apply_display_scale(&name, snapped)
+                            })
+                            .await
+                            .unwrap_or(Err("Task failed".to_string()));
+                            match res {
+                                Ok(()) => {
+                                    let updated = tokio::task::spawn_blocking(move || {
+                                        system::HyprlandBackend.get_displays()
+                                    })
+                                    .await
+                                    .unwrap_or_default();
+                                    if !updated.is_empty() {
+                                        ds.set(updated);
+                                    }
+                                    status_state.set(Some(Ok(format!("Scale {snapped:.2}× applied"))));
+                                }
+                                Err(e) => {
+                                    se.set(Some(e.clone()));
+                                    status_state.set(Some(Err(e)));
+                                }
+                            }
+                        });
+                    })
+                }))
+                .maybe_child(scale_err.read().clone().map(tile_sub))
+                .child(setting_row(
+                    "Primary display",
+                    Some(if primary_display.read().as_str() == sel_name {
+                        "This is the primary display".to_string()
+                    } else if primary_display.read().is_empty() {
+                        "No primary set — pick one".to_string()
+                    } else {
+                        format!("Primary is {}", primary_display.read().clone())
+                    }),
+                    true,
+                    if primary_display.read().as_str() == sel_name {
+                        status_chip("Primary", true, None).into_element()
+                    } else {
+                        secondary_button("Make primary", {
+                            let mut prim = primary_display;
+                            let mut perr = primary_err;
+                            let name = sel_name.clone();
+                            move || {
+                                prim.set(name.clone());
+                                perr.set(None);
+                                let n = name.clone();
+                                spawn(async move {
+                                    let res = tokio::task::spawn_blocking(move || {
+                                        system::apply_primary_display(&n)
+                                    })
+                                    .await
+                                    .unwrap_or(Err("Task failed".to_string()));
+                                    if let Err(e) = res {
+                                        perr.set(Some(e));
+                                    }
+                                });
+                            }
+                        })
+                        .into_element()
+                    },
+                ))
+                .maybe_child(primary_err.read().clone().map(tile_sub))
                 .into_element()
         } else {
             rect().into_element()
@@ -1816,6 +2520,9 @@ impl Component for DisplayDetailPage {
                             ))
                             .child({
                                 let store = store;
+                                let sf = sched_from;
+                                let st = sched_to;
+                                let se = sched_err;
                                 segmented_control(
                                     vec![("Off", 0), ("Sunset to sunrise", 1), ("Custom", 2)],
                                     *store.night_shift_mode.read(),
@@ -1823,9 +2530,144 @@ impl Component for DisplayDetailPage {
                                         let mut nm = store.night_shift_mode;
                                         nm.set(idx);
                                         store.set(SettingKey::Custom("display.night_shift_mode".to_string()), idx as i64);
+                                        let from = sf.read().clone();
+                                        let to = st.read().clone();
+                                        let mut se = se;
+                                        spawn(async move {
+                                            let res = tokio::task::spawn_blocking(move || {
+                                                system::apply_night_schedule(&system::NightSchedule {
+                                                    mode: idx,
+                                                    from,
+                                                    to,
+                                                })
+                                            })
+                                            .await
+                                            .unwrap_or(Err("Task failed".to_string()));
+                                            match res {
+                                                Ok(()) => se.set(None),
+                                                Err(e) => se.set(Some(e)),
+                                            }
+                                        });
                                     },
                                 )
                             })
+                            .maybe_child((*store.night_shift_mode.read() == 2).then(|| {
+                                fn hour_options() -> Vec<ui::DropdownOption> {
+                                    (0..24)
+                                        .map(|h| {
+                                            let label = format!("{h:02}:00");
+                                            ui::DropdownOption { label: label.clone(), value: label }
+                                        })
+                                        .collect()
+                                }
+                                let from_val = sched_from.read().clone();
+                                let to_val = sched_to.read().clone();
+                                rect()
+                                    .width(Size::fill())
+                                    .vertical()
+                                    .spacing(8.)
+                                    .margin((12., 0., 0., 0.))
+                                    .child(
+                                        rect()
+                                            .width(Size::fill())
+                                            .horizontal()
+                                            .spacing(GAP)
+                                            .content(Content::Flex)
+                                            .child(
+                                                rect()
+                                                    .width(Size::flex(1.))
+                                                    .vertical()
+                                                    .spacing(4.)
+                                                    .child(field_label("From"))
+                                                    .child(dropdown_select(
+                                                        from_val.clone(),
+                                                        hour_options(),
+                                                        EventHandler::new({
+                                                            let mode = store.night_shift_mode;
+                                                            let mut sf = sched_from;
+                                                            let to = to_val.clone();
+                                                            let se = sched_err;
+                                                            move |v: String| {
+                                                                sf.set(v.clone());
+                                                                let cur_mode = *mode.read();
+                                                                let to_c = to.clone();
+                                                                let mut se = se;
+                                                                spawn(async move {
+                                                                    let res = tokio::task::spawn_blocking(
+                                                                        move || {
+                                                                            system::apply_night_schedule(
+                                                                                &system::NightSchedule {
+                                                                                    mode: cur_mode,
+                                                                                    from: v,
+                                                                                    to: to_c,
+                                                                                },
+                                                                            )
+                                                                        },
+                                                                    )
+                                                                    .await
+                                                                    .unwrap_or(Err(
+                                                                        "Task failed".to_string(),
+                                                                    ));
+                                                                    match res {
+                                                                        Ok(()) => se.set(None),
+                                                                        Err(e) => se.set(Some(e)),
+                                                                    }
+                                                                });
+                                                            }
+                                                        }),
+                                                    )),
+                                            )
+                                            .child(
+                                                rect()
+                                                    .width(Size::flex(1.))
+                                                    .vertical()
+                                                    .spacing(4.)
+                                                    .child(field_label("To"))
+                                                    .child(dropdown_select(
+                                                        to_val.clone(),
+                                                        hour_options(),
+                                                        EventHandler::new({
+                                                            let mode = store.night_shift_mode;
+                                                            let from = from_val.clone();
+                                                            let mut st = sched_to;
+                                                            let se = sched_err;
+                                                            move |v: String| {
+                                                                st.set(v.clone());
+                                                                let cur_mode = *mode.read();
+                                                                let from_c = from.clone();
+                                                                let mut se = se;
+                                                                spawn(async move {
+                                                                    let res = tokio::task::spawn_blocking(
+                                                                        move || {
+                                                                            system::apply_night_schedule(
+                                                                                &system::NightSchedule {
+                                                                                    mode: cur_mode,
+                                                                                    from: from_c,
+                                                                                    to: v,
+                                                                                },
+                                                                            )
+                                                                        },
+                                                                    )
+                                                                    .await
+                                                                    .unwrap_or(Err(
+                                                                        "Task failed".to_string(),
+                                                                    ));
+                                                                    match res {
+                                                                        Ok(()) => se.set(None),
+                                                                        Err(e) => se.set(Some(e)),
+                                                                    }
+                                                                });
+                                                            }
+                                                        }),
+                                                    )),
+                                            ),
+                                    )
+                                    .child(tile_sub(format!(
+                                        "Night light follows the schedule {from_val} to {to_val} when Custom is on."
+                                    )))
+                                    .into_element()
+                            }))
+                            .maybe_child(sched_err.read().clone().map(tile_sub))
                             .child(
                                 rect()
                                     .margin((14., 0., 0., 0.))
@@ -1896,23 +2738,103 @@ struct InputLevelMeter;
 
 impl Component for InputLevelMeter {
     fn render(&self) -> impl IntoElement {
-        let level: State<f64> = use_state(|| 35.0);
+        let level: State<f64> = use_state(|| 0.0);
         use_hook({
             let mut lvl = level;
             move || {
                 spawn(async move {
                     loop {
-                        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-                        let t_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
-                        let n = ((t_ms / 150) % 100) as f64;
-                        let wave = ((t_ms as f64 * 0.003).sin() * 20.0).abs();
-                        let v = 15.0 + wave + (n * 0.3).clamp(0.0, 45.0);
-                        lvl.set(v.clamp(5.0, 95.0));
+                        let peak = tokio::task::spawn_blocking(system::query_input_peak)
+                            .await
+                            .unwrap_or(0.0);
+                        lvl.set_if_modified(peak.clamp(0.0, 100.0));
+                        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                     }
                 });
             }
         });
         input_level_pill(*level.read())
+    }
+}
+
+#[derive(PartialEq)]
+struct PerAppVolumes;
+
+impl Component for PerAppVolumes {
+    fn render(&self) -> impl IntoElement {
+        let streams: State<Vec<system::AudioStream>> = use_state(Vec::new);
+        let loading: State<bool> = use_state(|| true);
+        let op_error: State<Option<String>> = use_state(|| None);
+        use_hook({
+            let mut st = streams;
+            let mut ld = loading;
+            move || {
+                spawn(async move {
+                    loop {
+                        let list = tokio::task::spawn_blocking(system::list_sink_inputs)
+                            .await
+                            .unwrap_or_default();
+                        st.set_if_modified(list);
+                        ld.set(false);
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    }
+                });
+            }
+        });
+
+        let list = streams.read().clone();
+        let is_loading = *loading.read();
+        let err_opt = op_error.read().clone();
+        let mut base = tile().child(tile_head(None, "Per-app volume", None::<String>));
+        if let Some(e) = err_opt {
+            base = base.child(tile_sub(e));
+        }
+        if is_loading && list.is_empty() {
+            base = base.child(tile_sub("Reading audio streams…"));
+        } else if list.is_empty() {
+            base = base.child(empty_state(
+                SOUND,
+                "No app audio playing",
+                "Start playback in an app and its volume control appears here.",
+            ));
+        } else {
+            for s in list.iter().take(8) {
+                let sid = s.id;
+                let vol = s.volume.clamp(0, 150) as f64;
+                let name = if s.app_name.is_empty() {
+                    format!("Stream {sid}")
+                } else {
+                    s.app_name.clone()
+                };
+                let meta = if s.muted {
+                    Some("Muted".to_string())
+                } else {
+                    Some(format!("{vol:.0}%"))
+                };
+                let err = op_error;
+                base = base.child(setting_row(name, meta, false, {
+                    slider_row(None, vol, move |v| {
+                        let pct = v.clamp(0.0, 150.0).round() as i32;
+                        let mut err = err;
+                        spawn(async move {
+                            let res = tokio::task::spawn_blocking(move || {
+                                system::set_sink_input_volume(sid, pct)
+                            })
+                            .await
+                            .unwrap_or(Err("Task failed".to_string()));
+                            match res {
+                                Ok(()) => err.set(None),
+                                Err(e) => err.set(Some(e)),
+                            }
+                        });
+                    })
+                }));
+            }
+            base = base.child(tile_sub(
+                "Volumes apply live via pactl. Refresh happens every 2 seconds.",
+            ));
+        }
+        base
     }
 }
 
@@ -1927,6 +2849,34 @@ impl Component for SoundDetailPage {
         let sinks = use_hook(|| system::HyprlandBackend.get_audio_sinks());
         let sources = use_hook(|| system::HyprlandBackend.get_audio_sources());
         let alert_sound = use_state(|| "Tri-tone".to_string());
+        let mic_gain: State<f64> = use_state(|| 70.0);
+        let mic_loaded: State<bool> = use_state(|| false);
+        let mic_gen: State<std::sync::Arc<std::sync::atomic::AtomicU64>> =
+            use_state(|| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
+        let mic_err: State<Option<String>> = use_state(|| None);
+        let balance: State<f64> = use_state(|| 0.0);
+        let balance_loaded: State<bool> = use_state(|| false);
+        let balance_gen: State<std::sync::Arc<std::sync::atomic::AtomicU64>> =
+            use_state(|| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
+        let balance_err: State<Option<String>> = use_state(|| None);
+        use_hook(move || {
+            let mut g = mic_gain;
+            let mut l = mic_loaded;
+            let mut b = balance;
+            let mut bl = balance_loaded;
+            spawn(async move {
+                let v = tokio::task::spawn_blocking(system::query_source_volume)
+                    .await
+                    .unwrap_or(70);
+                g.set_if_modified(v.clamp(0, 150) as f64);
+                l.set_if_modified(true);
+                let bal = tokio::task::spawn_blocking(system::query_sink_balance)
+                    .await
+                    .unwrap_or(0.0);
+                b.set_if_modified(bal);
+                bl.set_if_modified(true);
+            });
+        });
         let vol_lock = store.lock_label(&SettingKey::AudioVolume);
         let is_vol_locked = vol_lock.is_some();
         let mute_lock = store.lock_label(&SettingKey::AudioMuted);
@@ -1980,6 +2930,48 @@ impl Component for SoundDetailPage {
                                 },
                             )
                         }))
+                        .child(
+                            rect()
+                                .margin((12., 0., 0., 0.))
+                                .child(field_label(format!(
+                                    "Balance · {}",
+                                    if *balance.read() < -0.02 {
+                                        "Left"
+                                    } else if *balance.read() > 0.02 {
+                                        "Right"
+                                    } else {
+                                        "Centre"
+                                    }
+                                ))),
+                        )
+                        .child({
+                            let mut b = balance;
+                            let gen_arc = balance_gen.read().clone();
+                            let mut be = balance_err;
+                            let slider_v = ((*balance.read() + 1.0) * 50.0).clamp(0.0, 100.0);
+                            slider_row(None, slider_v, move |v| {
+                                let bal = ((v / 50.0) - 1.0).clamp(-1.0, 1.0);
+                                b.set(bal);
+                                let ctr = gen_arc.clone();
+                                let seq = ctr.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                                spawn(async move {
+                                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                                    if ctr.load(std::sync::atomic::Ordering::SeqCst) != seq {
+                                        return;
+                                    }
+                                    let res = tokio::task::spawn_blocking(move || {
+                                        system::apply_sink_balance(bal)
+                                    })
+                                    .await
+                                    .unwrap_or(Err("Task failed".to_string()));
+                                    match res {
+                                        Ok(()) => be.set(None),
+                                        Err(e) => be.set(Some(e)),
+                                    }
+                                });
+                            })
+                        })
+                        .maybe_child(balance_err.read().clone().map(tile_sub))
                         .child({
                             let opts: Vec<ui::DropdownOption> = if sinks.is_empty() {
                                 vec![ui::DropdownOption { label: sink_name.clone(), value: sink_name.clone() }]
@@ -2012,6 +3004,34 @@ impl Component for SoundDetailPage {
                         tile()
                             .child(tile_head(None, "Input", None::<String>))
                             .child(rect().margin((6., 0., 10., 0.)).child(InputLevelMeter))
+                            .child(field_label("Microphone gain"))
+                            .child({
+                                let mut g = mic_gain;
+                                let gen_arc = mic_gen.read().clone();
+                                let mut ge = mic_err;
+                                slider_row(None, *mic_gain.read(), move |v| {
+                                    let pct = v.clamp(0.0, 150.0).round() as i32;
+                                    g.set(pct as f64);
+                                    let ctr = gen_arc.clone();
+                                    let seq = ctr.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                                    spawn(async move {
+                                        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                                        if ctr.load(std::sync::atomic::Ordering::SeqCst) != seq {
+                                            return;
+                                        }
+                                        let res = tokio::task::spawn_blocking(move || {
+                                            system::apply_source_volume(pct)
+                                        })
+                                        .await
+                                        .unwrap_or(Err("Task failed".to_string()));
+                                        match res {
+                                            Ok(()) => ge.set(None),
+                                            Err(e) => ge.set(Some(e)),
+                                        }
+                                    });
+                                })
+                            })
+                            .maybe_child(mic_err.read().clone().map(tile_sub))
                             .child({
                                 let opts2: Vec<ui::DropdownOption> = if sources.is_empty() {
                                     vec![ui::DropdownOption { label: source_name.clone(), value: source_name.clone() }]
@@ -2084,7 +3104,8 @@ impl Component for SoundDetailPage {
                                 },
                             ))),
                     ),
-                ])),
+                ]))
+                .child(PerAppVolumes),
         )
     }
 }
@@ -2666,7 +3687,47 @@ impl Component for BatteryDetailPage {
         let has_battery = power.capacity != "Unknown" && power.status != "Unknown";
         let cap = power.capacity.clone();
         let status = power.status.clone();
-        let health = power.health_percent.map(|h| format!("{h}%")).unwrap_or_else(|| "91%".to_string());
+        let health = power.health_percent.map(|h| format!("{h}%")).unwrap_or_else(|| "Unknown".to_string());
+        let idle: State<system::IdleSettings> = use_state(system::IdleSettings::default);
+        let lid_action: State<String> = use_state(|| system::load_lid_action());
+        let charge_limit: State<Option<u8>> = use_state(|| None);
+        let charge_loaded: State<bool> = use_state(|| false);
+        let power_err: State<Option<String>> = use_state(|| None);
+        let limit_err: State<Option<String>> = use_state(|| None);
+        use_hook(move || {
+            let mut id = idle;
+            let mut lid = lid_action;
+            let mut cl = charge_limit;
+            let mut cl_loaded = charge_loaded;
+            spawn(async move {
+                let s = tokio::task::spawn_blocking(system::load_idle_settings)
+                    .await
+                    .unwrap_or_default();
+                id.set_if_modified(s);
+                let lid_val =
+                    tokio::task::spawn_blocking(system::load_lid_action).await.unwrap_or_else(|_| "suspend".to_string());
+                lid.set_if_modified(lid_val);
+                let real_profile =
+                    tokio::task::spawn_blocking(system::query_power_profile).await.unwrap_or_default();
+                if !real_profile.trim().is_empty() {
+                    // Mirror daemon truth into local store without IPC write.
+                    store.apply_to_local_state(
+                        &SettingKey::PowerProfile,
+                        &match real_profile.as_str() {
+                            "performance" => "performance",
+                            "power-saver" => "power-saver",
+                            _ => "balanced",
+                        }
+                        .into(),
+                    );
+                }
+                let limit = tokio::task::spawn_blocking(system::query_charge_limit)
+                    .await
+                    .unwrap_or(None);
+                cl.set_if_modified(limit);
+                cl_loaded.set_if_modified(true);
+            });
+        });
 
         if !has_battery {
             return rect()
@@ -2778,6 +3839,7 @@ impl Component for BatteryDetailPage {
                                 .child(battery_ring(*store.battery_pct.read(), true))
                                 .child(rect().opacity(if is_pwr_locked { 0.45 } else { 1.0 }).child({
                                     let store = store;
+                                    let mut pe = power_err;
                                     let cur_mode = match *store.battery_mode.read() {
                                         "low" | "power-saver" => "low",
                                         "high" | "performance" => "high",
@@ -2793,15 +3855,25 @@ impl Component for BatteryDetailPage {
                                                     "low" => "power-saver",
                                                     "high" => "performance",
                                                     _ => "balanced",
-                                                };
-                                                let _ = std::process::Command::new("powerprofilesctl")
-                                                    .args(["set", profile])
-                                                    .output();
+                                                }
+                                                .to_string();
+                                                pe.set(None);
+                                                spawn(async move {
+                                                    let res = tokio::task::spawn_blocking(move || {
+                                                        system::apply_power_profile(&profile)
+                                                    })
+                                                    .await
+                                                    .unwrap_or(Err("Task failed".to_string()));
+                                                    if let Err(e) = res {
+                                                        pe.set(Some(e));
+                                                    }
+                                                });
                                             }
                                         },
                                     )
                                 })),
-                        ),
+                        )
+                        .maybe_child(power_err.read().clone().map(tile_sub)),
                 )
                 .child(grid2([
                     rect().width(Size::flex(1.)).child(
@@ -2823,7 +3895,210 @@ impl Component for BatteryDetailPage {
                                 pill_switch(*store.opt_charging.read(), move |v| oc.set(v))
                             })),
                     ),
-                ])),
+                ]))
+                .child({
+                    fn delay_label(secs: u32) -> String {
+                        match secs {
+                            0 => "Never".to_string(),
+                            60 => "1 minute".to_string(),
+                            s if s < 60 => format!("{s} seconds"),
+                            s if s % 60 == 0 => format!("{} minutes", s / 60),
+                            s => format!("{s} seconds"),
+                        }
+                    }
+                    fn delay_options() -> Vec<ui::DropdownOption> {
+                        [0u32, 60, 120, 300, 600, 900, 1800]
+                            .into_iter()
+                            .map(|s| ui::DropdownOption {
+                                label: delay_label(s),
+                                value: s.to_string(),
+                            })
+                            .collect()
+                    }
+                    let idle_val = idle.read().clone();
+                    let lid_val = lid_action.read().clone();
+                    let mut idle_st = idle;
+                    let mut lid_st = lid_action;
+                    let pe = power_err;
+                    tile()
+                        .child(tile_head(None, "Energy saving", None::<String>))
+                        .child(field_label("Dim display after"))
+                        .child(dropdown_select(
+                            delay_label(idle_val.dim_seconds),
+                            delay_options(),
+                            EventHandler::new(move |v: String| {
+                                if let Ok(secs) = v.parse::<u32>() {
+                                    let mut cur = idle_st.read().clone();
+                                    cur.dim_seconds = secs;
+                                    idle_st.set(cur);
+                                    let mut pe = pe;
+                                    spawn(async move {
+                                        let res = tokio::task::spawn_blocking(move || {
+                                            system::apply_idle_delay("dim", secs)
+                                        })
+                                        .await
+                                        .unwrap_or(Err("Task failed".to_string()));
+                                        match res {
+                                            Ok(()) => pe.set(None),
+                                            Err(e) => pe.set(Some(e)),
+                                        }
+                                    });
+                                }
+                            }),
+                        ))
+                        .child(field_label("Turn off display after"))
+                        .child({
+                            let cur_blank = idle_val.blank_seconds;
+                            let mut idle_st = idle;
+                            let pe = power_err;
+                            dropdown_select(
+                                delay_label(cur_blank),
+                                delay_options(),
+                                EventHandler::new(move |v: String| {
+                                    if let Ok(secs) = v.parse::<u32>() {
+                                        let mut cur = idle_st.read().clone();
+                                        cur.blank_seconds = secs;
+                                        idle_st.set(cur);
+                                        let mut pe = pe;
+                                        spawn(async move {
+                                            let res = tokio::task::spawn_blocking(move || {
+                                                system::apply_idle_delay("blank", secs)
+                                            })
+                                            .await
+                                            .unwrap_or(Err("Task failed".to_string()));
+                                            match res {
+                                                Ok(()) => pe.set(None),
+                                                Err(e) => pe.set(Some(e)),
+                                            }
+                                        });
+                                    }
+                                }),
+                            )
+                        })
+                        .child(field_label("Suspend after"))
+                        .child({
+                            let cur_susp = idle_val.suspend_seconds;
+                            let mut idle_st = idle;
+                            let pe = power_err;
+                            dropdown_select(
+                                delay_label(cur_susp),
+                                delay_options(),
+                                EventHandler::new(move |v: String| {
+                                    if let Ok(secs) = v.parse::<u32>() {
+                                        let mut cur = idle_st.read().clone();
+                                        cur.suspend_seconds = secs;
+                                        idle_st.set(cur);
+                                        let mut pe = pe;
+                                        spawn(async move {
+                                            let res = tokio::task::spawn_blocking(move || {
+                                                system::apply_idle_delay("suspend", secs)
+                                            })
+                                            .await
+                                            .unwrap_or(Err("Task failed".to_string()));
+                                            match res {
+                                                Ok(()) => pe.set(None),
+                                                Err(e) => pe.set(Some(e)),
+                                            }
+                                        });
+                                    }
+                                }),
+                            )
+                        })
+                        .child(field_label("When the lid closes"))
+                        .child({
+                            let opts = vec![
+                                ("Suspend", "suspend"),
+                                ("Hibernate", "hibernate"),
+                                ("Lock screen", "lock"),
+                                ("Power off", "poweroff"),
+                                ("Do nothing", "ignore"),
+                            ];
+                            let cur_label = opts
+                                .iter()
+                                .find(|(_, v)| *v == lid_val)
+                                .map(|(l, _)| l.to_string())
+                                .unwrap_or_else(|| lid_val.clone());
+                            let dropdown_opts: Vec<ui::DropdownOption> = opts
+                                .into_iter()
+                                .map(|(l, v)| ui::DropdownOption {
+                                    label: l.to_string(),
+                                    value: v.to_string(),
+                                })
+                                .collect();
+                            dropdown_select(
+                                cur_label,
+                                dropdown_opts,
+                                EventHandler::new(move |v: String| {
+                                    lid_st.set(v.clone());
+                                    let mut pe = pe;
+                                    spawn(async move {
+                                        let res = tokio::task::spawn_blocking(move || {
+                                            system::apply_lid_action(&v)
+                                        })
+                                        .await
+                                        .unwrap_or(Err("Task failed".to_string()));
+                                        match res {
+                                            Ok(()) => pe.set(None),
+                                            Err(e) => pe.set(Some(e)),
+                                        }
+                                    });
+                                }),
+                            )
+                        })
+                        .child(tile_sub(
+                            "Lid action is saved for Finick. Enforcing it system-wide needs an admin logind.conf change.",
+                        ))
+                })
+                .child({
+                    let limit = charge_limit.read().clone();
+                    let loaded = *charge_loaded.read();
+                    let mut base = tile().child(tile_head(None, "Charge limit", None::<String>));
+                    match (loaded, limit) {
+                        (false, _) => {
+                            base = base.child(tile_sub("Reading charge limit…"));
+                        }
+                        (true, None) => {
+                            base = base.child(empty_state(
+                                BATTERY,
+                                "Charge limit unavailable",
+                                "This hardware does not expose a charge threshold via sysfs.",
+                            ));
+                        }
+                        (true, Some(pct)) => {
+                            let mut cl = charge_limit;
+                            let le = limit_err;
+                            base = base
+                                .child(field_label(format!("Stop charging at {pct}%")))
+                                .child(slider_row(None, pct as f64, move |v| {
+                                    let next = v.clamp(40.0, 100.0).round() as u8;
+                                    cl.set(Some(next));
+                                    let mut le = le;
+                                    spawn(async move {
+                                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                                        if cl.read().clone() != Some(next) {
+                                            return;
+                                        }
+                                        let res = tokio::task::spawn_blocking(move || {
+                                            system::apply_charge_limit(next)
+                                        })
+                                        .await
+                                        .unwrap_or(Err("Task failed".to_string()));
+                                        match res {
+                                            Ok(()) => le.set(None),
+                                            Err(e) => le.set(Some(e)),
+                                        }
+                                    });
+                                }))
+                                .child(tile_sub(
+                                    "Sticks after reboot where the firmware keeps the threshold.",
+                                ));
+                            if let Some(e) = limit_err.read().clone() {
+                                base = base.child(tile_sub(e));
+                            }
+                        }
+                    }
+                    base
+                }),
         )
     }
 }

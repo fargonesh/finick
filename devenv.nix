@@ -105,6 +105,7 @@
     files.exec = "cargo run -p files -- \"$@\"";
     launcher.exec = "cargo run -p overlay --bin launcher -- \"$@\"";
     locker.exec = "cargo run -p locker -- \"$@\"";
+    finick-lock.exec = ''if [ -d services/session-lock ]; then code=0; cargo run -p session-lock -- "$@" || code=$?; if [ "$code" -eq 42 ]; then cargo run -p locker -- "$@"; else exit "$code"; fi; else cargo run -p locker -- "$@"; fi'';
     overlay.exec = "cargo run -p overlay -- \"$@\"";
     store.exec = "cargo run -p store -- \"$@\"";
     finickd.exec = "cargo run -p finickd -- \"$@\"";

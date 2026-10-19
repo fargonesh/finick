@@ -131,7 +131,7 @@ impl Component for OverviewPage {
                                     let new_t = theme.read().with_accent(acc);
                                     theme.set(new_t);
                                     set_theme(&new_t);
-                                    store.set(SettingKey::AccentColor, acc.name.to_string());
+                                    store.set(SettingKey::AccentColor, acc.hex.to_string());
                                     let clean_hex = acc.hex.trim_start_matches('#');
                                     let _ = std::process::Command::new("hyprctl")
                                         .args(["keyword", "general:col.active_border", &format!("0xff{clean_hex}")])

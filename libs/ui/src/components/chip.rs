@@ -22,7 +22,7 @@ pub fn status_chip(text: impl Into<String>, is_on: bool, on_press: Option<EventH
                 .a11y_focusable(true)
                 .on_press(move |_| cb.call(()))
         })
-        .child(label().font_size(11.).font_weight(FontWeight::MEDIUM).color(text_color).text(text_str))
+        .child(label().font_size(11.).font_weight(FontWeight::MEDIUM).color(text_color).max_lines(Some(1)).text(text_str))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -364,6 +364,15 @@ fn locker_app() -> Element {
         .into_element()
 }
 
+// P3 status: this Freya window-layer locker is bypassable by design (any
+// shell access defeats it) and stays only as the session-lock
+// `finished`-event fallback. Super+L and all trigger paths resolve to
+// `finick-lock` first (see system::locker_binary); both `finick-lock`
+// entry points exec this binary when the session client exits 42
+// (denied/superseded/manager missing). The per-window audit loop below is
+// retained on purpose: HM ships no locker window rules, so the fallback
+// self-pins while shown. Emergency exit stays as a safety valve so a
+// broken auth stack can never brick the session.
 #[derive(Clone)]
 struct LockerMonitor {
     name: String,

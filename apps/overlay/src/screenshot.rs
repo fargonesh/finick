@@ -211,7 +211,10 @@ impl Component for ScreenshotUtility {
                                 .horizontal()
                                 .main_align(Alignment::End)
                                 .content(Content::Flex)
-                                .child(ghost_button("Close", || Platform::get().close_window(Platform::window_id()))),
+                                .child(ghost_button("Close", {
+                                    let mut d = dismiss;
+                                    move || d.set(true)
+                                })),
                         ),
                 ),
             )
@@ -224,6 +227,10 @@ pub fn screenshot_app() -> Element {
     let dismiss = use_state(|| false);
     use_hook(move || {
         crate::state::spawn_panel_focus_watcher(&["overlay-screenshot", "overlay", "topbar"], "screenshot", dismiss);
+    });
+    use_hook(move || {
+        crate::state::clear_close_flag(&crate::state::CLOSE_SCREENSHOT);
+        crate::state::spawn_close_flag_watcher(&crate::state::CLOSE_SCREENSHOT, dismiss);
     });
     ScreenshotUtility { dismiss }.into_element()
 }

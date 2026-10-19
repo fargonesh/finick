@@ -78,6 +78,20 @@ pub fn danger_button(text: impl Into<String>, mut on_press: impl FnMut() + 'stat
         .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(text_str))
 }
 
+pub fn danger_button_full(text: impl Into<String>, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
+    let t = use_app_theme();
+    let text_str = text.into();
+    rect()
+        .width(Size::fill())
+        .padding((10., 16.))
+        .corner_radius(8.)
+        .background(t.accent_red)
+        .center()
+        .cursor(CursorIcon::Pointer)
+        .on_press(move |_| on_press())
+        .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(text_str))
+}
+
 /// An icon button with subtle rounded background.
 pub fn icon_button(icon: impl Into<String>, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
     let t = use_app_theme();

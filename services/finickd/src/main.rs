@@ -25,6 +25,7 @@ pub const ALL_SETTING_KEYS: &[SettingKey] = &[
     SettingKey::WifiEnabled,
     SettingKey::WifiNetwork,
     SettingKey::BluetoothEnabled,
+    SettingKey::AirplaneMode,
     SettingKey::AudioVolume,
     SettingKey::AudioMuted,
     SettingKey::AudioDefaultSink,
@@ -42,6 +43,7 @@ pub const ALL_SETTING_KEYS: &[SettingKey] = &[
     SettingKey::NtpEnabled,
     SettingKey::PowerProfile,
     SettingKey::SystemAutoUpdates,
+    SettingKey::FirewallEnabled,
     SettingKey::CameraAccess,
     SettingKey::MicAccess,
     SettingKey::LocationAccess,
@@ -173,6 +175,7 @@ pub fn get_setting_entry(payload: &SettingsPayload, backend: &HyprlandBackend, k
         SettingKey::WifiEnabled => Some(SettingValue::Bool(*payload.connectivity.wifi.enabled)),
         SettingKey::WifiNetwork => Some(SettingValue::Bool(*payload.connectivity.wifi.ask_to_join)),
         SettingKey::BluetoothEnabled => Some(SettingValue::Bool(*payload.connectivity.bluetooth.enabled)),
+        SettingKey::AirplaneMode => Some(SettingValue::Bool(backend.get_airplane_mode())),
         SettingKey::AudioVolume => {
             let info = backend.get_audio_info();
             Some(SettingValue::Int(info.volume.round() as i64))
@@ -200,8 +203,15 @@ pub fn get_setting_entry(payload: &SettingsPayload, backend: &HyprlandBackend, k
         SettingKey::Timezone => Some(SettingValue::String((*payload.system.date_time.timezone).clone())),
         SettingKey::TimeFormat24h => Some(SettingValue::Bool(*payload.system.date_time.time_format_24h)),
         SettingKey::NtpEnabled => Some(SettingValue::Bool(*payload.system.date_time.ntp_sync)),
-        SettingKey::PowerProfile => Some(SettingValue::String((*payload.system.battery.mode).clone())),
+        SettingKey::PowerProfile => Some(SettingValue::String(backend.get_power_profile())),
         SettingKey::SystemAutoUpdates => Some(SettingValue::Bool(*payload.system.general.auto_updates)),
+        SettingKey::FirewallEnabled => {
+            if let Some(v) = payload.custom.get("system.privacy.firewall_enabled").and_then(|v| v.as_bool()) {
+                Some(SettingValue::Bool(v))
+            } else {
+                Some(SettingValue::Bool(backend.get_firewall().active))
+            }
+        }
         SettingKey::CameraAccess => Some(SettingValue::Bool(*payload.system.privacy.camera_enabled)),
         SettingKey::MicAccess => Some(SettingValue::Bool(*payload.system.privacy.microphone_enabled)),
         SettingKey::LocationAccess => Some(SettingValue::Bool(*payload.system.privacy.location_enabled)),
@@ -363,6 +373,13 @@ pub fn set_setting_value(payload: &mut SettingsPayload, key: &SettingKey, value:
             payload.connectivity.bluetooth.enabled.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
             Ok(())
         }
+        SettingKey::AirplaneMode => {
+            let b = value
+                .as_bool()
+                .ok_or_else(|| DenialReason::InvalidValue("Expected bool for airplane mode".to_string()))?;
+            payload.custom.insert("connectivity.airplane_mode".to_string(), serde_json::Value::Bool(b));
+            Ok(())
+        }
         SettingKey::AudioVolume => {
             let i = value.as_i64().ok_or_else(|| DenialReason::InvalidValue("Expected int for audio volume".to_string()))?;
             payload
@@ -465,6 +482,12 @@ pub fn set_setting_value(payload: &mut SettingsPayload, key: &SettingKey, value:
                 .as_bool()
                 .ok_or_else(|| DenialReason::InvalidValue("Expected bool for location access".to_string()))?;
             payload.system.privacy.location_enabled.set(b).map_err(|e| DenialReason::Other(e.to_string()))?;
+            Ok(())
+        }
+        SettingKey::FirewallEnabled => {
+            let b =
+                value.as_bool().ok_or_else(|| DenialReason::InvalidValue("Expected bool for firewall".to_string()))?;
+            payload.custom.insert("system.privacy.firewall_enabled".to_string(), serde_json::Value::Bool(b));
             Ok(())
         }
         SettingKey::AccessibilityReduceMotion => {
@@ -588,6 +611,18 @@ pub fn apply_setting(backend: &HyprlandBackend, payload: &SettingsPayload, key: 
             backend.set_bluetooth_status(enabled);
             Ok(())
         }
+        SettingKey::AirplaneMode => {
+            let enabled = payload
+                .custom
+                .get("connectivity.airplane_mode")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            backend.set_airplane_mode(enabled).map_err(|e| e.to_string())
+        }
+        SettingKey::PowerProfile => {
+            let profile = (*payload.system.battery.mode).clone();
+            backend.set_power_profile(&profile).map_err(|e| e.to_string())
+        }
         SettingKey::AudioVolume => {
             let vol = *payload.personalization.sound.volume as i32;
             backend.set_volume(vol);
@@ -708,8 +743,41 @@ pub fn apply_setting(backend: &HyprlandBackend, payload: &SettingsPayload, key: 
                         &gap_int.to_string(),
                     );
                 }
+            } else if key_str == "privacy.lock_delay" {
+                let secs = payload
+                    .custom
+                    .get("privacy.lock_delay")
+                    .and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|i| i as u64)))
+                    .unwrap_or(300) as u32;
+                backend.set_lock_delay(secs).map_err(|e| e.to_string())?;
+            } else if key_str == "privacy.usb_protection" {
+                let enabled = payload.custom.get("privacy.usb_protection").and_then(|v| v.as_bool()).unwrap_or(false);
+                backend.set_usb_protection(enabled).map_err(|e| e.to_string())?;
+            } else if key_str == "privacy.diagnostics" {
+                let enabled = payload.custom.get("privacy.diagnostics").and_then(|v| v.as_bool()).unwrap_or(false);
+                backend.set_diagnostics(enabled).map_err(|e| e.to_string())?;
             }
             Ok(())
+        }
+        SettingKey::FirewallEnabled => {
+            let enabled = payload
+                .custom
+                .get("system.privacy.firewall_enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or_else(|| backend.get_firewall().active);
+            backend.set_firewall_enabled(enabled).map_err(|e| e.to_string())
+        }
+        SettingKey::CameraAccess => {
+            let enabled = *payload.system.privacy.camera_enabled;
+            backend.set_camera_enabled(enabled).map_err(|e| e.to_string())
+        }
+        SettingKey::MicAccess => {
+            let enabled = *payload.system.privacy.microphone_enabled;
+            backend.set_mic_enabled(enabled).map_err(|e| e.to_string())
+        }
+        SettingKey::LocationAccess => {
+            let enabled = *payload.system.privacy.location_enabled;
+            backend.set_location_enabled(enabled).map_err(|e| e.to_string())
         }
         _ => {
             // Unbound settings apply cleanly without hardware side effects
@@ -718,14 +786,47 @@ pub fn apply_setting(backend: &HyprlandBackend, payload: &SettingsPayload, key: 
     }
 }
 
+/// Reads live sink volume/mute straight from `wpctl`, returning `None` when
+/// PipeWire isn't reachable. `None` means "leave the cached value alone"
+/// instead of clobbering it with a fallback default.
+fn query_live_audio() -> Option<(u32, bool)> {
+    let output = std::process::Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SINK@"]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let out = String::from_utf8_lossy(&output.stdout);
+    let vol_str = out.split_whitespace().nth(1)?;
+    let vol = (vol_str.parse::<f64>().ok()? * 100.0).round().clamp(0.0, 150.0) as u32;
+    Some((vol, out.contains("[MUTED]")))
+}
+
+/// Mirrors hardware audio truth into the in-memory payload. Finick doesn't own
+/// volume: it reads the live level and writes it through on explicit user
+/// action, but never pushes a stale cached value over the user's current
+/// level on boot / reload / apply-all.
+fn sync_audio_from_system(payload: &mut SettingsPayload) -> bool {
+    match query_live_audio() {
+        Some((vol, muted)) => {
+            payload.personalization.sound.volume.set_force(vol);
+            payload.personalization.sound.muted.set_force(muted);
+            true
+        }
+        None => false,
+    }
+}
+
 /// Applies all active system settings to the OS environment.
-pub fn apply_all_settings(backend: &HyprlandBackend, payload: &SettingsPayload) {
+///
+/// Volume/mute are deliberately excluded: they are synced *from* the system
+/// (see `sync_audio_from_system`) so a stale config never blasts the user's
+/// current level on launch.
+pub fn apply_all_settings(backend: &HyprlandBackend, payload: &mut SettingsPayload) {
     backend.set_wifi_status(*payload.connectivity.wifi.enabled);
     backend.set_bluetooth_status(*payload.connectivity.bluetooth.enabled);
-    backend.set_volume(*payload.personalization.sound.volume as i32);
-    let cur_audio = backend.get_audio_info();
-    if cur_audio.is_muted != *payload.personalization.sound.muted {
-        backend.set_mute(*payload.personalization.sound.muted);
+    if sync_audio_from_system(payload) {
+        // Persist the mirrored level so the on-disk cache never drifts behind
+        // hardware. Failure is non-fatal (e.g. read-only config).
+        let _ = config::save_settings(payload);
     }
     let accent_hex = accent_to_hex(&payload.personalization.appearance.accent_color);
     let _ = HyprlandBackend::hyprctl_set_config(
@@ -949,8 +1050,9 @@ pub fn handle_request(state: &Arc<Mutex<DaemonState>>, req: SettingsRequest, sen
             }
         }
         SettingsRequest::ApplyAll => {
-            let state = state.lock().unwrap();
-            apply_all_settings(&state.backend, &state.payload);
+            let mut state = state.lock().unwrap();
+            let backend = HyprlandBackend;
+            apply_all_settings(&backend, &mut state.payload);
             let _ = sender.send(SettingsResponse::Ok);
         }
         SettingsRequest::SetAndApply { key, value, source } => {
@@ -1065,8 +1167,10 @@ pub fn handle_request(state: &Arc<Mutex<DaemonState>>, req: SettingsRequest, sen
         SettingsRequest::ReloadFromDisk => {
             let mut state = state.lock().unwrap();
             match config::load_settings() {
-                Ok(payload) => {
-                    apply_all_settings(&state.backend, &payload);
+                Ok(mut payload) => {
+                    // Disk volume is stale by definition; hardware wins.
+                    sync_audio_from_system(&mut payload);
+                    apply_all_settings(&state.backend, &mut payload);
                     state.payload = payload;
                     state.broadcast_event(SettingsEvent::Reloaded);
                     let _ = sender.send(SettingsResponse::Ok);
@@ -1083,13 +1187,17 @@ pub fn handle_request(state: &Arc<Mutex<DaemonState>>, req: SettingsRequest, sen
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting finickd...");
 
-    let payload = config::load_settings().unwrap_or_else(|e| {
+    let mut payload = config::load_settings().unwrap_or_else(|e| {
         eprintln!("Warning: Failed to load existing settings ({}). Initializing defaults.", e);
         config::SettingsPayload::default()
     });
 
+    // Adopt the live hardware level before serving; never push a stale
+    // cached volume over the user's current session on launch.
+    sync_audio_from_system(&mut payload);
+
     let backend = HyprlandBackend;
-    apply_all_settings(&backend, &payload);
+    apply_all_settings(&backend, &mut payload);
     let state = Arc::new(Mutex::new(DaemonState { payload, backend, subscribers: Vec::new() }));
 
     // 1. Notification broadcaster and IPC server
@@ -1223,7 +1331,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::thread::sleep(backoff);
             if let Some(exe) = system::locker_binary() {
                 let _ = std::process::Command::new(&exe).spawn();
-            } else if std::process::Command::new("locker").spawn().is_err() {
+            } else if std::process::Command::new("finick-lock").spawn().is_err() {
                 let _ = std::process::Command::new("locker").spawn();
             }
         }

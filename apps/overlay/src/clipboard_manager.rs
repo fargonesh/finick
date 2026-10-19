@@ -373,6 +373,10 @@ pub fn clipboard_app() -> Element {
     use_hook(move || {
         crate::state::spawn_panel_focus_watcher(&["overlay-clipboard", "overlay", "topbar"], "clipboard", dismiss);
     });
+    use_hook(move || {
+        crate::state::clear_close_flag(&crate::state::CLOSE_CLIPBOARD);
+        crate::state::spawn_close_flag_watcher(&crate::state::CLOSE_CLIPBOARD, dismiss);
+    });
     ClipboardManager { dismiss }.into_element()
 }
 

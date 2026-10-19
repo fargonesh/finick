@@ -458,9 +458,10 @@ fn pam_dlopen(service: &str, username: &str, password: &str) -> Option<bool> {
 }
 
 /// PAM service to try first: our own stack when the OS ships it,
-/// otherwise the ubiquitous `login` stack. `None` when PAM is unusable here.
+/// otherwise the legacy `locker` name, otherwise the ubiquitous `login`
+/// stack. `None` when PAM is unusable here.
 pub fn pam_service_available() -> Option<String> {
-    for candidate in ["locker", "login"] {
+    for candidate in ["finick-lock", "locker", "login"] {
         if std::path::Path::new(&format!("/etc/pam.d/{candidate}")).exists() {
             return Some(candidate.to_string());
         }
@@ -539,7 +540,7 @@ mod tests {
     fn test_pam_service_selection_sane() {
         if let Some(svc) = pam_service_available() {
             assert!(std::path::Path::new(&format!("/etc/pam.d/{svc}")).exists());
-            assert!(svc == "locker" || svc == "login");
+            assert!(svc == "finick-lock" || svc == "locker" || svc == "login");
         }
     }
 }

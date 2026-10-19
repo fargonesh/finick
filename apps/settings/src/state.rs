@@ -100,6 +100,9 @@ pub struct SettingsStore {
     pub mic_access: State<bool>,
     pub location_access: State<bool>,
     pub firewall_enabled: State<bool>,
+    pub lock_delay_secs: State<u32>,
+    pub usb_protection: State<bool>,
+    pub diagnostics_enabled: State<bool>,
 
     // Lock states from finickd (e.g. NixOS-managed)
     pub lock_states: State<HashMap<SettingKey, LockState>>,
@@ -344,12 +347,23 @@ impl SettingsStore {
             }
             SettingKey::AccentColor => {
                 if let Some(s) = val.as_str() {
-                    if let Some(acc) = ui::ACCENTS.iter().find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s)) {
-                        if let Some(mut theme_state) = try_consume_context::<State<ui::AppTheme>>() {
-                            let new_t = theme_state.read().with_accent(*acc);
-                            theme_state.set(new_t);
-                            ui::set_theme(&new_t);
-                        }
+                    let acc_opt = ui::ACCENTS
+                        .iter()
+                        .find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s))
+                        .copied()
+                        .or_else(|| {
+                            ui::hex_to_color(s).map(|c| ui::Accent {
+                                name: Box::leak(format!("Custom {s}").into_boxed_str()),
+                                hex: Box::leak(s.to_string().into_boxed_str()),
+                                color: c,
+                            })
+                        });
+                    if let (Some(acc), Some(mut theme_state)) =
+                        (acc_opt, try_consume_context::<State<ui::AppTheme>>())
+                    {
+                        let new_t = theme_state.read().with_accent(acc);
+                        theme_state.set(new_t);
+                        ui::set_theme(&new_t);
                     }
                 }
             }
@@ -470,6 +484,30 @@ impl SettingsStore {
             }
             SettingKey::Custom(key_str) => {
                 match key_str.as_str() {
+                    "privacy.lock_delay" => {
+                        if let Some(i) = val.as_i64() {
+                            let mut s = self.lock_delay_secs;
+                            s.set(i.max(0) as u32);
+                        } else if let Some(f) = val.as_f64() {
+                            let mut s = self.lock_delay_secs;
+                            s.set(f.max(0.0) as u32);
+                        }
+                        return;
+                    }
+                    "privacy.usb_protection" => {
+                        if let Some(b) = val.as_bool() {
+                            let mut s = self.usb_protection;
+                            s.set(b);
+                        }
+                        return;
+                    }
+                    "privacy.diagnostics" => {
+                        if let Some(b) = val.as_bool() {
+                            let mut s = self.diagnostics_enabled;
+                            s.set(b);
+                        }
+                        return;
+                    }
                     "desktop.dock_position" => {
                         if let Some(i) = val.as_i64() {
                             let mut s = self.dock_position;
@@ -651,7 +689,7 @@ pub fn use_init_settings_store() -> SettingsStore {
     let topbar_text_color = use_state(|| "Default".to_string());
     let topbar_text_color_light = use_state(|| "Inherit".to_string());
     let topbar_text_color_dark = use_state(|| "Inherit".to_string());
-    let topbar_icon_size = use_state(|| 14.0);
+    let topbar_icon_size = use_state(|| 16.0);
     let topbar_icon_stroke = use_state(|| 1.6);
     let topbar_show_wifi = use_state(|| true);
     let topbar_show_bluetooth = use_state(|| true);
@@ -694,6 +732,9 @@ pub fn use_init_settings_store() -> SettingsStore {
     let mic_access = use_state(|| true);
     let location_access = use_state(|| true);
     let firewall_enabled = use_state(|| true);
+    let lock_delay_secs = use_state(|| system::query_lock_delay());
+    let usb_protection = use_state(|| false);
+    let diagnostics_enabled = use_state(|| system::query_diagnostics());
 
     let lock_states = use_state(HashMap::<SettingKey, LockState>::new);
     let last_error = use_state(|| None::<String>);
@@ -758,6 +799,9 @@ pub fn use_init_settings_store() -> SettingsStore {
         mic_access,
         location_access,
         firewall_enabled,
+        lock_delay_secs,
+        usb_protection,
+        diagnostics_enabled,
         lock_states,
         last_error,
         topbar_text_size,

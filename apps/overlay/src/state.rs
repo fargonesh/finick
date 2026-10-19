@@ -5,7 +5,10 @@ use {
         get_all_settings, set_and_apply,
     },
     std::{
-        sync::Mutex,
+        sync::{
+            Mutex,
+            atomic::{AtomicBool, AtomicU64, Ordering},
+        },
         time::{Duration, Instant},
     },
     system::{HyprlandBackend, SystemBackend},
@@ -67,8 +70,117 @@ pub fn apply_entry(
             s.set_if_modified(on);
         }
         SettingKey::PowerProfile => {}
+        SettingKey::AirplaneMode => {}
+        SettingKey::DisplayNightShift => {}
         _ => {}
     }
+}
+
+pub fn apply_extended_entry(
+    entry: &SettingEntry,
+    airplane: State<bool>,
+    night: State<bool>,
+    power_profile: State<String>,
+) {
+    match entry.key {
+        SettingKey::AirplaneMode => {
+            if let Some(v) = entry.value.as_bool() {
+                let mut s = airplane;
+                s.set_if_modified(v);
+            }
+        }
+        SettingKey::DisplayNightShift => {
+            if let Some(v) = entry.value.as_bool() {
+                let mut s = night;
+                s.set_if_modified(v);
+            }
+        }
+        SettingKey::PowerProfile => {
+            if let Some(s) = entry.value.as_str() {
+                let mut p = power_profile;
+                p.set_if_modified(s.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn load_extended_batch(
+    airplane: State<bool>,
+    night: State<bool>,
+    power_profile: State<String>,
+) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Option<Vec<SettingEntry>>>();
+    std::thread::spawn(move || match get_all_settings(socket()) {
+        Ok(entries) => {
+            let _ = tx.send(Some(entries));
+        }
+        Err(e) => {
+            eprintln!("panel extended get_all_settings offline: {e}");
+            let _ = tx.send(None);
+        }
+    });
+    spawn(async move {
+        if let Some(Some(entries)) = rx.recv().await {
+            for entry in &entries {
+                apply_extended_entry(entry, airplane, night, power_profile);
+            }
+        }
+    });
+}
+
+pub fn subscribe_extended_live(
+    airplane: State<bool>,
+    night: State<bool>,
+    power_profile: State<String>,
+) {
+    let rx = match ipsea::settings::subscribe_channel(socket(), SubscriptionFilter::all()) {
+        Ok(rx) => rx,
+        Err(e) => {
+            eprintln!("panel extended subscribe failed: {e}");
+            return;
+        }
+    };
+    let mut rx = rx;
+    spawn(async move {
+        while let Some(evt) = rx.recv().await {
+            match evt {
+                SettingsEvent::Changed { key, value, .. } => match key {
+                    SettingKey::AirplaneMode => {
+                        if let Some(v) = value.as_bool() {
+                            let mut s = airplane;
+                            s.set_if_modified(v);
+                        }
+                    }
+                    SettingKey::DisplayNightShift => {
+                        if let Some(v) = value.as_bool() {
+                            let mut s = night;
+                            s.set_if_modified(v);
+                        }
+                    }
+                    SettingKey::PowerProfile => {
+                        if let Some(s) = value.as_str() {
+                            let mut p = power_profile;
+                            p.set_if_modified(s.to_string());
+                        }
+                    }
+                    _ => {}
+                },
+                SettingsEvent::Reloaded => {
+                    load_extended_batch(airplane, night, power_profile);
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
+pub fn open_in_settings() {
+    std::thread::spawn(|| {
+        let _ = std::process::Command::new("finick-settings").spawn().or_else(|_| {
+            std::process::Command::new("hyprctl").args(["dispatch", "exec", "finick-settings"]).spawn()
+        });
+    });
 }
 
 pub fn parse_capacity_pct(capacity: &str) -> u8 {
@@ -169,7 +281,7 @@ impl Default for TopbarSettings {
             text_color_light: String::new(),
             text_color_dark: String::new(),
             theme: "system".to_string(),
-            icon_size: 14.0,
+            icon_size: 16.0,
             icon_stroke: 1.6,
         }
     }
@@ -532,4 +644,513 @@ pub fn cursor_pos_blocking() -> Option<(f64, f64)> {
 pub fn cursor_in_travel_zone() -> bool {
     let Some((x, y)) = cursor_pos_blocking() else { return false };
     travel_guard_holds(x, y)
+}
+
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Returns true when enough time passed since the last accepted toggle.
+/// First call per store always passes. Used to swallow double-clicks that
+/// otherwise open a panel twice (leaking one window) or open-then-instantly-close it.
+pub fn rate_limit_ok(last: &AtomicU64, window_ms: u64) -> bool {
+    let now = now_ms();
+    let prev = last.swap(now, Ordering::SeqCst);
+    prev == 0 || now.saturating_sub(prev) >= window_ms
+}
+
+pub static LAST_PANEL_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
+pub static LAST_NOTIF_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
+pub static LAST_CLIPBOARD_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
+pub static LAST_SCREENSHOT_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
+static LAST_CLIPBOARD_OPEN_MS: AtomicU64 = AtomicU64::new(0);
+static LAST_SCREENSHOT_OPEN_MS: AtomicU64 = AtomicU64::new(0);
+
+pub fn note_clipboard_opened() {
+    LAST_CLIPBOARD_OPEN_MS.store(now_ms(), Ordering::SeqCst);
+}
+
+pub fn clipboard_opened_recently() -> bool {
+    now_ms().saturating_sub(LAST_CLIPBOARD_OPEN_MS.load(Ordering::SeqCst)) < 600
+}
+
+pub fn note_screenshot_opened() {
+    LAST_SCREENSHOT_OPEN_MS.store(now_ms(), Ordering::SeqCst);
+}
+
+pub fn screenshot_opened_recently() -> bool {
+    now_ms().saturating_sub(LAST_SCREENSHOT_OPEN_MS.load(Ordering::SeqCst)) < 600
+}
+
+/// Animated-close requests. Toggle buttons live in the topbar window while
+/// the panel's dismiss state lives in the panel window, so a toggle cannot
+/// set dismiss directly. Instant close_window from another window pops.
+/// Instead the toggle sets a flag and the panel's watcher maps it to its
+/// local dismiss, preserving the PanelShell exit animation.
+pub static CLOSE_PANEL: AtomicBool = AtomicBool::new(false);
+pub static CLOSE_NOTIFICATIONS: AtomicBool = AtomicBool::new(false);
+pub static CLOSE_CLIPBOARD: AtomicBool = AtomicBool::new(false);
+pub static CLOSE_SCREENSHOT: AtomicBool = AtomicBool::new(false);
+
+pub fn clear_close_flag(flag: &'static AtomicBool) {
+    flag.store(false, Ordering::SeqCst);
+}
+
+pub fn spawn_close_flag_watcher(flag: &'static AtomicBool, mut dismiss: State<bool>) {
+    spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            if flag.swap(false, Ordering::SeqCst) {
+                dismiss.set(true);
+                break;
+            }
+        }
+    });
+}
+
+fn spawn_stale_close_watchdog(
+    flag: &'static AtomicBool,
+    hypr_class: &'static str,
+    take_stale: impl FnOnce() -> Option<winit::window::WindowId> + Send + 'static,
+) {
+    spawn(async move {
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        if flag.swap(false, Ordering::SeqCst) {
+            if let Some(id) = take_stale() {
+                eprintln!("[overlay] close request unacked, clearing stale window");
+                Platform::get().close_window(id);
+            }
+            let _ = std::process::Command::new("hyprctl")
+                .args(["eval", &format!("hl.dispatch(hl.dsp.window.close({{ window = 'class:^({hypr_class})$' }}))")])
+                .output();
+        }
+    });
+}
+
+pub fn request_panel_close() {
+    CLOSE_PANEL.store(true, Ordering::SeqCst);
+    spawn_stale_close_watchdog(&CLOSE_PANEL, "overlay-panel", || {
+        GlobalContexts::get()
+            .try_get_context::<crate::PanelWindowId>()
+            .and_then(|c| c.0.lock().ok().and_then(|mut g| g.take()))
+    });
+}
+
+pub fn request_notifications_close() {
+    CLOSE_NOTIFICATIONS.store(true, Ordering::SeqCst);
+    spawn_stale_close_watchdog(&CLOSE_NOTIFICATIONS, "overlay-notifications", || {
+        GlobalContexts::get()
+            .try_get_context::<crate::NotificationPanelWindowId>()
+            .and_then(|c| c.0.lock().ok().and_then(|mut g| g.take()))
+    });
+}
+
+pub fn request_clipboard_close() {
+    CLOSE_CLIPBOARD.store(true, Ordering::SeqCst);
+    spawn_stale_close_watchdog(&CLOSE_CLIPBOARD, "overlay-clipboard", || {
+        GlobalContexts::get()
+            .try_get_context::<crate::ClipboardWindowId>()
+            .and_then(|c| c.0.lock().ok().and_then(|mut g| g.take()))
+    });
+}
+
+pub fn request_screenshot_close() {
+    CLOSE_SCREENSHOT.store(true, Ordering::SeqCst);
+    spawn_stale_close_watchdog(&CLOSE_SCREENSHOT, "overlay-screenshot", || {
+        GlobalContexts::get()
+            .try_get_context::<crate::ScreenshotWindowId>()
+            .and_then(|c| c.0.lock().ok().and_then(|mut g| g.take()))
+    });
+}
+
+// --- Issue #20: notification center, DND schedule, OSD live, media ---
+
+fn overlay_data_file(name: &str) -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+        .map(|c| c.join("finick").join(name))
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DndSchedule {
+    pub enabled: bool,
+    pub start: String,
+    pub end: String,
+}
+
+impl Default for DndSchedule {
+    fn default() -> Self {
+        Self { enabled: false, start: "22:00".to_string(), end: "07:00".to_string() }
+    }
+}
+
+pub fn parse_hm(s: &str) -> Option<(u32, u32)> {
+    let (h, m) = s.trim().split_once(':')?;
+    let h: u32 = h.trim().parse().ok()?;
+    let m: u32 = m.trim().split_whitespace().next()?.parse().ok()?;
+    if h > 23 || m > 59 {
+        return None;
+    }
+    Some((h, m))
+}
+
+pub fn dnd_schedule_active(sched: &DndSchedule, now_hm: &str) -> bool {
+    if !sched.enabled {
+        return false;
+    }
+    let (sh, sm) = match parse_hm(&sched.start) {
+        Some(v) => v,
+        None => return false,
+    };
+    let (eh, em) = match parse_hm(&sched.end) {
+        Some(v) => v,
+        None => return false,
+    };
+    let (nh, nm) = match parse_hm(now_hm) {
+        Some(v) => v,
+        None => return false,
+    };
+    let to_min = |h: u32, m: u32| h * 60 + m;
+    let s = to_min(sh, sm);
+    let e = to_min(eh, em);
+    let n = to_min(nh, nm);
+    if s == e {
+        return true;
+    }
+    if s < e {
+        n >= s && n < e
+    } else {
+        n >= s || n < e
+    }
+}
+
+pub fn now_hm_local() -> String {
+    chrono::Local::now().format("%H:%M").to_string()
+}
+
+pub fn load_dnd_schedule() -> DndSchedule {
+    let mut s = DndSchedule::default();
+    let Some(f) = overlay_data_file("dnd_schedule.json") else {
+        return s;
+    };
+    let Ok(raw) = std::fs::read_to_string(f) else {
+        return s;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return s;
+    };
+    if let Some(b) = v.get("enabled").and_then(|x| x.as_bool()) {
+        s.enabled = b;
+    }
+    if let Some(x) = v.get("start").and_then(|x| x.as_str()) {
+        if parse_hm(x).is_some() {
+            s.start = x.to_string();
+        }
+    }
+    if let Some(x) = v.get("end").and_then(|x| x.as_str()) {
+        if parse_hm(x).is_some() {
+            s.end = x.to_string();
+        }
+    }
+    s
+}
+
+pub fn save_dnd_schedule(sched: &DndSchedule) {
+    let Some(f) = overlay_data_file("dnd_schedule.json") else {
+        return;
+    };
+    if let Some(parent) = f.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let v = serde_json::json!({ "enabled": sched.enabled, "start": sched.start, "end": sched.end });
+    let _ = std::fs::write(f, serde_json::to_string_pretty(&v).unwrap_or_default());
+}
+
+fn dnd_manual_on_blocking() -> bool {
+    let entries = ipsea::settings::get_all_settings(socket()).unwrap_or_default();
+    for e in &entries {
+        if e.key == ipsea::settings::SettingKey::DoNotDisturb {
+            return e.value.as_str().map(|s| s != "off").unwrap_or(false)
+                || e.value.as_bool().unwrap_or(false);
+        }
+    }
+    false
+}
+
+/// True when toasts must stay silent: manual DND is on or the persisted
+/// DND schedule window currently covers local time.
+pub fn dnd_silenced_blocking() -> bool {
+    if dnd_manual_on_blocking() {
+        return true;
+    }
+    let sched = load_dnd_schedule();
+    dnd_schedule_active(&sched, &now_hm_local())
+}
+
+pub fn load_muted_apps() -> std::collections::HashSet<String> {
+    let Some(f) = overlay_data_file("notif_muted_apps.json") else {
+        return std::collections::HashSet::new();
+    };
+    let Ok(raw) = std::fs::read_to_string(f) else {
+        return std::collections::HashSet::new();
+    };
+    serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default().into_iter().collect()
+}
+
+pub fn save_muted_apps(muted: &std::collections::HashSet<String>) {
+    let Some(f) = overlay_data_file("notif_muted_apps.json") else {
+        return;
+    };
+    if let Some(parent) = f.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut v: Vec<String> = muted.iter().cloned().collect();
+    v.sort();
+    let _ = std::fs::write(f, serde_json::to_string_pretty(&v).unwrap_or_default());
+}
+
+pub fn is_app_muted(muted: &std::collections::HashSet<String>, app: &str) -> bool {
+    muted.contains(app)
+}
+
+pub fn set_app_muted(muted: &mut std::collections::HashSet<String>, app: &str, mute: bool) {
+    if mute {
+        muted.insert(app.to_string());
+    } else {
+        muted.remove(app);
+    }
+    save_muted_apps(muted);
+}
+
+/// Groups notifications by app name for the center. Groups are sorted by
+/// app name so the list is stable; items keep newest-first order.
+pub fn group_notifications(notifs: &[Notification]) -> Vec<(String, Vec<Notification>)> {
+    let mut map: std::collections::BTreeMap<String, Vec<Notification>> = std::collections::BTreeMap::new();
+    for n in notifs.iter().rev() {
+        let app = if n.app_name.trim().is_empty() {
+            "Other".to_string()
+        } else {
+            n.app_name.clone()
+        };
+        map.entry(app).or_default().push(n.clone());
+    }
+    map.into_iter().collect()
+}
+
+/// Live sink volume in percent, or None when wpctl is unavailable.
+pub fn query_sink_volume_pct() -> Option<f64> {
+    let out = std::process::Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SINK@"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    let v: f64 = s.split_whitespace().nth(1)?.parse().ok()?;
+    Some((v * 100.0).clamp(0.0, 150.0))
+}
+
+pub fn query_sink_muted() -> Option<bool> {
+    let out = std::process::Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SINK@"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).contains("[MUTED]"))
+}
+
+/// Live display brightness in percent, or None when no backlight exists.
+pub fn query_brightness_pct() -> Option<f64> {
+    if let Ok(entries) = std::fs::read_dir("/sys/class/backlight") {
+        let mut best: Option<f64> = None;
+        for e in entries.flatten() {
+            let base = e.path();
+            let cur: Option<u64> =
+                std::fs::read_to_string(base.join("brightness")).ok().and_then(|s| s.trim().parse().ok());
+            let max: Option<u64> =
+                std::fs::read_to_string(base.join("max_brightness")).ok().and_then(|s| s.trim().parse().ok());
+            if let (Some(c), Some(m)) = (cur, max) {
+                if m > 0 {
+                    let pct = (c as f64 / m as f64 * 100.0).clamp(0.0, 100.0);
+                    best = Some(best.map_or(pct, |b: f64| b.max(pct)));
+                }
+            }
+        }
+        if best.is_some() {
+            return best;
+        }
+    }
+    let out = std::process::Command::new("brightnessctl").arg("get").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let cur: f64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+    let max_out = std::process::Command::new("brightnessctl").arg("max").output().ok()?;
+    let max: f64 = String::from_utf8_lossy(&max_out.stdout).trim().parse().ok()?;
+    if max > 0.0 {
+        Some((cur / max * 100.0).clamp(0.0, 100.0))
+    } else {
+        None
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MediaStatus {
+    pub available: bool,
+    pub player: String,
+    pub title: String,
+    pub artist: String,
+    pub status: String,
+}
+
+impl MediaStatus {
+    pub fn unavailable() -> Self {
+        Self { available: false, player: String::new(), title: String::new(), artist: String::new(), status: String::new() }
+    }
+}
+
+pub fn playerctl_present() -> bool {
+    std::process::Command::new("playerctl").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+fn playerctl_arg(args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("playerctl").args(args).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+pub fn query_media_status() -> MediaStatus {
+    if !playerctl_present() {
+        return MediaStatus::unavailable();
+    }
+    let player = playerctl_arg(&["metadata", "--format", "{{playerName}}"]).unwrap_or_default();
+    let title = playerctl_arg(&["metadata", "--format", "{{title}}"]).unwrap_or_default();
+    let artist = playerctl_arg(&["metadata", "--format", "{{artist}}"]).unwrap_or_default();
+    let status = playerctl_arg(&["status"]).unwrap_or_default();
+    if title.is_empty() && artist.is_empty() && status.is_empty() {
+        return MediaStatus { available: true, player, title: String::new(), artist: String::new(), status: "Stopped".to_string() };
+    }
+    MediaStatus { available: true, player, title, artist, status }
+}
+
+pub fn media_control(action: &str) -> bool {
+    if !playerctl_present() {
+        return false;
+    }
+    let arg = match action {
+        "play-pause" => "play-pause",
+        "next" => "next",
+        "previous" => "previous",
+        _ => return false,
+    };
+    std::process::Command::new("playerctl").arg(arg).output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+pub fn load_reduced_motion_blocking() -> bool {
+    let entries = ipsea::settings::get_all_settings(socket()).unwrap_or_default();
+    for e in &entries {
+        if e.key == ipsea::settings::SettingKey::AccessibilityReduceMotion {
+            return e.value.as_bool().unwrap_or(false);
+        }
+    }
+    false
+}
+
+pub fn subscribe_reduced_motion(reduced: State<bool>) {
+    let rx = match ipsea::settings::subscribe_channel(socket(), SubscriptionFilter::all()) {
+        Ok(rx) => rx,
+        Err(e) => {
+            eprintln!("reduced-motion subscribe failed: {e}");
+            return;
+        }
+    };
+    let mut rx = rx;
+    spawn(async move {
+        while let Some(evt) = rx.recv().await {
+            if let ipsea::settings::SettingsEvent::Changed { key, value, .. } = evt {
+                if key == ipsea::settings::SettingKey::AccessibilityReduceMotion {
+                    if let Some(b) = value.as_bool() {
+                        let mut s = reduced;
+                        s.set_if_modified(b);
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod issue20_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hm_valid_and_invalid() {
+        assert_eq!(parse_hm("22:00"), Some((22, 0)));
+        assert_eq!(parse_hm("07:30"), Some((7, 30)));
+        assert_eq!(parse_hm("24:00"), None);
+        assert_eq!(parse_hm("22:60"), None);
+        assert_eq!(parse_hm("nope"), None);
+    }
+
+    #[test]
+    fn test_dnd_schedule_overnight_window() {
+        let sched = DndSchedule { enabled: true, start: "22:00".to_string(), end: "07:00".to_string() };
+        assert!(dnd_schedule_active(&sched, "22:00"));
+        assert!(dnd_schedule_active(&sched, "23:59"));
+        assert!(dnd_schedule_active(&sched, "03:00"));
+        assert!(!dnd_schedule_active(&sched, "07:00"));
+        assert!(!dnd_schedule_active(&sched, "12:00"));
+        assert!(!dnd_schedule_active(&sched, "21:59"));
+    }
+
+    #[test]
+    fn test_dnd_schedule_daytime_window_and_disabled() {
+        let day = DndSchedule { enabled: true, start: "09:00".to_string(), end: "17:00".to_string() };
+        assert!(dnd_schedule_active(&day, "12:00"));
+        assert!(!dnd_schedule_active(&day, "08:59"));
+        assert!(!dnd_schedule_active(&day, "17:00"));
+        let off = DndSchedule { enabled: false, start: "22:00".to_string(), end: "07:00".to_string() };
+        assert!(!dnd_schedule_active(&off, "23:00"));
+    }
+
+    #[test]
+    fn test_group_notifications_by_app_newest_first() {
+        let mk = |id: u32, app: &str| Notification {
+            id,
+            app_name: app.to_string(),
+            summary: format!("s{id}"),
+            body: String::new(),
+            icon: String::new(),
+            timeout: 5000,
+        };
+        let notifs = vec![mk(1, "Mail"), mk(2, "Chat"), mk(3, "Mail")];
+        let groups = group_notifications(&notifs);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].0, "Chat");
+        assert_eq!(groups[1].0, "Mail");
+        assert_eq!(groups[1].1.iter().map(|n| n.id).collect::<Vec<_>>(), vec![3, 1]);
+    }
+
+    #[test]
+    fn test_group_notifications_empty_app_becomes_other() {
+        let n = Notification {
+            id: 1,
+            app_name: String::new(),
+            summary: "s".to_string(),
+            body: String::new(),
+            icon: String::new(),
+            timeout: 5000,
+        };
+        let groups = group_notifications(&[n]);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, "Other");
+    }
 }

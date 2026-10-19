@@ -212,12 +212,19 @@ fn main() {
         }
         Program::launcher => {
             let toggle = args.data.as_deref().is_some_and(|d| d == "--toggle" || d == "toggle" || d == "-t");
+            // Must stay in sync with overlay::launcher::launcher_lock_path().
             let lock = std::path::PathBuf::from("/tmp/finick-launcher.lock");
             if toggle {
                 if let Ok(pid_str) = std::fs::read_to_string(&lock) {
                     if let Ok(pid) = pid_str.trim().parse::<u32>() {
                         if std::path::PathBuf::from(format!("/proc/{pid}")).exists() {
                             let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
+                            for _ in 0..30 {
+                                if !std::path::PathBuf::from(format!("/proc/{pid}")).exists() {
+                                    break;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(10));
+                            }
                             let _ = std::fs::remove_file(&lock);
                             println!("Launcher toggled off");
                             return;
