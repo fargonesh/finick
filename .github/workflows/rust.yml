@@ -23,8 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      with:
-        submodules: recursive
+        with:
+          submodules: recursive
       # rustfmt.toml uses unstable options (imports_granularity, etc.),
       # so formatting requires nightly. devenv.nix / flake.nix both pin nightly.
       - uses: dtolnay/rust-toolchain@nightly
@@ -37,8 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      with:
-        submodules: recursive
+        with:
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
@@ -73,8 +73,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      with:
-        submodules: recursive
+        with:
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
@@ -112,8 +112,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
-      with:
-        submodules: recursive
+        with:
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
