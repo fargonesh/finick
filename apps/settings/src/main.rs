@@ -149,7 +149,7 @@ pub const ALL_NAV_ROUTES: &[RouteInfo] = &[
     RouteInfo {
         route: Route::Mouse,
         title: "Mouse & Touchpad",
-        icon_svg: GENERAL,
+        icon_svg: MOUSE,
         group: Some("System"),
         keywords: "mouse touchpad pointer speed accel natural scroll tap click trackpad sensitivity",
     },
@@ -219,26 +219,117 @@ pub const ALL_NAV_ROUTES: &[RouteInfo] = &[
     },
 ];
 
+impl Route {
+    /// Map a CLI page slug / URI tail to a settings route.
+    /// Accepts `wifi`, `wi-fi`, `bluetooth`, `appearance`, ... and falls back
+    /// to `None` so callers can default to `Overview`.
+    pub fn from_slug(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().replace('_', "-").as_str() {
+            "overview" | "home" | "" => Some(Self::Overview),
+            "wifi" | "wi-fi" | "network" | "wireless" => Some(Self::Wifi),
+            "bluetooth" | "bt" => Some(Self::Bluetooth),
+            "appearance" | "theme" | "wallpaper" => Some(Self::Appearance),
+            "display" | "displays" | "screen" | "monitor" => Some(Self::Display),
+            "sound" | "audio" | "volume" => Some(Self::Sound),
+            "focus" | "dnd" | "do-not-disturb" => Some(Self::Focus),
+            "notifications" | "notification" => Some(Self::Notifications),
+            "screen-time" | "screentime" => Some(Self::ScreenTime),
+            "general" => Some(Self::General),
+            "storage" | "disk" => Some(Self::Storage),
+            "battery" | "power" => Some(Self::Battery),
+            "mouse" | "touchpad" | "mouse-touchpad" | "trackpad" => Some(Self::Mouse),
+            "accessibility" | "a11y" => Some(Self::Accessibility),
+            "about" | "info" | "specs" => Some(Self::About),
+            "desktop" | "dock" | "workspaces" => Some(Self::Desktop),
+            "datetime" | "date-time" | "time" | "clock" | "timezone" => Some(Self::DateTime),
+            "privacy" | "privacy-security" | "security" | "firewall" => Some(Self::Privacy),
+            "language" | "language-region" | "locale" | "region" => Some(Self::Language),
+            "printers" | "printers-scanners" | "scanners" | "printing" => Some(Self::Printers),
+            "accounts" | "users" | "account" | "user" => Some(Self::Accounts),
+            "shortcuts" | "keyboard" | "keybindings" | "hotkeys" => Some(Self::Shortcuts),
+            "default-apps" | "defaultapps" | "defaults" | "mime" => Some(Self::DefaultApps),
+            _ => None,
+        }
+    }
+}
+
+/// Page slugs accepted on the command line / via URI handlers.
+pub const SETTINGS_PAGE_SLUGS: &[&str] = &[
+    "overview",
+    "wifi",
+    "bluetooth",
+    "appearance",
+    "display",
+    "sound",
+    "focus",
+    "notifications",
+    "screen-time",
+    "desktop",
+    "general",
+    "storage",
+    "battery",
+    "mouse",
+    "accessibility",
+    "datetime",
+    "privacy",
+    "language",
+    "printers",
+    "accounts",
+    "shortcuts",
+    "default-apps",
+    "about",
+];
+
+struct SettingsApp {
+    initial_route: Route,
+}
+
+impl freya::prelude::App for SettingsApp {
+    fn render(&self) -> impl IntoElement {
+        settings_root(self.initial_route)
+    }
+}
+
 pub fn main() {
+    let args = config::LaunchArgs::parse();
+    if args.wants_help() {
+        args.print_help("settings", SETTINGS_PAGE_SLUGS);
+        return;
+    }
+    let initial_route = args
+        .page
+        .as_deref()
+        .and_then(Route::from_slug)
+        .unwrap_or(Route::Overview);
+    if args.page.is_some() && args.page.as_deref().and_then(Route::from_slug).is_none() {
+        eprintln!("[settings] unknown page {:?}, opening Overview", args.page);
+    }
+    args.maybe_arm_screenshot("settings");
+
     let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
     let _guard = _rt.as_ref().map(|rt| rt.enter());
 
     launch(
         LaunchConfig::new()
-            .with_window(WindowConfig::new(app).with_title("Settings").with_size(1080., 740.).with_min_size(640., 480.))
+            .with_window(
+                WindowConfig::new_app(SettingsApp { initial_route })
+                    .with_title("Settings")
+                    .with_size(1080., 740.)
+                    .with_min_size(640., 480.),
+            )
             .with_plugin(freya_devtools::DevtoolsPlugin::default())
             .with_plugin(freya_performance_plugin::PerformanceOverlayPlugin::default()),
     )
 }
 
-fn app() -> impl IntoElement {
+fn settings_root(initial_route: Route) -> impl IntoElement {
     let initial_theme = get_theme();
     let theme_state = use_init_app_theme(initial_theme);
     let t = use_app_theme();
     let wired_info = use_state(|| HyprlandBackend.get_wired_info());
     let displays = use_state(|| HyprlandBackend.get_displays());
     let about_info = use_state(|| crate::pages::about::fetch_about_info());
-    let current_route = use_state(|| Route::Overview);
+    let current_route = use_state(move || initial_route);
     let search_query = use_state(String::new);
     let focused_nav_idx = use_state(|| 0usize);
 
@@ -307,9 +398,15 @@ fn app() -> impl IntoElement {
                         set_theme(&new_t);
                         picker_apply_store.set(SettingKey::AccentColor, hex.clone());
                         let clean_hex = hex.trim_start_matches('#');
-                        let _ = std::process::Command::new("hyprctl")
-                            .args(["keyword", "general:col.active_border", &format!("0xff{clean_hex}")])
-                            .status();
+                        let hypr_color = format!("0xff{clean_hex}");
+                        let lua = format!(
+                            "hl.config({{ general = {{ col = {{ active_border = {{ colors = {{ \"{hypr_color}\" }} }} }} }} }})"
+                        );
+                        let _ = HyprlandBackend::hyprctl_set_config(
+                            &lua,
+                            "general:col.active_border",
+                            &hypr_color,
+                        );
                     }
                     let mut r = picker_req_key;
                     r.set(None);

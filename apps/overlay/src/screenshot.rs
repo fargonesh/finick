@@ -225,12 +225,24 @@ impl Component for ScreenshotUtility {
 pub fn screenshot_app() -> Element {
     let _st = use_init_app_theme(get_theme());
     let dismiss = use_state(|| false);
+    let wid = Platform::window_id();
     use_hook(move || {
-        crate::state::spawn_panel_focus_watcher(&["overlay-screenshot", "overlay", "topbar"], "screenshot", dismiss);
+        let my_wid = wid;
+        crate::state::spawn_panel_focus_watcher_guarded(
+            &["overlay-screenshot", "overlay", "topbar"],
+            "screenshot",
+            dismiss,
+            move || crate::state::is_screenshot_window_current(my_wid),
+        );
     });
     use_hook(move || {
+        let my_wid = wid;
         crate::state::clear_close_flag(&crate::state::CLOSE_SCREENSHOT);
-        crate::state::spawn_close_flag_watcher(&crate::state::CLOSE_SCREENSHOT, dismiss);
+        crate::state::spawn_close_flag_watcher_guarded(
+            &crate::state::CLOSE_SCREENSHOT,
+            dismiss,
+            move || crate::state::is_screenshot_window_current(my_wid),
+        );
     });
     ScreenshotUtility { dismiss }.into_element()
 }

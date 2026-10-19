@@ -110,21 +110,24 @@ pub fn load_extended_batch(
     night: State<bool>,
     power_profile: State<String>,
 ) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Option<Vec<SettingEntry>>>();
-    std::thread::spawn(move || match get_all_settings(socket()) {
-        Ok(entries) => {
-            let _ = tx.send(Some(entries));
-        }
-        Err(e) => {
-            eprintln!("panel extended get_all_settings offline: {e}");
-            let _ = tx.send(None);
-        }
-    });
     spawn(async move {
-        if let Some(Some(entries)) = rx.recv().await {
-            for entry in &entries {
-                apply_extended_entry(entry, airplane, night, power_profile);
+        loop {
+            let res = tokio::task::spawn_blocking(|| get_all_settings(socket())).await;
+            match res {
+                Ok(Ok(entries)) => {
+                    for entry in &entries {
+                        apply_extended_entry(entry, airplane, night, power_profile);
+                    }
+                    break;
+                }
+                Ok(Err(e)) => {
+                    eprintln!("panel extended get_all_settings offline: {e}; retrying");
+                }
+                Err(e) => {
+                    eprintln!("panel extended get_all_settings join failed: {e}; retrying");
+                }
             }
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     });
 }
@@ -134,52 +137,57 @@ pub fn subscribe_extended_live(
     night: State<bool>,
     power_profile: State<String>,
 ) {
-    let rx = match ipsea::settings::subscribe_channel(socket(), SubscriptionFilter::all()) {
-        Ok(rx) => rx,
-        Err(e) => {
-            eprintln!("panel extended subscribe failed: {e}");
-            return;
-        }
-    };
-    let mut rx = rx;
     spawn(async move {
-        while let Some(evt) = rx.recv().await {
-            match evt {
-                SettingsEvent::Changed { key, value, .. } => match key {
-                    SettingKey::AirplaneMode => {
-                        if let Some(v) = value.as_bool() {
-                            let mut s = airplane;
-                            s.set_if_modified(v);
+        loop {
+            let rx = match ipsea::settings::subscribe_channel(socket(), SubscriptionFilter::all()) {
+                Ok(rx) => rx,
+                Err(e) => {
+                    eprintln!("panel extended subscribe failed: {e}; retrying");
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            };
+            let mut rx = rx;
+            while let Some(evt) = rx.recv().await {
+                match evt {
+                    SettingsEvent::Changed { key, value, .. } => match key {
+                        SettingKey::AirplaneMode => {
+                            if let Some(v) = value.as_bool() {
+                                let mut s = airplane;
+                                s.set_if_modified(v);
+                            }
                         }
-                    }
-                    SettingKey::DisplayNightShift => {
-                        if let Some(v) = value.as_bool() {
-                            let mut s = night;
-                            s.set_if_modified(v);
+                        SettingKey::DisplayNightShift => {
+                            if let Some(v) = value.as_bool() {
+                                let mut s = night;
+                                s.set_if_modified(v);
+                            }
                         }
-                    }
-                    SettingKey::PowerProfile => {
-                        if let Some(s) = value.as_str() {
-                            let mut p = power_profile;
-                            p.set_if_modified(s.to_string());
+                        SettingKey::PowerProfile => {
+                            if let Some(s) = value.as_str() {
+                                let mut p = power_profile;
+                                p.set_if_modified(s.to_string());
+                            }
                         }
+                        _ => {}
+                    },
+                    SettingsEvent::Reloaded => {
+                        load_extended_batch(airplane, night, power_profile);
                     }
                     _ => {}
-                },
-                SettingsEvent::Reloaded => {
-                    load_extended_batch(airplane, night, power_profile);
                 }
-                _ => {}
             }
+            eprintln!("panel extended subscribe disconnected; retrying");
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     });
 }
 
 pub fn open_in_settings() {
     std::thread::spawn(|| {
-        let _ = std::process::Command::new("finick-settings").spawn().or_else(|_| {
-            std::process::Command::new("hyprctl").args(["dispatch", "exec", "finick-settings"]).spawn()
-        });
+        if std::process::Command::new("finick-settings").spawn().is_err() {
+            system::hypr_exec("finick-settings");
+        }
     });
 }
 
@@ -198,54 +206,55 @@ pub fn load_initial_batch(
     mut topbar_settings: State<TopbarSettings>,
     mut theme_state: State<ui::AppTheme>,
 ) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Option<Vec<SettingEntry>>>();
-    std::thread::spawn(move || match get_all_settings(socket()) {
-        Ok(entries) => {
-            let _ = tx.send(Some(entries));
-        }
-        Err(e) => {
-            eprintln!("topbar get_all_settings offline: {e}");
-            let _ = tx.send(None);
-        }
-    });
     spawn(async move {
-        if let Some(opt) = rx.recv().await {
-            match opt {
-                Some(entries) => {
-                    for entry in &entries {
-                        apply_entry(entry, wifi, bt, volume, muted, brightness, dnd);
-                        if let SettingKey::Custom(ref k) = entry.key {
-                            let mut ts = topbar_settings.read().clone();
-                            if apply_topbar_custom(&mut ts, k.as_str(), &entry.value) {
-                                topbar_settings.set(ts);
-                            }
-                        }
-                        if entry.key == SettingKey::AccentColor {
-                            if let Some(s) = entry.value.as_str() {
-                                if let Some(acc) = ui::ACCENTS.iter().find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s)) {
-                                    let new_t = theme_state.read().with_accent(*acc);
-                                    theme_state.set(new_t);
-                                    ui::set_theme(&new_t);
-                                }
-                            }
-                        }
-                        if entry.key == SettingKey::ThemeMode {
-                            if let Some(s) = entry.value.as_str() {
-                                let mode = match s { "light" => ui::ThemeMode::Light, "auto" => ui::ThemeMode::Auto, _ => ui::ThemeMode::Dark };
-                                let new_t = theme_state.read().with_mode(mode);
-                                theme_state.set(new_t);
-                                ui::set_theme(&new_t);
-                            }
-                        }
-                    }
-                    let mut c = connected;
-                    c.set_if_modified(true);
-                }
-                None => {
+        loop {
+            let res = tokio::task::spawn_blocking(|| get_all_settings(socket())).await;
+            let entries = match res {
+                Ok(Ok(entries)) => entries,
+                Ok(Err(e)) => {
+                    eprintln!("topbar get_all_settings offline: {e}; retrying");
                     let mut c = connected;
                     c.set_if_modified(false);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!("topbar get_all_settings join failed: {e}; retrying");
+                    let mut c = connected;
+                    c.set_if_modified(false);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            };
+            for entry in &entries {
+                apply_entry(entry, wifi, bt, volume, muted, brightness, dnd);
+                if let SettingKey::Custom(ref k) = entry.key {
+                    let mut ts = topbar_settings.read().clone();
+                    if apply_topbar_custom(&mut ts, k.as_str(), &entry.value) {
+                        topbar_settings.set(ts);
+                    }
+                }
+                if entry.key == SettingKey::AccentColor {
+                    if let Some(s) = entry.value.as_str() {
+                        if let Some(acc) = ui::ACCENTS.iter().find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s)) {
+                            let new_t = theme_state.read().with_accent(*acc);
+                            theme_state.set(new_t);
+                            ui::set_theme(&new_t);
+                        }
+                    }
+                }
+                if entry.key == SettingKey::ThemeMode {
+                    if let Some(s) = entry.value.as_str() {
+                        let mode = match s { "light" => ui::ThemeMode::Light, "auto" => ui::ThemeMode::Auto, _ => ui::ThemeMode::Dark };
+                        let new_t = theme_state.read().with_mode(mode);
+                        theme_state.set(new_t);
+                        ui::set_theme(&new_t);
+                    }
                 }
             }
+            let mut c = connected;
+            c.set_if_modified(true);
+            break;
         }
     });
 }
@@ -337,88 +346,107 @@ pub fn subscribe_live(
     mut topbar_settings: State<TopbarSettings>,
     theme_state: State<ui::AppTheme>,
 ) {
-    let rx = match ipsea::settings::subscribe_channel(socket(), SubscriptionFilter::all()) {
-        Ok(rx) => rx,
-        Err(e) => {
-            eprintln!("topbar subscribe failed: {e}");
-            return;
-        }
-    };
-    let mut rx = rx;
     spawn(async move {
-        while let Some(evt) = rx.recv().await {
-            match evt {
-                SettingsEvent::Changed { key, value, source: _ } => match key {
-                    SettingKey::WifiEnabled => {
-                        if let Some(v) = value.as_bool() {
-                            let mut s = wifi;
-                            s.set_if_modified(v);
+        loop {
+            let rx = match ipsea::settings::subscribe_channel(socket(), SubscriptionFilter::all()) {
+                Ok(rx) => rx,
+                Err(e) => {
+                    eprintln!("topbar subscribe failed: {e}; retrying");
+                    let mut c = connected;
+                    c.set_if_modified(false);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            };
+            let mut rx = rx;
+            {
+                let mut c = connected;
+                c.set_if_modified(true);
+            }
+            // Re-pull full state on every (re)connect so changes made while
+            // offline (or before finickd was up) are applied, including
+            // AccentColor / ThemeMode.
+            load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
+            while let Some(evt) = rx.recv().await {
+                match evt {
+                    SettingsEvent::Changed { key, value, source: _ } => match key {
+                        SettingKey::WifiEnabled => {
+                            if let Some(v) = value.as_bool() {
+                                let mut s = wifi;
+                                s.set_if_modified(v);
+                            }
                         }
-                    }
-                    SettingKey::BluetoothEnabled => {
-                        if let Some(v) = value.as_bool() {
-                            let mut s = bt;
-                            s.set_if_modified(v);
+                        SettingKey::BluetoothEnabled => {
+                            if let Some(v) = value.as_bool() {
+                                let mut s = bt;
+                                s.set_if_modified(v);
+                            }
                         }
-                    }
-                    SettingKey::AudioVolume => {
-                        if let Some(v) = value.as_f64() {
-                            let mut s = volume;
-                            s.set_if_modified(v);
+                        SettingKey::AudioVolume => {
+                            if let Some(v) = value.as_f64() {
+                                let mut s = volume;
+                                s.set_if_modified(v);
+                            }
                         }
-                    }
-                    SettingKey::AudioMuted => {
-                        if let Some(v) = value.as_bool() {
-                            let mut s = muted;
-                            s.set_if_modified(v);
+                        SettingKey::AudioMuted => {
+                            if let Some(v) = value.as_bool() {
+                                let mut s = muted;
+                                s.set_if_modified(v);
+                            }
                         }
-                    }
-                    SettingKey::DisplayBrightness => {
-                        if let Some(v) = value.as_f64() {
-                            let mut s = brightness;
-                            s.set_if_modified(v);
+                        SettingKey::DisplayBrightness => {
+                            if let Some(v) = value.as_f64() {
+                                let mut s = brightness;
+                                s.set_if_modified(v);
+                            }
                         }
-                    }
-                    SettingKey::DoNotDisturb => {
-                        let on = value.as_str().map(|s| s != "off").unwrap_or(false)
-                            || value.as_bool().unwrap_or(false);
-                        let mut s = dnd;
-                        s.set_if_modified(on);
-                    }
-                    SettingKey::Custom(ref k) => {
-                        let mut ts = topbar_settings.read().clone();
-                        if apply_topbar_custom(&mut ts, k.as_str(), &value) {
-                            topbar_settings.set(ts);
+                        SettingKey::DoNotDisturb => {
+                            let on = value.as_str().map(|s| s != "off").unwrap_or(false)
+                                || value.as_bool().unwrap_or(false);
+                            let mut s = dnd;
+                            s.set_if_modified(on);
                         }
-                    }
-                    SettingKey::AccentColor => {
-                        if let Some(s) = value.as_str() {
-                            if let Some(acc) = ui::ACCENTS.iter().find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s)) {
+                        SettingKey::Custom(ref k) => {
+                            let mut ts = topbar_settings.read().clone();
+                            if apply_topbar_custom(&mut ts, k.as_str(), &value) {
+                                topbar_settings.set(ts);
+                            }
+                        }
+                        SettingKey::AccentColor => {
+                            if let Some(s) = value.as_str() {
+                                if let Some(acc) = ui::ACCENTS.iter().find(|a| a.name.eq_ignore_ascii_case(s) || a.hex.eq_ignore_ascii_case(s)) {
+                                    let mut th = theme_state;
+                                    let new_t = th.read().with_accent(*acc);
+                                    th.set(new_t);
+                                    ui::set_theme(&new_t);
+                                }
+                            }
+                        }
+                        SettingKey::ThemeMode => {
+                            if let Some(s) = value.as_str() {
+                                let mode = match s { "light" => ui::ThemeMode::Light, "auto" => ui::ThemeMode::Auto, _ => ui::ThemeMode::Dark };
                                 let mut th = theme_state;
-                                let new_t = th.read().with_accent(*acc);
+                                let new_t = th.read().with_mode(mode);
                                 th.set(new_t);
                                 ui::set_theme(&new_t);
                             }
                         }
+                        SettingKey::PowerProfile => {}
+                        _ => {}
+                    },
+                    SettingsEvent::LockChanged { .. } => {}
+                    SettingsEvent::Reloaded => {
+                        load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
                     }
-                    SettingKey::ThemeMode => {
-                        if let Some(s) = value.as_str() {
-                            let mode = match s { "light" => ui::ThemeMode::Light, "auto" => ui::ThemeMode::Auto, _ => ui::ThemeMode::Dark };
-                            let mut th = theme_state;
-                            let new_t = th.read().with_mode(mode);
-                            th.set(new_t);
-                            ui::set_theme(&new_t);
-                        }
-                    }
-                    SettingKey::PowerProfile => {}
-                    _ => {}
-                },
-                SettingsEvent::LockChanged { .. } => {}
-                SettingsEvent::Reloaded => {
-                    load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
+                    SettingsEvent::Alert(_) => {}
                 }
-                SettingsEvent::Alert(_) => {}
             }
+            eprintln!("topbar subscribe disconnected; retrying");
+            {
+                let mut c = connected;
+                c.set_if_modified(false);
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     });
 }
@@ -595,11 +623,24 @@ pub fn travel_guard_holds(cursor_x: f64, cursor_y: f64) -> bool {
 pub fn spawn_panel_focus_watcher(
     keep_classes: &'static [&'static str],
     own_title: &'static str,
-    mut dismiss: State<bool>,
+    dismiss: State<bool>,
 ) {
+    spawn_panel_focus_watcher_guarded(keep_classes, own_title, dismiss, || true);
+}
+
+pub fn spawn_panel_focus_watcher_guarded(
+    keep_classes: &'static [&'static str],
+    own_title: &'static str,
+    dismiss: State<bool>,
+    is_current: impl Fn() -> bool + Send + 'static,
+) {
+    let mut dismiss = dismiss;
     spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            if !is_current() {
+                break;
+            }
             let should_close = tokio::task::spawn_blocking(move || {
                 let out = std::process::Command::new("hyprctl").args(["activewindow", "-j"]).output();
                 if let Ok(o) = out {
@@ -658,12 +699,17 @@ pub fn now_ms() -> u64 {
 /// otherwise open a panel twice (leaking one window) or open-then-instantly-close it.
 pub fn rate_limit_ok(last: &AtomicU64, window_ms: u64) -> bool {
     let now = now_ms();
-    let prev = last.swap(now, Ordering::SeqCst);
-    prev == 0 || now.saturating_sub(prev) >= window_ms
+    let prev = last.load(Ordering::SeqCst);
+    if prev == 0 || now.saturating_sub(prev) >= window_ms {
+        last.store(now, Ordering::SeqCst);
+        return true;
+    }
+    false
 }
 
 pub static LAST_PANEL_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
 pub static LAST_NOTIF_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
+pub static LAST_CALENDAR_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
 pub static LAST_CLIPBOARD_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
 pub static LAST_SCREENSHOT_TOGGLE_MS: AtomicU64 = AtomicU64::new(0);
 static LAST_CLIPBOARD_OPEN_MS: AtomicU64 = AtomicU64::new(0);
@@ -692,6 +738,7 @@ pub fn screenshot_opened_recently() -> bool {
 /// local dismiss, preserving the PanelShell exit animation.
 pub static CLOSE_PANEL: AtomicBool = AtomicBool::new(false);
 pub static CLOSE_NOTIFICATIONS: AtomicBool = AtomicBool::new(false);
+pub static CLOSE_CALENDAR: AtomicBool = AtomicBool::new(false);
 pub static CLOSE_CLIPBOARD: AtomicBool = AtomicBool::new(false);
 pub static CLOSE_SCREENSHOT: AtomicBool = AtomicBool::new(false);
 
@@ -699,16 +746,81 @@ pub fn clear_close_flag(flag: &'static AtomicBool) {
     flag.store(false, Ordering::SeqCst);
 }
 
-pub fn spawn_close_flag_watcher(flag: &'static AtomicBool, mut dismiss: State<bool>) {
+pub fn spawn_close_flag_watcher_guarded(
+    flag: &'static AtomicBool,
+    dismiss: State<bool>,
+    is_current: impl Fn() -> bool + Send + 'static,
+) {
+    let mut dismiss = dismiss;
     spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(80)).await;
+            if !is_current() {
+                break;
+            }
             if flag.swap(false, Ordering::SeqCst) {
                 dismiss.set(true);
                 break;
             }
         }
     });
+}
+
+pub fn is_panel_window_current(my_wid: winit::window::WindowId) -> bool {
+    GlobalContexts::get()
+        .try_get_context::<crate::PanelWindowId>()
+        .and_then(|c| c.0.lock().ok().and_then(|g| *g))
+        .is_some_and(|id| id == my_wid)
+}
+
+pub fn is_notifications_window_current(my_wid: winit::window::WindowId) -> bool {
+    GlobalContexts::get()
+        .try_get_context::<crate::NotificationPanelWindowId>()
+        .and_then(|c| c.0.lock().ok().and_then(|g| *g))
+        .is_some_and(|id| id == my_wid)
+}
+
+pub fn is_calendar_window_current(my_wid: winit::window::WindowId) -> bool {
+    GlobalContexts::get()
+        .try_get_context::<crate::CalendarPanelWindowId>()
+        .and_then(|c| c.0.lock().ok().and_then(|g| *g))
+        .is_some_and(|id| id == my_wid)
+}
+
+pub fn is_clipboard_window_current(my_wid: winit::window::WindowId) -> bool {
+    GlobalContexts::get()
+        .try_get_context::<crate::ClipboardWindowId>()
+        .and_then(|c| c.0.lock().ok().and_then(|g| *g))
+        .is_some_and(|id| id == my_wid)
+}
+
+pub fn is_screenshot_window_current(my_wid: winit::window::WindowId) -> bool {
+    GlobalContexts::get()
+        .try_get_context::<crate::ScreenshotWindowId>()
+        .and_then(|c| c.0.lock().ok().and_then(|g| *g))
+        .is_some_and(|id| id == my_wid)
+}
+
+pub fn hypr_has_any_class_blocking(classes: &[&str]) -> bool {
+    let out = match std::process::Command::new("hyprctl").args(["clients", "-j"]).output() {
+        Ok(o) if o.status.success() => o,
+        _ => return true,
+    };
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return true;
+    };
+    let Some(arr) = v.as_array() else {
+        return true;
+    };
+    for c in arr {
+        if let Some(cls) = c.get("class").and_then(|x| x.as_str()) {
+            if classes.iter().any(|w| *w == cls) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn spawn_stale_close_watchdog(
@@ -744,6 +856,15 @@ pub fn request_notifications_close() {
     spawn_stale_close_watchdog(&CLOSE_NOTIFICATIONS, "overlay-notifications", || {
         GlobalContexts::get()
             .try_get_context::<crate::NotificationPanelWindowId>()
+            .and_then(|c| c.0.lock().ok().and_then(|mut g| g.take()))
+    });
+}
+
+pub fn request_calendar_close() {
+    CLOSE_CALENDAR.store(true, Ordering::SeqCst);
+    spawn_stale_close_watchdog(&CLOSE_CALENDAR, "overlay-calendar", || {
+        GlobalContexts::get()
+            .try_get_context::<crate::CalendarPanelWindowId>()
             .and_then(|c| c.0.lock().ok().and_then(|mut g| g.take()))
     });
 }
@@ -1065,24 +1186,29 @@ pub fn load_reduced_motion_blocking() -> bool {
 }
 
 pub fn subscribe_reduced_motion(reduced: State<bool>) {
-    let rx = match ipsea::settings::subscribe_channel(socket(), SubscriptionFilter::all()) {
-        Ok(rx) => rx,
-        Err(e) => {
-            eprintln!("reduced-motion subscribe failed: {e}");
-            return;
-        }
-    };
-    let mut rx = rx;
     spawn(async move {
-        while let Some(evt) = rx.recv().await {
-            if let ipsea::settings::SettingsEvent::Changed { key, value, .. } = evt {
-                if key == ipsea::settings::SettingKey::AccessibilityReduceMotion {
-                    if let Some(b) = value.as_bool() {
-                        let mut s = reduced;
-                        s.set_if_modified(b);
+        loop {
+            let rx = match ipsea::settings::subscribe_channel(socket(), SubscriptionFilter::all()) {
+                Ok(rx) => rx,
+                Err(e) => {
+                    eprintln!("reduced-motion subscribe failed: {e}; retrying");
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+            };
+            let mut rx = rx;
+            while let Some(evt) = rx.recv().await {
+                if let ipsea::settings::SettingsEvent::Changed { key, value, .. } = evt {
+                    if key == ipsea::settings::SettingKey::AccessibilityReduceMotion {
+                        if let Some(b) = value.as_bool() {
+                            let mut s = reduced;
+                            s.set_if_modified(b);
+                        }
                     }
                 }
             }
+            eprintln!("reduced-motion subscribe disconnected; retrying");
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     });
 }

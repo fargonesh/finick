@@ -1,6 +1,13 @@
 [workspace]
 resolver = "2"
 members = ["libs/*", "services/*", "apps/*", "finickctl"]
+exclude = ["libs/freya"]
+
+[workspace.dependencies]
+freya = { path = "libs/freya/crates/freya", features = ["all"] }
+freya-components = { path = "libs/freya/crates/freya-components" }
+freya-devtools = { path = "libs/freya/crates/freya-devtools", features = ["server"] }
+freya-performance-plugin = { path = "libs/freya/crates/freya-performance-plugin" }
 
 [profile.wasm-dev]
 inherits = "dev"

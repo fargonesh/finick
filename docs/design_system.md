@@ -73,15 +73,29 @@ Don't use `page_header()` legacy headers, big 28px titles, manual ALL CAPS label
 
 ## Controls
 
-Switches: `pill_switch(checked, on_toggle)` from `libs/ui/src/components/switch.rs`. It's 36x21, track `accent` or `track`, white thumb. Raw `Switch::new()` renders the default pink Freya switch and breaks the theme, so it's banned in `apps/`.
+Switches: `pill_switch(checked, on_toggle)` from `libs/ui/src/components/switch.rs`. It's 36x21, track `accent` or `track`, white thumb. Hover is instant: track goes to `accent_blue_hover` when on, `border` when off. Raw `Switch::new()` renders the default pink Freya switch and breaks the theme, so it's banned in `apps/`.
+
+Hover is a state swap, not an animation. Every shared button, switch, chip, and segment tracks hover internally with `use_state` plus `on_pointer_enter`/`on_pointer_leave` and swaps `background` on the next frame. No fade, no delay, per the Motion rules. Keyboard focus keeps its own ring (`accent` border) and hover never removes it. Hover colors per control:
+
+- `primary_button`: `primary_accent` to `accent_blue_hover`
+- `secondary_button`, `icon_button`: `bg_card` to `bg_hover`
+- `danger_button`: `accent_red` to a lighter red
+- `ghost_button`, `tool_button`, `small_close_button`, `focus_pill`: `panel_raised` to `track`
+- `segmented_control` inactive segment: transparent to `bg_hover`
+- `status_chip` with `on_press`: `track` to `panel_raised` when off, `bg_active` to `bg_hover` when on
+- mute button in `slider_row_with_mute`: `panel_raised` to `track` when unmuted, `accent` to `accent_blue_hover` when muted
+
+Shared buttons are `Component` structs that own their hover state, so call sites keep the same `ghost_button("Save", || ...)` shape. Do not add hover with `use_state` inside `apps/` renders. If a new hoverable shape is needed twice, add it to `libs/ui` once.
 
 Other controls and when to reach for them:
 
-- `segmented_control()` for Light/Dark/Auto or Small/Medium/Large
-- `slider_row()` for brightness and volume
-- `status_chip(text, is_on, on_press)` for Connected, Paired, INSTALLED, DEFAULT, kind badges; never hand roll `rect().padding().corner_radius(999)` badges
-- `primary_button()`, `secondary_button()`, `danger_button()`, `ghost_button()`, `focus_pill()` for actions; never `Button::new()` in overlays, never accent `rect().on_press` (locker Unlock did this), never bordered icon `rect().on_press` (files toolbar did this); don't wrap them in extra bordered rects
-- `icon_button(icon, on_press)` for toolbar icons; never hand roll `rect().padding(8).corner_radius(8)` icon boxes
+- `segmented_control()` for inline pickers (Light/Dark/Auto in a card header). Hug-content. `segmented_control_full()` for full-width rows (DND schedule presets in the calendar panel) with equal `flex(1)` segments. Same split for `segmented_control_dynamic()` and `segmented_control_dynamic_full()`. Never put the hug variant in a full-width row and never wrap the full variant in an extra flex rect.
+- `slider_row()` for brightness and volume. Already full width. `slider_row_with_mute()` adds the mute pill with hover.
+- `status_chip(text, is_on, on_press)` for Connected, Paired, INSTALLED, DEFAULT, kind badges; never hand roll `rect().padding().corner_radius(999)` badges. Chips with `on_press` get hover. Display-only chips stay flat.
+- `primary_button()`, `secondary_button()`, `danger_button()`, `ghost_button()`, `focus_pill()` for actions; never `Button::new()` in overlays, never accent `rect().on_press` (locker Unlock did this), never bordered icon `rect().on_press` (files toolbar did this); don't wrap them in extra bordered rects. The `*_full` variants fill the parent. In a horizontal row of equals (media controls, Cut/Copy), give each button its own flex share and let the `*_full` button fill it.
+- `ghost_icon_button()` and `ghost_icon_button_full()` for icon-only pill actions. Use for media Prev/Play-Pause/Next (`SKIP_BACK`, `PLAY`/`PAUSE`, `SKIP_FORWARD`), never text labels for transport controls.
+- `icon_button(icon, on_press)` for toolbar icons; never hand roll `rect().padding(8).corner_radius(8)` icon boxes. Toolbar navigation uses SVG icons through `tool_button` (`CHEVRON_LEFT`, `CHEVRON_RIGHT`, `REFRESH_CW`), never text glyphs like `‹` `›` `↻`. The files toolbar shipped those glyphs and they are gone.
+- Tab close uses `small_close_button()`, never `ghost_button("×")`.
 - `ctx_button()` and `ctx_divider()` for context menus; never raw `MenuButton::new()`
 - `input_level_pill()` and `multi_segment_bar()` for OSD and storage bars; never hand roll `rect().height(8).corner_radius(999)` meters
 - `top_bar_custom()` for app top bars; never hand roll `rect().height(56)` chrome
@@ -192,8 +206,8 @@ Headers and buttons carry the product voice, so keep them plain and specific. "B
 ## Checklist Before Ship
 
 1. Did you use `tile`, `tile_head`, `setting_row`, `page_head` instead of manual rects.
-2. Any raw `Switch`, `Button`, `MenuButton`, or raw `Input` left. Replace with `pill_switch`, shared buttons, `ctx_button`, or pill search.
-3. Any hand-rolled close `✕`, badge, bar, top bar, or result row. Replace with `icon_button`, `status_chip`, `input_level_pill` or `multi_segment_bar`, `top_bar_custom`, `list_item`.
+2. Any raw `Switch`, `Button`, `MenuButton`, or raw `Input` left. Replace with `pill_switch`, shared buttons, `ctx_button`, or pill search. Shared buttons carry hover internally, nothing extra to wire at the call site.
+3. Any hand-rolled close `✕`, badge, bar, top bar, or result row. Replace with `small_close_button`, `status_chip`, `input_level_pill` or `multi_segment_bar`, `top_bar_custom`, `list_item`. Transport and toolbar actions use SVG icon buttons (`ghost_icon_button_full`, `tool_button`), never text labels or text glyphs.
 4. One border per input. Transparent Input in styled parents, full width.
 5. Tokens from the short set, `GAP` spacing, `RADIUS_LG/MD/SM/PILL`.
 6. No fixed search widths, no uneven button wraps, responsive helpers where Overview uses them.

@@ -13,6 +13,8 @@ pub mod privacy;
 pub use privacy::*;
 pub mod shortcuts;
 pub use shortcuts::*;
+pub mod hypr;
+pub use hypr::{hypr_bind, hypr_bring_to_top, hypr_close_window, hypr_exec, hypr_focus_window, hypr_workspace, lua_escape};
 pub mod desktop_apps;
 pub use desktop_apps::*;
 pub mod auth;
@@ -434,11 +436,16 @@ fn persist_pointer_settings(s: &PointerSettings) {
 }
 
 fn hypr_input_keyword(key: &str, val: &str) -> Result<(), String> {
-    let out = Command::new("hyprctl").args(["keyword", &format!("input:{key}"), val]).output()
-        .map_err(|e| format!("failed to run hyprctl: {e}"))?;
-    if out.status.success() { Ok(()) } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
+    // Lua-first (Hyprland >=0.55 rejects `keyword` on Lua configs), legacy fallback.
+    let lua_val = if val == "true" || val == "false" {
+        val.to_string()
+    } else if val.parse::<f64>().is_ok() {
+        val.to_string()
+    } else {
+        format!("\"{}\"", val.replace('\\', "\\\\").replace('"', "\\\""))
+    };
+    let lua = format!("hl.config({{ input = {{ {key} = {lua_val} }} }})");
+    HyprlandBackend::hyprctl_set_config(&lua, &format!("input:{key}"), val)
 }
 
 pub fn apply_pointer_speed(speed: f64) -> Result<(), String> {
@@ -653,15 +660,63 @@ pub fn apply_idle_delay(kind: &str, seconds: u32) -> Result<(), String> {
 }
 
 pub fn load_lid_action() -> String {
-    if let Ok(raw) = std::fs::read_to_string("/etc/systemd/logind.conf") {
-        for line in raw.lines() {
-            let t = line.trim();
-            if t.starts_with("HandleLidSwitch") && !t.starts_with('#') {
-                if let Some(v) = t.split('=').nth(1) { return v.trim().to_string(); }
+    for path in [lid_dropin_path(), std::path::PathBuf::from("/etc/systemd/logind.conf")] {
+        if let Ok(raw) = std::fs::read_to_string(&path) {
+            for line in raw.lines() {
+                let t = line.trim();
+                if t.starts_with("HandleLidSwitch") && !t.starts_with('#') {
+                    if let Some(v) = t.split('=').nth(1) {
+                        let v = v.trim().to_string();
+                        if !v.is_empty() {
+                            return v;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(f) = finick_data_file("lid_action") {
+        if let Ok(raw) = std::fs::read_to_string(f) {
+            let v = raw.trim().to_string();
+            if !v.is_empty() {
+                return v;
             }
         }
     }
     "suspend".to_string()
+}
+
+pub fn lid_dropin_path() -> std::path::PathBuf {
+    std::path::PathBuf::from("/etc/systemd/logind.conf.d/10-finick-lid.conf")
+}
+
+pub fn lid_dropin_body(action: &str) -> String {
+    format!("[Login]\nHandleLidSwitch={action}\nHandleLidSwitchExternalPower={action}\nHandleLidSwitchDocked={action}\n")
+}
+
+/// Why the lid switch is system-managed (NixOS / admin policy), if it is.
+pub fn lid_managed_reason() -> Option<String> {
+    if lid_dropin_path().exists() {
+        return Some("Managed by /etc/systemd/logind.conf.d/10-finick-lid.conf".to_string());
+    }
+    if let Ok(raw) = std::fs::read_to_string("/etc/systemd/logind.conf") {
+        let pinned = raw.lines().any(|l| {
+            let t = l.trim();
+            !t.starts_with('#') && t.starts_with("HandleLidSwitch")
+        });
+        if pinned {
+            return Some("Managed by system logind.conf — needs admin to change".to_string());
+        }
+    }
+    None
+}
+
+/// Why lid-close control is unavailable on this machine, if it is.
+pub fn lid_unavailable_reason() -> Option<String> {
+    if std::process::Command::new("systemctl").arg("--version").output().is_err() {
+        return Some("Unavailable: systemd-logind not found".to_string());
+    }
+    None
 }
 
 pub fn apply_lid_action(action: &str) -> Result<(), String> {
@@ -671,7 +726,101 @@ pub fn apply_lid_action(action: &str) -> Result<(), String> {
         if let Some(parent) = f.parent() { let _ = std::fs::create_dir_all(parent); }
         let _ = std::fs::write(f, action);
     }
-    Ok(())
+    let body = lid_dropin_body(action);
+    if let Some(parent) = lid_dropin_path().parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::write(lid_dropin_path(), body) {
+        Ok(()) => {
+            let _ = Command::new("systemctl").args(["restart", "systemd-logind"]).output();
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            Ok(())
+        }
+        Err(e) => Err(format!("failed to write logind drop-in (need admin): {e}")),
+    }
+}
+
+/// Parse `upower --dump` charge history into 7 recent samples (0-100).
+/// Returns None when no usable history exists so callers show an honest empty state.
+pub fn parse_upower_dump_history(output: &str) -> Option<[f32; 7]> {
+    let mut in_charge_history = false;
+    let mut samples: Vec<f32> = Vec::new();
+    for line in output.lines() {
+        let t = line.trim();
+        let lower = t.to_lowercase();
+        if lower.starts_with("history (charge)") {
+            in_charge_history = true;
+            continue;
+        }
+        if lower.starts_with("history (rate)") || lower.starts_with("history (time") {
+            if in_charge_history {
+                break;
+            }
+            in_charge_history = false;
+            continue;
+        }
+        if !in_charge_history {
+            continue;
+        }
+        if t.is_empty() {
+            if !samples.is_empty() {
+                break;
+            }
+            continue;
+        }
+        let parts: Vec<&str> = t.split_whitespace().collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        if let Ok(pct) = parts[1].trim_end_matches('%').parse::<f32>() {
+            if (0.0..=100.0).contains(&pct) {
+                samples.push(pct);
+            }
+        }
+    }
+    if samples.len() < 2 {
+        let mut fallback: Vec<f32> = Vec::new();
+        for line in output.lines() {
+            let t = line.trim().to_lowercase();
+            if let Some(rest) = t.strip_prefix("percentage:") {
+                if let Ok(pct) = rest.trim().trim_end_matches('%').parse::<f32>() {
+                    if (0.0..=100.0).contains(&pct) {
+                        fallback.push(pct);
+                    }
+                }
+            }
+        }
+        if fallback.len() >= 7 {
+            let tail = &fallback[fallback.len() - 7..];
+            let mut arr = [0.0f32; 7];
+            arr.copy_from_slice(tail);
+            return Some(arr);
+        }
+        return None;
+    }
+    let n = samples.len().min(7);
+    let tail = &samples[samples.len() - n..];
+    let mut arr = [0.0f32; 7];
+    if n == 7 {
+        arr.copy_from_slice(tail);
+    } else {
+        let first = tail[0];
+        for v in arr.iter_mut().take(7 - n) {
+            *v = first;
+        }
+        arr[7 - n..].copy_from_slice(tail);
+    }
+    Some(arr)
+}
+
+pub fn query_battery_history() -> Option<[f32; 7]> {
+    let out = Command::new("upower").arg("--dump").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_upower_dump_history(&String::from_utf8_lossy(&out.stdout))
 }
 
 pub fn query_power_profile() -> String {
@@ -2502,6 +2651,15 @@ mod tests {
         assert_eq!(compute_battery_health(6000, 5000), Some(100));
         assert_eq!(compute_battery_health(0, 5000), None);
         assert_eq!(compute_battery_health(4600, 0), None);
+    }
+
+    #[test]
+    fn test_parse_upower_dump_history() {
+        let sample = "Device: /org/freedesktop/UPower/devices/battery_BAT0\n  History (charge):\n    1760000000  82.000  discharging\n    1760000600  81.000  discharging\n    1760001200  80.000  discharging\n    1760001800  79.000  discharging\n    1760002400  78.000  discharging\n    1760003000  77.000  discharging\n    1760003600  76.000  discharging\n  History (rate):\n    1760000000  12.000  discharging\n";
+        let parsed = parse_upower_dump_history(sample).unwrap();
+        assert_eq!(parsed, [82.0, 81.0, 80.0, 79.0, 78.0, 77.0, 76.0]);
+        assert!(parse_upower_dump_history("Device: x\n  percentage: 55%\n").is_none());
+        assert!(parse_upower_dump_history("").is_none());
     }
 
     #[test]

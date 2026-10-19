@@ -284,8 +284,8 @@ pub fn ensure_launcher_window_rules() {
 pub fn focus_launcher_best_effort() {
     ensure_launcher_window_rules();
     std::thread::spawn(|| {
-        let _ = Command::new("hyprctl").args(["dispatch", "bringactivetotop", "class:^(launcher)$"]).output();
-        let _ = Command::new("hyprctl").args(["dispatch", "focuswindow", "class:^(launcher)$"]).output();
+        system::hypr_bring_to_top("class:^(launcher)$");
+        system::hypr_focus_window("class:^(launcher)$");
     });
 }
 
@@ -703,11 +703,7 @@ fn dispatch_exec(args: &[String]) -> bool {
 }
 
 fn run_hyprctl_exec(cmd: &str) -> bool {
-    let trimmed = cmd.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    Command::new("hyprctl").args(["dispatch", "exec", "--", trimmed]).spawn().is_ok()
+    system::hypr_exec(cmd)
 }
 
 fn run_xdg_open(path: &str) -> bool {
@@ -959,10 +955,55 @@ fn secondary_hint(r: &index::ty::SearchResult) -> &'static str {
     }
 }
 
+/// Page slugs accepted on the command line / via URI handlers.
+/// The launcher has a single page; the value is used as the initial query.
+pub const LAUNCHER_PAGE_SLUGS: &[&str] = &["<query>"];
+
+struct LauncherApp {
+    initial_query: String,
+}
+
+impl freya::prelude::App for LauncherApp {
+    fn render(&self) -> impl IntoElement {
+        launcher_root(self.initial_query.clone())
+    }
+}
+
+/// Window config seeded with an initial search query (deep-link support).
+pub fn launcher_window_config_with_query(initial_query: String) -> WindowConfig {
+    WindowConfig::new_app(LauncherApp { initial_query })
+        .with_title("launcher")
+        .with_app_id("launcher")
+        .with_size(700., 540.)
+        .with_min_size(640., 460.)
+        .with_decorations(false)
+        .with_transparency(true)
+        .with_background(Color::TRANSPARENT)
+}
+
+/// Resolve the initial launcher query from deep-link args: `--query`,
+/// `?query=` / `?search=`, a positional query, or `--page <query>`.
+pub fn initial_query_from_args(args: &config::LaunchArgs) -> String {
+    if let Some(extra) = args.extra.as_deref() {
+        if extra != "__help__" && !extra.trim().is_empty() {
+            return extra.to_string();
+        }
+    }
+    if let Some(page) = args.page.as_deref() {
+        // `launcher <query>` arrives as `page`; anything is a valid query.
+        return page.to_string();
+    }
+    String::new()
+}
+
 pub fn launcher_app() -> Element {
+    launcher_root(String::new())
+}
+
+fn launcher_root(initial_query: String) -> Element {
     let _st = use_init_app_theme(get_theme());
     let t = use_app_theme();
-    let query = use_state(String::new);
+    let query = use_state(move || initial_query.clone());
     let results = use_state(Vec::<index::ty::SearchResult>::new);
     let selected = use_state(|| 0usize);
     let launch_error = use_state(|| Option::<String>::None);
@@ -974,7 +1015,7 @@ pub fn launcher_app() -> Element {
         spawn(async move {
             focus_launcher_best_effort();
             tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-            let _ = Command::new("hyprctl").args(["dispatch", "focuswindow", "class:^(launcher)$"]).output();
+            system::hypr_focus_window("class:^(launcher)$");
         });
     });
     let r_side = results;
@@ -1255,14 +1296,7 @@ pub fn launcher_app() -> Element {
 }
 
 pub fn launcher_window_config() -> WindowConfig {
-    WindowConfig::new(launcher_app)
-        .with_title("launcher")
-        .with_app_id("launcher")
-        .with_size(700., 540.)
-        .with_min_size(640., 460.)
-        .with_decorations(false)
-        .with_transparency(true)
-        .with_background(Color::TRANSPARENT)
+    launcher_window_config_with_query(String::new())
 }
 
 #[cfg(test)]

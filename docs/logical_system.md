@@ -6,7 +6,7 @@ This doc defines how state, mutations, async work, and errors should flow across
 
 Four layers, each with one job.
 
-1. Local UI state (`use_state` in the component): filter text, selected row, open/closed, arm/confirm for destructive actions. It never claims system truth.
+1. Local UI state (`use_state` in the component): filter text, selected row, open/closed, arm/confirm for destructive actions, hover highlighting. It never claims system truth. Hover lives in the shared `libs/ui` component that owns it and never touches the store or IPC.
 2. `SettingsStore` (`apps/settings/src/state.rs`): reactive mirror of daemon truth for wifi power, bluetooth power, volume, brightness, focus mode, lock states, and similar keys. Components read from it; they don't own the value.
 3. Daemon truth (`finickd` over IPC, `SettingKey`/`SettingValue`): the authority. `set_and_apply` either accepts the write or denies it with a reason.
 4. System backends (`libs/system`, `HyprlandBackend`, `nmcli`, `bluetoothctl`, `wpctl`, `lpstat`): the commands and files that actually change the machine.

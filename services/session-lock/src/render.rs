@@ -33,13 +33,61 @@ pub struct ClockText {
     pub date: String,
 }
 
+/// Now-playing snapshot for the lock screen. Read-only in this phase: the
+/// session-lock surface captures the keyboard for auth, so transport control
+/// stays on compositor media-key bindings (which still fire under lock) and
+/// on the Freya fallback locker, which has clickable controls.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct MediaSnapshot {
+    pub title: String,
+    pub artist: String,
+    pub status: String,
+}
+
 pub struct Overlays<'a> {
     pub dots: usize,
     pub dots_fail: bool,
     pub finger: FingerStatus,
     pub clock: ClockText,
     pub hint: Option<&'a str>,
+    pub media: Option<MediaSnapshot>,
+    /// Preformatted "App: summary" lines. Bodies are withheld on purpose so a
+    /// locked screen never leaks message content.
+    pub notifs: Vec<String>,
     pub font: Option<FontArc>,
+}
+
+/// Cap for notification lines drawn on the lock surface.
+pub const MAX_NOTIF_LINES: usize = 3;
+/// Display width cap per notification line (chars).
+pub const MAX_NOTIF_WIDTH: usize = 52;
+
+/// Format one lock-screen notification line, withholding the body.
+pub fn notif_line(app: &str, summary: &str) -> String {
+    let a = app.trim();
+    let s = summary.trim().replace('\n', " ");
+    let mut line = if a.is_empty() { s } else { format!("{a}: {s}") };
+    if line.chars().count() > MAX_NOTIF_WIDTH {
+        line = line.chars().take(MAX_NOTIF_WIDTH.saturating_sub(1)).collect();
+        line.push('…');
+    }
+    line
+}
+
+/// One-line "Title — Artist" label for the now-playing snapshot.
+pub fn media_line(m: &MediaSnapshot) -> String {
+    let t = m.title.trim();
+    let a = m.artist.trim();
+    if t.is_empty() && a.is_empty() {
+        return m.status.trim().to_string();
+    }
+    if a.is_empty() {
+        return t.to_string();
+    }
+    if t.is_empty() {
+        return a.to_string();
+    }
+    format!("{t} — {a}")
 }
 
 /// One-shot duration until the next minute boundary (for the clock timer).
@@ -159,6 +207,26 @@ pub fn draw_overlays(px: &mut [u32], w: i32, h: i32, ov: &Overlays) {
     if let (Some(font), Some(hint)) = (ov.font.clone(), ov.hint) {
         if !hint.is_empty() {
             draw_centered(px, w, h, &font, 20.0, hint, cy + 122, 0xFF_88_88_90);
+        }
+    }
+    // Media + notifications sit below the auth hint. Every draw is
+    // bounds-clipped, so short outputs degrade by cropping, never by panic.
+    if let Some(font) = ov.font.clone() {
+        let mut y = cy + 158;
+        if let Some(m) = ov.media.as_ref() {
+            let label = media_line(m);
+            if !label.is_empty() {
+                let prefix = if m.status.eq_ignore_ascii_case("playing") { "▶ " } else { "♫ " };
+                draw_centered(px, w, h, &font, 20.0, &format!("{prefix}{label}"), y, 0xFF_B0_B0_B8);
+                y += 28;
+            }
+        }
+        for line in ov.notifs.iter().take(MAX_NOTIF_LINES) {
+            if line.is_empty() {
+                continue;
+            }
+            draw_centered(px, w, h, &font, 18.0, line, y, 0xFF_88_88_90);
+            y += 24;
         }
     }
 }
@@ -309,6 +377,8 @@ mod tests {
             finger,
             clock: ClockText { time: "12:00".into(), date: "Tue".into() },
             hint: None,
+            media: None,
+            notifs: Vec::new(),
             font: None,
         }
     }
@@ -344,6 +414,23 @@ mod tests {
     fn test_discover_font_runs() {
         // Must not panic; finds a font wherever system fonts exist.
         let _ = discover_font();
+    }
+
+    #[test]
+    fn test_notif_line_withholds_body_and_truncates() {
+        assert_eq!(notif_line(" chat ", "hi"), "chat: hi");
+        assert_eq!(notif_line("", "hi"), "hi");
+        let long = notif_line("app", &"x".repeat(100));
+        assert!(long.chars().count() <= MAX_NOTIF_WIDTH);
+        assert!(long.ends_with('…'));
+    }
+
+    #[test]
+    fn test_media_line_formats() {
+        let m = MediaSnapshot { title: "Song".into(), artist: "Band".into(), status: "Playing".into() };
+        assert_eq!(media_line(&m), "Song — Band");
+        let m = MediaSnapshot { title: "".into(), artist: "".into(), status: "Stopped".into() };
+        assert_eq!(media_line(&m), "Stopped");
     }
 
     #[test]

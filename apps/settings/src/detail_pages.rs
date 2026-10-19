@@ -5,7 +5,7 @@ use {
     },
     freya::prelude::*,
     ipsea::settings::SettingKey,
-    system::{DisplayInfo, SystemBackend},
+    system::{DisplayInfo, HyprlandBackend, SystemBackend},
     ui::*,
 };
 
@@ -121,9 +121,15 @@ impl Component for AppearanceDetailPage {
                                                         set_theme(&new_t);
                                                         store.set(SettingKey::AccentColor, acc.hex.to_string());
                                                         let clean_hex = acc.hex.trim_start_matches('#');
-                                                        let _ = std::process::Command::new("hyprctl")
-                                                            .args(["keyword", "general:col.active_border", &format!("0xff{clean_hex}")])
-                                                            .status();
+                                                        let hypr_color = format!("0xff{clean_hex}");
+                                                        let lua = format!(
+                                                            "hl.config({{ general = {{ col = {{ active_border = {{ colors = {{ \"{hypr_color}\" }} }} }} }} }})"
+                                                        );
+                                                        let _ = HyprlandBackend::hyprctl_set_config(
+                                                            &lua,
+                                                            "general:col.active_border",
+                                                            &hypr_color,
+                                                        );
                                                     }
                                                 },
                                             )
@@ -946,6 +952,7 @@ impl Component for VpnManager {
         let vpns: State<Vec<system::VpnInfo>> = use_state(Vec::new);
         let loading: State<bool> = use_state(|| true);
         let op_error: State<Option<String>> = use_state(|| None);
+        let vpn_armed: State<Option<String>> = use_state(|| None);
         let show_add: State<bool> = use_state(|| false);
         let vpn_name: State<String> = use_state(String::new);
         let vpn_gateway: State<String> = use_state(String::new);
@@ -1008,6 +1015,61 @@ impl Component for VpnManager {
                 let err = op_error;
                 let vs = vpns;
                 let ld = loading;
+                let armed_name = vpn_armed.read().clone();
+                let is_armed = armed_name.as_deref() == Some(name.as_str());
+                let vpn_action: Element = if !is_armed {
+                    let key = name_c.clone();
+                    let mut armed = vpn_armed;
+                    secondary_button(if is_on { "Down" } else { "Up" }, move || {
+                        armed.set(Some(key.clone()));
+                        let id = key.clone();
+                        spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            if armed.read().clone() == Some(id) {
+                                armed.set(None);
+                            }
+                        });
+                    })
+                    .into_element()
+                } else {
+                    let n = name_c.clone();
+                    let mut vs = vs;
+                    let mut ld = ld;
+                    let mut err = err;
+                    let mut armed = vpn_armed;
+                    rect()
+                        .horizontal()
+                        .spacing(8.)
+                        .child(danger_button(
+                            if is_on { "Sure? Down" } else { "Sure? Up" },
+                            move || {
+                                armed.set(None);
+                                let value = n.clone();
+                                spawn(async move {
+                                    let res = tokio::task::spawn_blocking(move || {
+                                        system::apply_vpn_state(&value, !is_on)
+                                    })
+                                    .await
+                                    .unwrap_or(Err("Task failed".to_string()));
+                                    match res {
+                                        Ok(()) => {
+                                            err.set(None);
+                                            let list = tokio::task::spawn_blocking(
+                                                system::list_vpn_connections,
+                                            )
+                                            .await
+                                            .unwrap_or_default();
+                                            vs.set(list);
+                                            ld.set(false);
+                                        }
+                                        Err(e) => err.set(Some(e)),
+                                    }
+                                });
+                            },
+                        ))
+                        .child(ghost_button("Cancel", move || armed.set(None)))
+                        .into_element()
+                };
                 base = base.child(setting_row(
                     name,
                     Some(meta),
@@ -1017,32 +1079,7 @@ impl Component for VpnManager {
                         .cross_align(Alignment::Center)
                         .spacing(8.)
                         .child(status_chip(if is_on { "Up" } else { "Down" }, is_on, None))
-                        .child(secondary_button(if is_on { "Down" } else { "Up" }, move || {
-                            let n = name_c.clone();
-                            let mut vs = vs;
-                            let mut ld = ld;
-                            let mut err = err;
-                            spawn(async move {
-                                let res = tokio::task::spawn_blocking(move || {
-                                    system::apply_vpn_state(&n, !is_on)
-                                })
-                                .await
-                                .unwrap_or(Err("Task failed".to_string()));
-                                match res {
-                                    Ok(()) => {
-                                        err.set(None);
-                                        let list = tokio::task::spawn_blocking(
-                                            system::list_vpn_connections,
-                                        )
-                                        .await
-                                        .unwrap_or_default();
-                                        vs.set(list);
-                                        ld.set(false);
-                                    }
-                                    Err(e) => err.set(Some(e)),
-                                }
-                            });
-                        })),
+                        .child(vpn_action),
                 ));
             }
         }
@@ -1863,9 +1900,7 @@ impl Component for DisplayDetailPage {
                     let mut s = status;
                     freya::prelude::spawn(async move {
                         let _ = tokio::task::spawn_blocking(|| {
-                            let _ = std::process::Command::new("hyprctl")
-                                .args(["dispatch", "exec", "notify-send 'Display Identify' 'Overlay shown'"])
-                                .output();
+                            system::hypr_exec("notify-send 'Display Identify' 'Overlay shown'");
                         })
                         .await;
                         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -3694,11 +3729,19 @@ impl Component for BatteryDetailPage {
         let charge_loaded: State<bool> = use_state(|| false);
         let power_err: State<Option<String>> = use_state(|| None);
         let limit_err: State<Option<String>> = use_state(|| None);
+        let batt_history: State<Option<[f32; 7]>> = use_state(|| None);
+        let hist_loaded: State<bool> = use_state(|| false);
+        let lid_managed: State<Option<String>> = use_state(|| None);
+        let lid_unavail: State<Option<String>> = use_state(|| None);
         use_hook(move || {
             let mut id = idle;
             let mut lid = lid_action;
             let mut cl = charge_limit;
             let mut cl_loaded = charge_loaded;
+            let mut hist = batt_history;
+            let mut hist_ld = hist_loaded;
+            let mut managed = lid_managed;
+            let mut unavail = lid_unavail;
             spawn(async move {
                 let s = tokio::task::spawn_blocking(system::load_idle_settings)
                     .await
@@ -3726,8 +3769,22 @@ impl Component for BatteryDetailPage {
                     .unwrap_or(None);
                 cl.set_if_modified(limit);
                 cl_loaded.set_if_modified(true);
+                let hist_vals = tokio::task::spawn_blocking(system::query_battery_history)
+                    .await
+                    .unwrap_or(None);
+                hist.set(hist_vals);
+                hist_ld.set(true);
+                let managed_val =
+                    tokio::task::spawn_blocking(system::lid_managed_reason).await.unwrap_or(None);
+                managed.set(managed_val);
+                let unavail_val =
+                    tokio::task::spawn_blocking(system::lid_unavailable_reason).await.unwrap_or(None);
+                unavail.set(unavail_val);
             });
         });
+
+        let history_opt = batt_history.read().clone();
+        let history_is_loaded = *hist_loaded.read();
 
         if !has_battery {
             return rect()
@@ -3744,11 +3801,20 @@ impl Component for BatteryDetailPage {
                                 .child(tile_head(None, "Power", Some(tile_sub("No battery — plugged in"))))
                                 .child(tile_sub("This device is running on AC power. Showing system power usage instead."))
                                 .child(
-                                    rect()
-                                        .margin((12., 0., 0., 0.))
-                                        .child(mini_bar_chart([42., 58., 35., 62., 48., 55., 60.], [
-                                            "M", "T", "W", "T", "F", "S", "S",
-                                        ])),
+                                    rect().margin((12., 0., 0., 0.)).child(
+                                        if !history_is_loaded {
+                                            tile_sub("Reading power history…").into_element()
+                                        } else if let Some(vals) = history_opt {
+                                            mini_bar_chart(vals, ["M", "T", "W", "T", "F", "S", "S"]).into_element()
+                                        } else {
+                                            empty_state(
+                                                BATTERY,
+                                                "No power history",
+                                                "upower --dump reported no charge history on this machine.",
+                                            )
+                                            .into_element()
+                                        },
+                                    ),
                                 )
                                 .child(
                                     rect()
@@ -3876,11 +3942,28 @@ impl Component for BatteryDetailPage {
                         .maybe_child(power_err.read().clone().map(tile_sub)),
                 )
                 .child(grid2([
-                    rect().width(Size::flex(1.)).child(
-                        tile()
-                            .child(tile_head(None, "Past 7 days", None::<String>))
-                            .child(mini_bar_chart([52., 70., 38., 85., 60., 44., 78.], ["M", "T", "W", "T", "F", "S", "S"])),
-                    ),
+                    rect().width(Size::flex(1.)).child({
+                        let mut hist_tile = tile().child(tile_head(
+                            None,
+                            "Past 7 days",
+                            (!history_is_loaded).then(|| tile_sub("Reading…")),
+                        ));
+                        hist_tile = hist_tile.child(
+                            if !history_is_loaded {
+                                tile_sub("Reading battery history…").into_element()
+                            } else if let Some(vals) = history_opt {
+                                mini_bar_chart(vals, ["M", "T", "W", "T", "F", "S", "S"]).into_element()
+                            } else {
+                                empty_state(
+                                    BATTERY,
+                                    "No battery history",
+                                    "upower --dump reported no charge history. Showing live capacity only.",
+                                )
+                                .into_element()
+                            },
+                        );
+                        hist_tile
+                    }),
                     rect().width(Size::flex(1.)).child(
                         tile()
                             .child(tile_head(None, "Battery health", Some(status_chip("Normal", false, None))))
@@ -3920,8 +4003,27 @@ impl Component for BatteryDetailPage {
                     let mut idle_st = idle;
                     let mut lid_st = lid_action;
                     let pe = power_err;
+                    let lid_managed_reason = lid_managed.read().clone();
+                    let lid_unavail_reason = lid_unavail.read().clone();
+                    let (lid_chip_label, lid_chip_on) = lid_managed_reason
+                        .as_deref()
+                        .map(|_| ("Managed", false))
+                        .or_else(|| lid_unavail_reason.as_deref().map(|_| ("Unavailable", false)))
+                        .unwrap_or(("Live", true));
+                    let lid_locked = lid_managed_reason.is_some() || lid_unavail_reason.is_some();
                     tile()
-                        .child(tile_head(None, "Energy saving", None::<String>))
+                        .child(tile_head(
+                            None,
+                            "Energy saving",
+                            Some(
+                                rect()
+                                    .horizontal()
+                                    .spacing(8.)
+                                    .cross_align(Alignment::Center)
+                                    .maybe_child(lid_managed_reason.clone().map(|l| lock_badge(l)))
+                                    .child(status_chip(lid_chip_label, lid_chip_on, None)),
+                            ),
+                        ))
                         .child(field_label("Dim display after"))
                         .child(dropdown_select(
                             delay_label(idle_val.dim_seconds),
@@ -4025,10 +4127,14 @@ impl Component for BatteryDetailPage {
                                     value: v.to_string(),
                                 })
                                 .collect();
-                            dropdown_select(
+                            let is_locked = lid_locked;
+                            rect().opacity(if is_locked { 0.45 } else { 1.0 }).child(dropdown_select(
                                 cur_label,
                                 dropdown_opts,
                                 EventHandler::new(move |v: String| {
+                                    if is_locked {
+                                        return;
+                                    }
                                     lid_st.set(v.clone());
                                     let mut pe = pe;
                                     spawn(async move {
@@ -4043,10 +4149,16 @@ impl Component for BatteryDetailPage {
                                         }
                                     });
                                 }),
-                            )
+                            ))
                         })
                         .child(tile_sub(
-                            "Lid action is saved for Finick. Enforcing it system-wide needs an admin logind.conf change.",
+                            if let Some(reason) = lid_managed_reason.clone() {
+                                reason
+                            } else if let Some(reason) = lid_unavail_reason.clone() {
+                                reason
+                            } else {
+                                "Saved to ~/.config/finick plus /etc/systemd/logind.conf.d when run as admin. Full finickd enforcement is tracked separately.".to_string()
+                            },
                         ))
                 })
                 .child({
@@ -4182,9 +4294,16 @@ impl Component for AccessibilityDetailPage {
                                                 SettingKey::Custom("accessibility.reduce_motion_applied".to_string()),
                                                 v,
                                             );
-                                            let _ = std::process::Command::new("hyprctl")
-                                                .args(["keyword", "animations:enabled", if v { "0" } else { "1" }])
-                                                .output();
+                                            let lua = format!(
+                                                "hl.config({{ animations = {{ enabled = {} }} }})",
+                                                if v { "false" } else { "true" }
+                                            );
+                                            let legacy = if v { "0" } else { "1" };
+                                            let _ = HyprlandBackend::hyprctl_set_config(
+                                                &lua,
+                                                "animations:enabled",
+                                                legacy,
+                                            );
                                         }
                                     })
                                 },
@@ -4224,13 +4343,16 @@ impl Component for AccessibilityDetailPage {
                                                 SettingKey::Custom("accessibility.reduce_transparency_applied".to_string()),
                                                 v,
                                             );
-                                            let _ = std::process::Command::new("hyprctl")
-                                                .args([
-                                                    "keyword",
-                                                    "decoration:blur:enabled",
-                                                    if v { "false" } else { "true" },
-                                                ])
-                                                .output();
+                                            let lua = format!(
+                                                "hl.config({{ decoration = {{ blur = {{ enabled = {} }} }} }})",
+                                                if v { "false" } else { "true" }
+                                            );
+                                            let legacy = if v { "false" } else { "true" };
+                                            let _ = HyprlandBackend::hyprctl_set_config(
+                                                &lua,
+                                                "decoration:blur:enabled",
+                                                legacy,
+                                            );
                                         }
                                     })
                                 },
@@ -4453,9 +4575,13 @@ impl Component for DesktopDetailPage {
                                     let mut s = store.workspace_gap;
                                     s.set(v);
                                     store.set(SettingKey::Custom("desktop.workspace_gap".to_string()), v);
-                                    let _ = std::process::Command::new("hyprctl")
-                                        .args(["keyword", "general:gaps_out", &format!("{}", v as i32)])
-                                        .output();
+                                    let n = v as i32;
+                                    let lua = format!("hl.config({{ general = {{ gaps_out = {n} }} }})");
+                                    let _ = HyprlandBackend::hyprctl_set_config(
+                                        &lua,
+                                        "general:gaps_out",
+                                        &n.to_string(),
+                                    );
                                 })
                             })
                             .child(
@@ -4469,9 +4595,13 @@ impl Component for DesktopDetailPage {
                                 slider_row(None, *inner_gap.read(), move |v| {
                                     ig.set(v);
                                     store.set(SettingKey::Custom("desktop.inner_gap".to_string()), v);
-                                    let _ = std::process::Command::new("hyprctl")
-                                        .args(["keyword", "general:gaps_in", &format!("{}", v as i32)])
-                                        .output();
+                                    let n = v as i32;
+                                    let lua = format!("hl.config({{ general = {{ gaps_in = {n} }} }})");
+                                    let _ = HyprlandBackend::hyprctl_set_config(
+                                        &lua,
+                                        "general:gaps_in",
+                                        &n.to_string(),
+                                    );
                                 })
                             }),
                     )

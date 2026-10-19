@@ -77,6 +77,148 @@ fn format_speed(bytes_done: u64, elapsed_secs: f64) -> String {
     }
 }
 
+fn trash_undo_file() -> PathBuf {
+    let base = env::var("HOME").map(PathBuf::from).unwrap_or(PathBuf::from("/tmp"));
+    base.join(".cache").join("finick").join("files_trash_undo.json")
+}
+
+fn load_trash_undo_from(path: &Path) -> Vec<(String, String)> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<(String, String)>>(&s).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(u, o)| !u.is_empty() && !o.is_empty())
+        .take(50)
+        .collect()
+}
+
+fn save_trash_undo_to(path: &Path, pairs: &[(String, String)]) -> bool {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    serde_json::to_string(&pairs).map(|s| std::fs::write(path, s).is_ok()).unwrap_or(false)
+}
+
+fn remember_trashed(pairs: Vec<(String, String)>) {
+    if pairs.is_empty() {
+        return;
+    }
+    let _ = LAST_TRASHED.lock().map(|mut v| {
+        v.extend(pairs.clone());
+        if v.len() > 50 {
+            let drop_n = v.len() - 50;
+            v.drain(..drop_n);
+        }
+    });
+    let path = trash_undo_file();
+    let mut merged = load_trash_undo_from(&path);
+    merged.extend(pairs);
+    if merged.len() > 50 {
+        let drop_n = merged.len() - 50;
+        merged.drain(..drop_n);
+    }
+    save_trash_undo_to(&path, &merged);
+}
+
+fn take_trash_undo() -> Vec<(String, String)> {
+    let mem: Vec<(String, String)> = LAST_TRASHED.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+    let path = trash_undo_file();
+    let file_pairs = load_trash_undo_from(&path);
+    let _ = std::fs::remove_file(&path);
+    if mem.is_empty() {
+        return file_pairs;
+    }
+    if file_pairs.is_empty() {
+        return mem;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for p in mem.into_iter().chain(file_pairs) {
+        if seen.insert(p.clone()) {
+            out.push(p);
+        }
+    }
+    out.truncate(50);
+    out
+}
+
+fn pending_trash_undo_count() -> usize {
+    let mem = LAST_TRASHED.lock().map(|v| v.len()).unwrap_or(0);
+    if mem > 0 {
+        return mem;
+    }
+    load_trash_undo_from(&trash_undo_file()).len()
+}
+
+fn internal_drop_error(srcs: &[String], dest_dir: &str) -> Option<String> {
+    if srcs.is_empty() {
+        return Some(String::from("Nothing selected to move"));
+    }
+    let dest = PathBuf::from(dest_dir);
+    if !dest.is_dir() {
+        return Some(format!("Destination is not a folder: {dest_dir}"));
+    }
+    let dest_canon = dest.canonicalize().unwrap_or(dest.clone());
+    for src in srcs {
+        let sp = PathBuf::from(src);
+        if !sp.exists() {
+            return Some(format!("Source no longer exists: {src}"));
+        }
+        let name = sp.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if name.is_empty() {
+            return Some(format!("Cannot move: {src}"));
+        }
+        if dest.join(&name) == sp {
+            return Some(String::from("Already here"));
+        }
+        if let Ok(canon) = sp.canonicalize() {
+            if canon == dest_canon {
+                return Some(String::from("Already here"));
+            }
+            if dest_canon.starts_with(&canon) {
+                return Some(String::from("Cannot move a folder into itself"));
+            }
+            if dest_canon.join(&name) == canon {
+                return Some(String::from("Already here"));
+            }
+        } else if sp == dest {
+            return Some(String::from("Already here"));
+        }
+    }
+    None
+}
+
+fn dir_byte_size(path: &Path) -> u64 {
+    if let Ok(md) = std::fs::metadata(path) {
+        if !md.is_dir() {
+            return md.len();
+        }
+    } else {
+        return 0;
+    }
+    let mut total = 0u64;
+    let mut stack = vec![path.to_path_buf()];
+    let mut seen = 0usize;
+    while let Some(d) = stack.pop() {
+        let entries = std::fs::read_dir(&d).map(|r| r.filter_map(|e| e.ok()).collect::<Vec<_>>()).unwrap_or_default();
+        for e in entries {
+            seen += 1;
+            if seen > 20000 {
+                return total;
+            }
+            if let Ok(ty) = e.file_type() {
+                if ty.is_dir() {
+                    stack.push(e.path());
+                } else if let Ok(md) = e.metadata() {
+                    total = total.saturating_add(md.len());
+                }
+            }
+        }
+    }
+    total
+}
+
 fn parse_trashinfo(path: &Path) -> Option<(String, String)> {
     let s = std::fs::read_to_string(path).ok()?;
     let mut orig = None;
@@ -358,6 +500,12 @@ enum DateFilter {
     Today,
     Week,
     Month,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DrawerTab {
+    Preview,
+    Details,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -765,7 +913,7 @@ fn read_text_preview(path: &str) -> Option<String> {
         return None;
     }
     let md = std::fs::metadata(path).ok()?;
-    if md.len() == 0 || md.len() > 100 * 1024 {
+    if md.len() == 0 {
         return None;
     }
     let f = std::fs::File::open(path).ok()?;
@@ -779,6 +927,32 @@ fn read_text_preview(path: &str) -> Option<String> {
         out.push_str("…");
     }
     Some(out)
+}
+
+fn read_pdf_preview(path: &str) -> Option<String> {
+    if !is_pdf_name(
+        Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default().as_str(),
+    ) {
+        return None;
+    }
+    let out = std::process::Command::new("pdftotext")
+        .args(["-l", "1", "-f", "1", path, "-"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let truncated = s.chars().count() > TEXT_PREVIEW_MAX_CHARS;
+    let mut preview: String = s.chars().take(TEXT_PREVIEW_MAX_CHARS).collect();
+    if truncated {
+        preview.push_str("…");
+    }
+    Some(preview)
 }
 
 fn is_av_name(name: &str) -> bool {
@@ -798,19 +972,7 @@ fn restore_all_trash() -> Result<usize, String> {
             let _ = std::fs::remove_file(info.join(format!("{}.trashinfo", e.trash_name)));
             continue;
         }
-        let dest = if e.orig_path.is_empty() {
-            let home = env::var("HOME").map(PathBuf::from).unwrap_or(PathBuf::from("/tmp"));
-            unique_dest(&home, &e.trash_name)
-        } else {
-            let p = PathBuf::from(&e.orig_path);
-            if p.exists() {
-                let parent = p.parent().map(|x| x.to_path_buf()).unwrap_or(PathBuf::from("/"));
-                let name = p.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or(e.trash_name.clone());
-                unique_dest(&parent, &name)
-            } else {
-                p
-            }
-        };
+        let dest = dedupe_restore_dest(&e.orig_path, &e.trash_name);
         match move_path(&src, &dest) {
             Ok(()) => {
                 let _ = std::fs::remove_file(info.join(format!("{}.trashinfo", e.trash_name)));
@@ -820,6 +982,7 @@ fn restore_all_trash() -> Result<usize, String> {
         }
     }
     let _ = LAST_TRASHED.lock().map(|mut v| v.clear());
+    let _ = std::fs::remove_file(trash_undo_file());
     if errs.is_empty() { Ok(n) } else { Err(errs.join("; ")) }
 }
 
@@ -1182,8 +1345,7 @@ fn move_to_trash(orig: &Path) -> std::io::Result<(String, String)> {
 }
 
 fn restore_last_trashed() -> Result<usize, String> {
-    let pairs: Vec<(String, String)> =
-        LAST_TRASHED.lock().map(|mut v| std::mem::take(&mut *v)).map_err(|e| e.to_string())?;
+    let pairs: Vec<(String, String)> = take_trash_undo();
     if pairs.is_empty() {
         return Ok(0);
     }
@@ -1192,14 +1354,7 @@ fn restore_last_trashed() -> Result<usize, String> {
     let mut errs = Vec::new();
     for (uname, orig) in pairs {
         let src = files.join(&uname);
-        let dest = PathBuf::from(&orig);
-        let dest = if dest.exists() {
-            let parent = dest.parent().map(|p| p.to_path_buf()).unwrap_or(PathBuf::from("/"));
-            let name = dest.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or(String::from("item"));
-            unique_dest(&parent, &name)
-        } else {
-            dest
-        };
+        let dest = dedupe_restore_dest(&orig, &uname);
         match move_path(&src, &dest) {
             Ok(()) => {
                 let _ = std::fs::remove_file(info.join(format!("{uname}.trashinfo")));
@@ -1226,7 +1381,12 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
     Ok(())
 }
 
-fn copy_dir_recursive_cancel(src: &PathBuf, dst: &PathBuf, cancel: State<bool>) -> std::io::Result<()> {
+fn copy_dir_recursive_cancel_progress(
+    src: &PathBuf,
+    dst: &PathBuf,
+    cancel: State<bool>,
+    on_file: &mut dyn FnMut(u64),
+) -> std::io::Result<()> {
     if *cancel.read() {
         return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "cancelled"));
     }
@@ -1239,9 +1399,11 @@ fn copy_dir_recursive_cancel(src: &PathBuf, dst: &PathBuf, cancel: State<bool>) 
         let ty = e.file_type()?;
         let dst_path = dst.join(e.file_name());
         if ty.is_dir() {
-            copy_dir_recursive_cancel(&e.path(), &dst_path, cancel)?;
+            copy_dir_recursive_cancel_progress(&e.path(), &dst_path, cancel, on_file)?;
         } else {
+            let bytes = e.metadata().map(|m| m.len()).unwrap_or(0);
             std::fs::copy(e.path(), dst_path)?;
+            on_file(bytes);
         }
     }
     Ok(())
@@ -1346,6 +1508,20 @@ fn duplicate_one(src: &str) -> std::io::Result<PathBuf> {
         std::fs::copy(&sp, &dest)?;
     }
     Ok(dest)
+}
+
+fn dedupe_restore_dest(orig: &str, fallback_name: &str) -> PathBuf {
+    if orig.is_empty() {
+        let home = env::var("HOME").map(PathBuf::from).unwrap_or(PathBuf::from("/tmp"));
+        return unique_dest(&home, fallback_name);
+    }
+    let p = PathBuf::from(orig);
+    if !p.exists() {
+        return p;
+    }
+    let parent = p.parent().map(|x| x.to_path_buf()).unwrap_or(PathBuf::from("/"));
+    let name = p.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or(fallback_name.to_string());
+    unique_dest(&parent, &name)
 }
 
 fn format_modified(ts: Option<u64>) -> String {
@@ -1506,7 +1682,27 @@ fn start_paste_job_multi(
                 if is_cut {
                     std::fs::rename(src, &dest).map_err(|e| e.to_string())
                 } else if PathBuf::from(src).is_dir() {
-                    copy_dir_recursive_cancel(&PathBuf::from(src), &dest, job_cancel).map_err(|e| e.to_string())
+                    let mut prog = job_progress;
+                    let label = if is_cut { "Moving".to_string() } else { "Copying".to_string() };
+                    let cur_name = name.clone();
+                    let t0 = started;
+                    let acc = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(bytes_done));
+                    let acc_c = acc.clone();
+                    let r = copy_dir_recursive_cancel_progress(&PathBuf::from(src), &dest, job_cancel, &mut |chunk| {
+                        use std::sync::atomic::Ordering;
+                        let b = acc_c.fetch_add(chunk, Ordering::Relaxed).saturating_add(chunk);
+                        let speed = format_speed(b, t0.elapsed().as_secs_f64());
+                        prog.set(Some(JobProgress {
+                            label: label.clone(),
+                            done: i,
+                            total,
+                            current: cur_name.clone(),
+                            speed,
+                        }));
+                    })
+                    .map_err(|e| e.to_string());
+                    bytes_done = acc.load(std::sync::atomic::Ordering::Relaxed);
+                    r
                 } else {
                     if let Some(p) = dest.parent() {
                         let _ = std::fs::create_dir_all(p);
@@ -1522,7 +1718,11 @@ fn start_paste_job_multi(
                 }
                 break;
             }
-            bytes_done += std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+            if PathBuf::from(src).is_dir() && !is_cut {
+                bytes_done = dir_byte_size(&dest).max(bytes_done);
+            } else {
+                bytes_done = bytes_done.saturating_add(std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0));
+            }
             done_pairs.push((src.clone(), dest.to_string_lossy().to_string()));
             ok += 1;
         }
@@ -1638,7 +1838,6 @@ fn confirm_trash_delete_multi(
         speed: String::new(),
     }));
     spawn(async move {
-        let started = std::time::Instant::now();
         let mut cancelled = false;
         let mut err: Option<String> = None;
         let mut n = 0usize;
@@ -1648,8 +1847,13 @@ fn confirm_trash_delete_multi(
                 cancelled = true;
                 break;
             }
-            let speed = format_speed(n as u64 * 512 * 1024, started.elapsed().as_secs_f64());
-            job_progress.set(Some(JobProgress { label: "Trashing".to_string(), done: i, total, current: p.clone(), speed }));
+            job_progress.set(Some(JobProgress {
+                label: "Trashing".to_string(),
+                done: i,
+                total,
+                current: p.clone(),
+                speed: String::new(),
+            }));
             match move_to_trash(Path::new(p)) {
                 Ok((u, o)) => {
                     trashed.push((u, o));
@@ -1668,12 +1872,12 @@ fn confirm_trash_delete_multi(
             notice.set(Some(("Cancelled".to_string(), NoticeKind::Warn)));
         } else if let Some(e) = err {
             if !trashed.is_empty() {
-                let _ = LAST_TRASHED.lock().map(|mut v| v.extend(trashed));
+                remember_trashed(trashed);
             }
             notice.set(Some((format!("Trash failed: {e}"), NoticeKind::Error)));
         } else {
             if !trashed.is_empty() {
-                let _ = LAST_TRASHED.lock().map(|mut v| v.extend(trashed));
+                remember_trashed(trashed);
             }
             notice.set(Some((
                 format!("Moved {n} item{} to Trash (Undo available)", if n == 1 { "" } else { "s" }),
@@ -1684,10 +1888,125 @@ fn confirm_trash_delete_multi(
     });
 }
 
-fn app() -> Element {
+/// Resolve the initial directory from deep-link args.
+///
+/// Accepts absolute paths (`/home/user/docs`, `~/docs`), `trash`, `home`,
+/// and `finick://files/<path>` / `finick://files?path=<path>` forms. The
+/// `extra` value (`--path`, `?path=`, second positional) wins when it looks
+/// like a path so `files files --path /tmp` works.
+fn resolve_initial_path(args: &config::LaunchArgs) -> Option<String> {
+    let mut candidates: Vec<&str> = Vec::new();
+    if let Some(e) = args.extra.as_deref() {
+        candidates.push(e);
+    }
+    if let Some(p) = args.page.as_deref() {
+        candidates.push(p);
+    }
+    // Prefer an explicit raw URI carrying a network address or full path.
+    if let Some(raw) = args.raw_uri.as_deref() {
+        candidates.push(raw);
+    }
+    for cand in candidates {
+        if let Some(resolved) = normalize_initial_dir(cand) {
+            return Some(resolved);
+        }
+    }
+    None
+}
+
+fn normalize_initial_dir(cand: &str) -> Option<String> {
+    let t = cand.trim();
+    if t.is_empty() {
+        return None;
+    }
+    // Strip `finick://files/...` / `files:...` wrappers back to a path.
+    let mut s = t;
+    if let Some(idx) = t.find("://") {
+        let after = &t[idx + 3..];
+        let stripped = after.trim_start_matches('/');
+        // `finick://files/home/user/x` -> `/home/user/x` when it looks absolute.
+        let first = stripped.split('/').next().unwrap_or("");
+        if first.eq_ignore_ascii_case("files") || first.eq_ignore_ascii_case("finick") {
+            let tail = stripped[first.len()..].trim_start_matches('/');
+            if tail.is_empty() {
+                s = "/";
+            } else if tail.starts_with("home/") || tail.starts_with("tmp/") || tail.starts_with("mnt/") {
+                s = Box::leak(format!("/{tail}").into_boxed_str());
+            } else {
+                s = tail;
+            }
+        } else if after.starts_with("home/") || after.starts_with("tmp/") {
+            s = Box::leak(format!("/{after}").into_boxed_str());
+        } else {
+            s = after;
+        }
+    } else if let Some(idx) = t.find(':') {
+        let (scheme, after) = t.split_at(idx);
+        if !scheme.is_empty()
+            && scheme.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+            && (scheme.eq_ignore_ascii_case("files") || scheme.eq_ignore_ascii_case("finick"))
+        {
+            s = after[1..].trim_start_matches('/');
+            if s.is_empty() {
+                return None;
+            }
+        }
+    }
+    let s = s.trim();
+    if s.eq_ignore_ascii_case("trash") || s.eq_ignore_ascii_case("trash://") {
+        return Some(trash_files_path().to_string_lossy().to_string());
+    }
+    if s.eq_ignore_ascii_case("home") || s == "~" {
+        return env::home_dir().map(|v| v.to_str().unwrap().to_string());
+    }
+    if let Some(rest) = s.strip_prefix("~/") {
+        if let Some(home) = env::home_dir().and_then(|v| v.to_str().map(|x| x.to_string())) {
+            return Some(format!("{home}/{rest}"));
+        }
+    }
+    if s.starts_with('/') {
+        return Some(s.trim_end_matches('/').to_string().tap_root());
+    }
+    // Bare `Documents` / `Downloads` relative to $HOME when that dir exists.
+    if !s.contains(' ') && !s.contains("://") {
+        if let Some(home) = env::home_dir().and_then(|v| v.to_str().map(|x| x.to_string())) {
+            let rel = format!("{home}/{s}");
+            if Path::new(&rel).is_dir() {
+                return Some(rel);
+            }
+        }
+    }
+    None
+}
+
+trait TapRoot {
+    fn tap_root(self) -> Self;
+}
+
+impl TapRoot for String {
+    fn tap_root(self) -> Self {
+        if self.is_empty() { "/".to_string() } else { self }
+    }
+}
+
+pub const FILES_PAGE_SLUGS: &[&str] = &["<absolute-path>", "~/<path>", "trash", "home", "Documents", "Downloads"];
+
+struct FilesApp {
+    initial_path: Option<String>,
+}
+
+impl freya::prelude::App for FilesApp {
+    fn render(&self) -> impl IntoElement {
+        files_root(self.initial_path.clone())
+    }
+}
+
+fn files_root(initial_path: Option<String>) -> Element {
     let _st = use_init_app_theme(get_theme());
     let t = use_app_theme();
-    let current_path = use_state(|| env::home_dir().map(|v| v.to_str().unwrap().to_string()).unwrap_or("/".to_string()));
+    let default_home = env::home_dir().map(|v| v.to_str().unwrap().to_string()).unwrap_or("/".to_string());
+    let start_dir = initial_path.unwrap_or_else(|| default_home.clone());
+    let current_path = use_state(move || start_dir.clone());
     let items = use_state(Vec::<Item>::new);
     let mut selected_item = use_state(|| Option::<Item>::None);
     let view_mode = use_state(|| ViewMode::Grid);
@@ -1715,9 +2034,15 @@ fn app() -> Element {
     let last_click: State<Option<(String, std::time::Instant)>> = use_state(|| None);
     let drag_start: State<Option<(f64, f64)>> = use_state(|| None);
     let drag_current: State<Option<(f64, f64)>> = use_state(|| None);
-    let last_cp = use_state(|| env::home_dir().map(|v| v.to_str().unwrap().to_string()).unwrap_or("/".to_string()));
+    let last_cp = use_state({
+        let p = current_path.read().clone();
+        move || p.clone()
+    });
     let loaded = use_state(|| false);
-    let history = use_state(|| vec![env::home_dir().map(|v| v.to_str().unwrap().to_string()).unwrap_or("/".to_string())]);
+    let history = use_state({
+        let p = current_path.read().clone();
+        move || vec![p.clone()]
+    });
     let hist_idx = use_state(|| 0usize);
     let hist_nav = use_state(|| false);
     let sort_key = use_state(|| SortKey::Name);
@@ -1738,12 +2063,23 @@ fn app() -> Element {
     let op_undo_tick = use_state(|| 0u64);
     let trash_orig = use_state(|| std::collections::HashMap::<String, String>::new());
     let drop_highlight = use_state(|| false);
-    let tabs = use_state(|| vec![env::home_dir().map(|v| v.to_str().unwrap().to_string()).unwrap_or("/".to_string())]);
+    let show_second = use_state(|| false);
+    let second_path = use_state({
+        let p = current_path.read().clone();
+        move || p.clone()
+    });
+    let second_items = use_state(Vec::<Item>::new);
+    let drop_target = use_state(|| Option::<String>::None);
+    let tabs = use_state({
+        let p = current_path.read().clone();
+        move || vec![p.clone()]
+    });
     let active_tab = use_state(|| 0usize);
     let tabs_loaded = use_state(|| false);
     let search_scope = use_state(|| SearchScope::Current);
     let type_filter = use_state(|| TypeFilter::All);
     let date_filter = use_state(|| DateFilter::Any);
+    let drawer_tab = use_state(|| DrawerTab::Preview);
     let show_connect = use_state(|| false);
     let connect_uri = use_state(String::new);
     let starred = use_state(load_starred);
@@ -2184,7 +2520,7 @@ fn app() -> Element {
             let next = !show_sidebar_val;
             move || s.set(next)
         }))
-        .child(icon_button("‹", {
+        .child(tool_button(CHEVRON_LEFT, t.text, {
             let mut current = current_path;
             let items = items;
             let h = history;
@@ -2202,7 +2538,7 @@ fn app() -> Element {
                 }
             }
         }))
-        .child(icon_button("›", {
+        .child(tool_button(CHEVRON_RIGHT, t.text, {
             let mut current = current_path;
             let items = items;
             let h = history;
@@ -2220,7 +2556,7 @@ fn app() -> Element {
                 }
             }
         }))
-        .child(icon_button("↻", {
+        .child(tool_button(REFRESH_CW, t.text, {
             let current = current_path;
             let items = items;
             move || {
@@ -2384,7 +2720,7 @@ fn app() -> Element {
                     })),
                 ))
                 .maybe(tabs_val.len() > 1, |el| {
-                    el.child(ghost_button("×", {
+                    el.child(small_close_button({
                         let mut tbs = tabs;
                         let mut at = active_tab;
                         let mut cur = current_path;
@@ -2476,7 +2812,7 @@ fn app() -> Element {
                 ("Images", TypeFilter::Images),
                 ("Docs", TypeFilter::Docs),
                 ("Code", TypeFilter::Code),
-                ("AV", TypeFilter::Audio),
+                ("Audio", TypeFilter::Audio),
                 ("Video", TypeFilter::Video),
                 ("Archives", TypeFilter::Archives),
             ],
@@ -2562,6 +2898,130 @@ fn app() -> Element {
                 load_dir(path_state.read().clone(), items_state);
             }
         }))
+        .into_element();
+
+    let second_on = *show_second.read();
+    let second_path_val = second_path.read().clone();
+    let second_count = second_items.read().iter().filter(|i| i.ty == ItemType::Folder).count();
+    let second_bar: Element = rect()
+        .horizontal()
+        .cross_align(Alignment::Center)
+        .content(Content::Flex)
+        .width(Size::fill())
+        .spacing(8.)
+        .padding((4., 12., 0., 12.))
+        .child(ghost_button(if second_on { "Hide second target" } else { "Second target" }, {
+            let mut show = show_second;
+            let mut sp = second_path;
+            let si = second_items;
+            let cur = current_path;
+            move || {
+                let next = !*show.read();
+                show.set(next);
+                if next {
+                    let target = sp.read().clone();
+                    let fallback = if Path::new(&target).is_dir() { target } else { cur.read().clone() };
+                    sp.set(fallback.clone());
+                    load_dir(fallback, si);
+                }
+            }
+        }))
+        .maybe(second_on, |el| {
+            el.child(ghost_button("Up", {
+                let mut sp = second_path;
+                let si = second_items;
+                move || {
+                    let cur = sp.read().clone();
+                    if let Some(parent) = PathBuf::from(&cur).parent() {
+                        let np = parent.to_string_lossy().to_string();
+                        sp.set(np.clone());
+                        load_dir(np, si);
+                    }
+                }
+            }))
+            .child(tile_sub(format!("Target: {second_path_val} ({second_count} folders)")))
+            .child(secondary_button("Copy here", {
+                let sp = second_path;
+                let si = second_items;
+                let sel = selected_paths;
+                let one = selected_item;
+                let clip = clipboard;
+                let mut note = notice;
+                move || {
+                    let mut srcs = sel.read().clone();
+                    if srcs.is_empty() {
+                        if let Some(it) = one.read().clone() {
+                            srcs = vec![it.path];
+                        } else if let Some((v, _)) = clip.read().clone() {
+                            srcs = v;
+                        }
+                    }
+                    let dest = sp.read().clone();
+                    if let Some(err) = internal_drop_error(&srcs, &dest) {
+                        note.set(Some((err, NoticeKind::Warn)));
+                        return;
+                    }
+                    start_paste_job_multi(
+                        srcs,
+                        false,
+                        false,
+                        dest,
+                        si,
+                        note,
+                        job_running,
+                        job_label,
+                        job_progress,
+                        job_cancel,
+                        clip,
+                    );
+                }
+            }))
+            .child(secondary_button("Move here", {
+                let sp = second_path;
+                let si = second_items;
+                let sel = selected_paths;
+                let one = selected_item;
+                let clip = clipboard;
+                let mut note = notice;
+                let mut multi = selected_paths;
+                let mut foc = selected_item;
+                move || {
+                    let mut srcs = sel.read().clone();
+                    if srcs.is_empty() {
+                        if let Some(it) = one.read().clone() {
+                            srcs = vec![it.path];
+                        } else if let Some((v, _)) = clip.read().clone() {
+                            srcs = v;
+                        }
+                    }
+                    let dest = sp.read().clone();
+                    if let Some(err) = internal_drop_error(&srcs, &dest) {
+                        note.set(Some((err, NoticeKind::Warn)));
+                        return;
+                    }
+                    start_paste_job_multi(
+                        srcs,
+                        false,
+                        true,
+                        dest,
+                        si,
+                        note,
+                        job_running,
+                        job_label,
+                        job_progress,
+                        job_cancel,
+                        clip,
+                    );
+                    multi.set(Vec::new());
+                    foc.set(None);
+                }
+            }))
+            .child(ghost_button("Refresh", {
+                let sp = second_path;
+                let si = second_items;
+                move || load_dir(sp.read().clone(), si)
+            }))
+        })
         .into_element();
 
     let trash_bar: Element = if is_trash_view {
@@ -2992,6 +3452,9 @@ fn app() -> Element {
                             let mut ms = multi_state;
                             let mut ss = sel_state;
                             let it = item_clone.clone();
+                            let mut dt = drop_target;
+                            let folder_p = path.clone();
+                            let folder_flag = is_folder;
                             move |_| {
                                 if ds.read().is_some() {
                                     let mut cur = ms.read().clone();
@@ -3001,6 +3464,73 @@ fn app() -> Element {
                                     }
                                     ss.set(Some(it.clone()));
                                 }
+                                if folder_flag
+                                    && (!ms.read().is_empty() || ss.read().is_some())
+                                    && !ms.read().contains(&folder_p)
+                                {
+                                    dt.set(Some(folder_p.clone()));
+                                }
+                            }
+                        })
+                        .on_pointer_leave({
+                            let mut dt = drop_target;
+                            let folder_p = path.clone();
+                            move |_| {
+                                if dt.read().clone().is_some_and(|v| v == folder_p) {
+                                    dt.set(None);
+                                }
+                            }
+                        })
+                        .on_mouse_up({
+                            let mut dt = drop_target;
+                            let mut note = notice;
+                            let mut multi = multi_state;
+                            let mut foc = sel_state;
+                            let folder_p = path.clone();
+                            let folder_flag = is_folder;
+                            let items_c = items_state;
+                            move |_| {
+                                if !folder_flag {
+                                    return;
+                                }
+                                let mut srcs = multi.read().clone();
+                                if srcs.is_empty() {
+                                    if let Some(it) = foc.read().clone() {
+                                        if it.path != folder_p {
+                                            srcs = vec![it.path];
+                                        }
+                                    }
+                                }
+                                srcs.retain(|s| s != &folder_p);
+                                if srcs.is_empty() {
+                                    dt.set(None);
+                                    return;
+                                }
+                                if dt.read().clone().is_none_or(|v| v != folder_p) && multi.read().is_empty() {
+                                    return;
+                                }
+                                if let Some(err) = internal_drop_error(&srcs, &folder_p) {
+                                    note.set(Some((err, NoticeKind::Warn)));
+                                    dt.set(None);
+                                    return;
+                                }
+                                let is_copy = *ctrl_held.read();
+                                start_paste_job_multi(
+                                    srcs,
+                                    false,
+                                    !is_copy,
+                                    folder_p.clone(),
+                                    items_c,
+                                    note,
+                                    job_running,
+                                    job_label,
+                                    job_progress,
+                                    job_cancel,
+                                    clipboard,
+                                );
+                                multi.set(Vec::new());
+                                foc.set(None);
+                                dt.set(None);
                             }
                         })
                         .on_press({
@@ -3082,6 +3612,9 @@ fn app() -> Element {
                             },
                         )
                         .maybe(is_cut, |el| el.child(status_chip("Cut", true, None)))
+                        .maybe(is_folder && drop_target.read().clone().is_some_and(|d| d == path), |el| {
+                            el.child(status_chip("Drop", true, None))
+                        })
                         .map(is_folder.then(|| path.clone()), |el, folder| {
                             el.on_file_drop({
                                 let items_c = items_state;
@@ -3123,6 +3656,9 @@ fn app() -> Element {
                             let mut ms = multi_state;
                             let mut ss = sel_state;
                             let it = item_clone.clone();
+                            let mut dt = drop_target;
+                            let folder_p = path.clone();
+                            let folder_flag = is_folder;
                             move |_| {
                                 if ds.read().is_some() {
                                     let mut cur = ms.read().clone();
@@ -3132,6 +3668,73 @@ fn app() -> Element {
                                     }
                                     ss.set(Some(it.clone()));
                                 }
+                                if folder_flag
+                                    && (!ms.read().is_empty() || ss.read().is_some())
+                                    && !ms.read().contains(&folder_p)
+                                {
+                                    dt.set(Some(folder_p.clone()));
+                                }
+                            }
+                        })
+                        .on_pointer_leave({
+                            let mut dt = drop_target;
+                            let folder_p = path.clone();
+                            move |_| {
+                                if dt.read().clone().is_some_and(|v| v == folder_p) {
+                                    dt.set(None);
+                                }
+                            }
+                        })
+                        .on_mouse_up({
+                            let mut dt = drop_target;
+                            let mut note = notice;
+                            let mut multi = multi_state;
+                            let mut foc = sel_state;
+                            let folder_p = path.clone();
+                            let folder_flag = is_folder;
+                            let items_c = items_state;
+                            move |_| {
+                                if !folder_flag {
+                                    return;
+                                }
+                                let mut srcs = multi.read().clone();
+                                if srcs.is_empty() {
+                                    if let Some(it) = foc.read().clone() {
+                                        if it.path != folder_p {
+                                            srcs = vec![it.path];
+                                        }
+                                    }
+                                }
+                                srcs.retain(|s| s != &folder_p);
+                                if srcs.is_empty() {
+                                    dt.set(None);
+                                    return;
+                                }
+                                if dt.read().clone().is_none_or(|v| v != folder_p) && multi.read().is_empty() {
+                                    return;
+                                }
+                                if let Some(err) = internal_drop_error(&srcs, &folder_p) {
+                                    note.set(Some((err, NoticeKind::Warn)));
+                                    dt.set(None);
+                                    return;
+                                }
+                                let is_copy = *ctrl_held.read();
+                                start_paste_job_multi(
+                                    srcs,
+                                    false,
+                                    !is_copy,
+                                    folder_p.clone(),
+                                    items_c,
+                                    note,
+                                    job_running,
+                                    job_label,
+                                    job_progress,
+                                    job_cancel,
+                                    clipboard,
+                                );
+                                multi.set(Vec::new());
+                                foc.set(None);
+                                dt.set(None);
                             }
                         })
                         .on_press({
@@ -3221,6 +3824,9 @@ fn app() -> Element {
                                 .text(format_size(item.size)),
                         )
                         .maybe(is_cut, |el| el.child(status_chip("Cut", true, None)))
+                        .maybe(is_folder && drop_target.read().clone().is_some_and(|d| d == path), |el| {
+                            el.child(status_chip("Drop", true, None))
+                        })
                         .map(is_folder.then(|| path.clone()), |el, folder| {
                             el.on_file_drop({
                                 let items_c = items_state;
@@ -3287,12 +3893,143 @@ fn app() -> Element {
         items_view.into()
     };
 
+    let second_pane: Element = if second_on {
+        let folders: Vec<Item> =
+            second_items.read().iter().filter(|i| i.ty == ItemType::Folder).cloned().take(40).collect();
+        let sp_val = second_path_val.clone();
+        rect()
+            .vertical()
+            .width(Size::flex(0.9))
+            .max_width(Size::px(300.))
+            .height(Size::fill())
+            .content(Content::Flex)
+            .background(t.panel)
+            .border(Border::new().width(1.).fill(t.border))
+            .corner_radius(RADIUS_MD)
+            .padding(8.)
+            .spacing(4.)
+            .child(tile_sub(format!("{} ({} folders)", sp_val, folders.len())))
+            .child(tile_sub("Drop selection onto a folder to move, Ctrl drops a copy."))
+            .children(folders.into_iter().map(|f| {
+                let dest = f.path.clone();
+                let label = f.name.clone();
+                let is_hl = drop_target.read().clone().is_some_and(|d| d == dest);
+                rect()
+                    .horizontal()
+                    .width(Size::fill())
+                    .content(Content::Flex)
+                    .cross_align(Alignment::Center)
+                    .spacing(8.)
+                    .padding((6., 8.))
+                    .corner_radius(8.)
+                    .background(if is_hl { t.bg_selected } else { Color::TRANSPARENT })
+                    .on_pointer_enter({
+                        let mut dt = drop_target;
+                        let d = dest.clone();
+                        move |_| {
+                            if !selected_paths.read().is_empty() || selected_item.read().is_some() {
+                                dt.set(Some(d.clone()));
+                            }
+                        }
+                    })
+                    .on_pointer_leave({
+                        let mut dt = drop_target;
+                        let d = dest.clone();
+                        move |_| {
+                            if dt.read().clone().is_some_and(|v| v == d) {
+                                dt.set(None);
+                            }
+                        }
+                    })
+                    .on_mouse_up({
+                        let mut dt = drop_target;
+                        let mut note = notice;
+                        let mut multi = selected_paths;
+                        let mut foc = selected_item;
+                        let d = dest.clone();
+                        let si = second_items;
+                        move |_| {
+                            let mut srcs = multi.read().clone();
+                            if srcs.is_empty() {
+                                if let Some(it) = foc.read().clone() {
+                                    srcs = vec![it.path];
+                                }
+                            }
+                            srcs.retain(|s| s != &d);
+                            if srcs.is_empty() {
+                                dt.set(None);
+                                return;
+                            }
+                            if let Some(err) = internal_drop_error(&srcs, &d) {
+                                note.set(Some((err, NoticeKind::Warn)));
+                                dt.set(None);
+                                return;
+                            }
+                            let is_copy = *ctrl_held.read();
+                            start_paste_job_multi(
+                                srcs,
+                                false,
+                                !is_copy,
+                                d.clone(),
+                                si,
+                                note,
+                                job_running,
+                                job_label,
+                                job_progress,
+                                job_cancel,
+                                clipboard,
+                            );
+                            multi.set(Vec::new());
+                            foc.set(None);
+                            dt.set(None);
+                        }
+                    })
+                    .on_file_drop({
+                        let si = second_items;
+                        let d = dest.clone();
+                        move |e: Event<FileEventData>| {
+                            let srcs: Vec<String> =
+                                e.file_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+                            if !srcs.is_empty() {
+                                start_paste_job_multi(
+                                    srcs,
+                                    false,
+                                    false,
+                                    d.clone(),
+                                    si,
+                                    notice,
+                                    job_running,
+                                    job_label,
+                                    job_progress,
+                                    job_cancel,
+                                    clipboard,
+                                );
+                            }
+                        }
+                    })
+                    .child(nav_item(FOLDER, label.clone(), false, {
+                        let mut sp = second_path;
+                        let si = second_items;
+                        let d = dest.clone();
+                        move || {
+                            sp.set(d.clone());
+                            load_dir(d.clone(), si);
+                        }
+                    }))
+                    .maybe(is_hl, |el| el.child(status_chip("Drop", true, None)))
+                    .into_element()
+            }))
+            .into_element()
+    } else {
+        rect().into_element()
+    };
+
     let status_row: Element = {
         let note = notice.read().clone();
         let job = *job_running.read();
         let jl = job_label.read().clone();
         let prog = job_progress.read().clone();
-        let trashed_n = LAST_TRASHED.lock().map(|v| v.len()).unwrap_or(0);
+        let trashed_n = pending_trash_undo_count();
         let has_op = LAST_OP.lock().map(|v| v.is_some()).unwrap_or(false);
         let _tick_op = *op_undo_tick.read();
         if job || note.is_some() || trashed_n > 0 || has_op {
@@ -3334,7 +4071,7 @@ fn app() -> Element {
                         }))
                 })
                 .maybe(trashed_n > 0, |el| {
-                    el.child(notice_pill(format!("{trashed_n} in Trash"), NoticeKind::Info)).child(ghost_button("Undo", {
+                    el.child(notice_pill(format!("{trashed_n} trashed (Undo survives restart)"), NoticeKind::Info)).child(ghost_button("Undo", {
                         let items_c = items;
                         let cp = current_path;
                         let mut note_st = notice;
@@ -3375,6 +4112,7 @@ fn app() -> Element {
     let drawer: Element = if let Some(sel) = selected_item.read().clone() {
         let is_folder = sel.ty == ItemType::Folder;
         let is_img_sel = !is_folder && is_image_ext(&sel.name);
+        let tab_val = *drawer_tab.read();
         rect()
             .width(Size::flex(0.8))
             .max_width(Size::px(340.))
@@ -3395,25 +4133,72 @@ fn app() -> Element {
                         small_close_button(move || sel_state.set(None))
                     }),
             )
-            .child({
+            .child(
+                rect().width(Size::fill()).content(Content::Flex).margin((0., 0., 12., 0.)).child(segmented_control_full(
+                    vec![("Preview", DrawerTab::Preview), ("Details", DrawerTab::Details)],
+                    tab_val,
+                    {
+                        let mut d = drawer_tab;
+                        move |v: DrawerTab| d.set(v)
+                    },
+                )),
+            )
+            .maybe(tab_val == DrawerTab::Preview, |el| {
+                el.child({
                 let is_pdf_sel = !is_folder && is_pdf_name(&sel.name);
                 if is_img_sel || is_pdf_sel {
                     let hit = cached_thumb_if_exists(&sel.path, sel.modified, sel.size);
                     if hit.is_none() && small_thumb_ok(sel.size, 0) {
                         request_cached_thumb(&sel.path, sel.modified, sel.size);
                     }
+                    let pdf_txt = if is_pdf_sel { read_pdf_preview(&sel.path) } else { None };
                     if let Some(tp) = hit {
                         rect()
+                            .vertical()
                             .width(Size::fill())
-                            .height(Size::px(160.))
-                            .cross_align(Alignment::Center)
-                            .main_align(Alignment::Center)
                             .content(Content::Flex)
+                            .spacing(8.)
                             .margin((0., 0., 16., 0.))
-                            .corner_radius(12.)
-                            .background(t.bg_card)
-                            .overflow(Overflow::Clip)
-                            .child(ImageViewer::new(tp).width(Size::fill()).height(Size::fill()))
+                            .child(
+                                rect()
+                                    .width(Size::fill())
+                                    .height(Size::px(160.))
+                                    .cross_align(Alignment::Center)
+                                    .main_align(Alignment::Center)
+                                    .content(Content::Flex)
+                                    .corner_radius(12.)
+                                    .background(t.bg_card)
+                                    .overflow(Overflow::Clip)
+                                    .child(ImageViewer::new(tp).width(Size::fill()).height(Size::fill())),
+                            )
+                            .maybe_child(pdf_txt.map(|txt| {
+                                rect()
+                                    .width(Size::fill())
+                                    .padding(8.)
+                                    .corner_radius(8.)
+                                    .background(t.panel)
+                                    .border(Border::new().width(1.).fill(t.border))
+                                    .child(label().font_size(12.).color(t.text).max_lines(Some(8)).text(txt))
+                                    .into_element()
+                            }))
+                            .into_element()
+                    } else if let Some(txt) = pdf_txt {
+                        rect()
+                            .vertical()
+                            .width(Size::fill())
+                            .content(Content::Flex)
+                            .spacing(4.)
+                            .margin((0., 0., 16., 0.))
+                            .child(field_label("Preview"))
+                            .child(
+                                rect()
+                                    .width(Size::fill())
+                                    .padding(8.)
+                                    .corner_radius(8.)
+                                    .background(t.panel)
+                                    .border(Border::new().width(1.).fill(t.border))
+                                    .child(label().font_size(12.).color(t.text).max_lines(Some(12)).text(txt)),
+                            )
                             .into_element()
                     } else if is_pdf_sel {
                         let p = sel.path.clone();
@@ -3489,41 +4274,53 @@ fn app() -> Element {
                         .into_element()
                 }
             })
-            .child(
-                label()
-                    .font_size(16.)
-                    .font_weight(FontWeight::BOLD)
-                    .color(t.text_primary)
-                    .margin((0., 0., 4., 0.))
-                    .text(sel.name.clone()),
-            )
-            .child(label().font_size(12.).color(t.text_muted).margin((0., 0., 12., 0.)).text(format_size(sel.size)))
-            .child(
+            })
+            .maybe(tab_val == DrawerTab::Details, |el| {
+                el.child(
                 rect()
-                    .margin((0., 0., 12., 0.))
-                    .child(field_label("Path"))
-                    .child(label().font_size(12.).color(t.text_primary).text(sel.path.clone())),
+                    .vertical()
+                    .width(Size::fill())
+                    .content(Content::Flex)
+                    .spacing(0.)
+                    .child(
+                        label()
+                            .font_size(16.)
+                            .font_weight(FontWeight::BOLD)
+                            .color(t.text_primary)
+                            .margin((0., 0., 4., 0.))
+                            .text(sel.name.clone()),
+                    )
+                    .child(label().font_size(12.).color(t.text_muted).margin((0., 0., 12., 0.)).text(format_size(sel.size)))
+                    .child(
+                        rect()
+                            .margin((0., 0., 12., 0.))
+                            .child(field_label("Path"))
+                            .child(label().font_size(12.).color(t.text_primary).text(sel.path.clone())),
+                    )
+                    .child(
+                        rect()
+                            .margin((0., 0., 12., 0.))
+                            .child(field_label("Type"))
+                            .child(label().font_size(12.).color(t.text_primary).text(file_type_label(&sel.name, is_folder))),
+                    )
+                    .child(
+                        rect()
+                            .margin((0., 0., 12., 0.))
+                            .child(field_label("Modified"))
+                            .child(label().font_size(12.).color(t.text_primary).text(format_modified(sel.modified))),
+                    )
+                    .child(
+                        rect()
+                            .margin((0., 0., 12., 0.))
+                            .child(field_label("Permissions"))
+                            .child(label().font_size(12.).color(t.text_primary).text(format_perms(&sel.path))),
+                    )
+                    .maybe(
+                        clipboard.read().clone().is_some_and(|(paths, is_cut)| is_cut && paths.contains(&sel.path)),
+                        |inner| inner.child(status_chip("Cut", true, None)),
+                    )
+                    .into_element(),
             )
-            .child(
-                rect()
-                    .margin((0., 0., 12., 0.))
-                    .child(field_label("Type"))
-                    .child(label().font_size(12.).color(t.text_primary).text(file_type_label(&sel.name, is_folder))),
-            )
-            .child(
-                rect()
-                    .margin((0., 0., 12., 0.))
-                    .child(field_label("Modified"))
-                    .child(label().font_size(12.).color(t.text_primary).text(format_modified(sel.modified))),
-            )
-            .child(
-                rect()
-                    .margin((0., 0., 12., 0.))
-                    .child(field_label("Permissions"))
-                    .child(label().font_size(12.).color(t.text_primary).text(format_perms(&sel.path))),
-            )
-            .maybe(clipboard.read().clone().is_some_and(|(paths, is_cut)| is_cut && paths.contains(&sel.path)), |el| {
-                el.child(status_chip("Cut", true, None))
             })
             .child({
                 let s_path = sel.path.clone();
@@ -4631,6 +5428,7 @@ fn app() -> Element {
                         .child(tab_bar)
                         .child(crumb_bar)
                         .child(tool_bar)
+                        .child(second_bar)
                         .child(filter_bar)
                         .child(trash_bar)
                         .child(status_row)
@@ -4749,7 +5547,17 @@ fn app() -> Element {
                                         );
                                     }
                                 })
-                                .child(content_view),
+                                .child(content_view)
+                                .maybe(second_on, |el| {
+                                    el.child(
+                                        rect()
+                                            .width(Size::fill())
+                                            .height(Size::fill())
+                                            .content(Content::Flex)
+                                            .padding((0., 0., 0., 8.))
+                                            .child(second_pane),
+                                    )
+                                }),
                         )
                         .child(bottom_bar),
                 )
@@ -4847,12 +5655,28 @@ fn sidebar_open_entry(
 }
 
 fn main() {
+    let args = config::LaunchArgs::parse();
+    if args.wants_help() {
+        args.print_help("files", FILES_PAGE_SLUGS);
+        return;
+    }
+    let initial_path = resolve_initial_path(&args);
+    if let Some(p) = initial_path.as_deref() {
+        if !Path::new(p).exists() {
+            eprintln!("[files] path does not exist: {p}");
+        }
+    } else if let Some(page) = args.page.as_deref() {
+        eprintln!("[files] unknown page {page:?}, opening home directory");
+    }
+    args.maybe_arm_screenshot("files");
+
     let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
     let _guard = _rt.as_ref().map(|rt| rt.enter());
 
     launch(
-        LaunchConfig::new()
-            .with_window(WindowConfig::new(app).with_title("Files").with_size(1100., 700.).with_min_size(640., 480.)),
+        LaunchConfig::new().with_window(
+            WindowConfig::new_app(FilesApp { initial_path }).with_title("Files").with_size(1100., 700.).with_min_size(640., 480.),
+        ),
     )
 }
 
@@ -4930,5 +5754,114 @@ mod tests {
         assert!(is_av_name("clip.mp4"));
         assert!(!is_av_name("notes.txt"));
         assert!(read_text_preview("/definitely/missing-file-xyz.txt").is_none());
+        assert!(read_pdf_preview("/definitely/missing-file-xyz.pdf").is_none());
+    }
+
+    #[test]
+    fn text_preview_reads_first_chunk_of_large_file() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("finick_large_preview_test.txt");
+        let big = "a".repeat(200 * 1024);
+        std::fs::write(&path, big).unwrap();
+        let preview = read_text_preview(&path.to_string_lossy());
+        let _ = std::fs::remove_file(&path);
+        let txt = preview.expect("large text file shows first N KB");
+        assert!(txt.chars().count() <= TEXT_PREVIEW_MAX_CHARS + 1);
+        assert!(txt.ends_with("…"));
+    }
+
+    #[test]
+    fn unique_dest_never_returns_existing_path() {
+        let base = std::env::temp_dir().join(format!("finick_unique_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&base);
+        let existing = base.join("doc.txt");
+        std::fs::write(&existing, "x").unwrap();
+        let out = unique_dest(&base, "doc.txt");
+        assert_ne!(out, existing);
+        assert!(!out.exists());
+        let _ = std::fs::remove_file(&existing);
+        let _ = std::fs::remove_dir(&base);
+    }
+
+    #[test]
+    fn dedupe_restore_dest_avoids_silent_overwrite() {
+        let base = std::env::temp_dir().join(format!("finick_dedupe_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&base);
+        let orig = base.join("keep.txt");
+        std::fs::write(&orig, "orig").unwrap();
+        let out = dedupe_restore_dest(orig.to_str().unwrap(), "keep.txt");
+        assert_ne!(out, orig);
+        assert!(!out.exists());
+        let missing = base.join("gone.txt");
+        assert_eq!(dedupe_restore_dest(missing.to_str().unwrap(), "gone.txt"), missing);
+        let _ = std::fs::remove_file(&orig);
+        let _ = std::fs::remove_dir(&base);
+    }
+
+    #[test]
+    fn trash_undo_file_roundtrip_filters_blanks() {
+        let path = std::env::temp_dir().join(format!("finick_trashundo_{}.json", std::process::id()));
+        let pairs = vec![
+            ("a.1".to_string(), "/tmp/a".to_string()),
+            ("".to_string(), "/tmp/b".to_string()),
+            ("c.1".to_string(), "".to_string()),
+        ];
+        assert!(save_trash_undo_to(&path, &pairs));
+        let loaded = load_trash_undo_from(&path);
+        assert_eq!(loaded, vec![("a.1".to_string(), "/tmp/a".to_string())]);
+        let _ = std::fs::remove_file(&path);
+        assert!(load_trash_undo_from(&path).is_empty());
+    }
+
+    #[test]
+    fn internal_drop_validation_rejects_bad_targets() {
+        let base = std::env::temp_dir().join(format!("finick_drop_{}", std::process::id()));
+        let src_dir = base.join("src");
+        let dest_dir = base.join("dest");
+        let _ = std::fs::create_dir_all(&src_dir);
+        let _ = std::fs::create_dir_all(&dest_dir);
+        let src_file = src_dir.join("f.txt");
+        std::fs::write(&src_file, "x").unwrap();
+        let src = src_file.to_string_lossy().to_string();
+        let dest = dest_dir.to_string_lossy().to_string();
+        assert!(internal_drop_error(&[], &dest).is_some());
+        assert!(internal_drop_error(&[src.clone()], &dest).is_none());
+        assert!(internal_drop_error(&[src.clone()], &src_dir.to_string_lossy().to_string()).is_some());
+        assert!(
+            internal_drop_error(&[src_dir.to_string_lossy().to_string()], &src_dir.to_string_lossy().to_string())
+                .is_some()
+        );
+        let nested = dest_dir.join("inner");
+        let _ = std::fs::create_dir_all(&nested);
+        assert!(internal_drop_error(&[dest.clone()], &nested.to_string_lossy().to_string()).is_some());
+        assert!(internal_drop_error(&[src.clone()], "/definitely/not/a/dir/xyz".into()).is_some());
+        assert!(internal_drop_error(&["/definitely/missing/src".to_string()], &dest).is_some());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn restore_single_never_overwrites_silently() {
+        assert!(restore_trash_one("finick-missing-entry-xyz", false).is_err());
+        let err = restore_trash_one("finick-missing-entry-xyz", false).unwrap_err();
+        assert!(err.contains("not in Trash"));
+    }
+
+    #[test]
+    fn copy_speed_is_honest_on_empty_or_early() {
+        assert!(format_speed(0, 5.0).is_empty());
+        assert!(format_speed(1024, 0.05).is_empty());
+        assert!(format_speed(2048, 1.0).contains("/s"));
+    }
+
+    #[test]
+    fn dir_byte_size_sums_files() {
+        let base = std::env::temp_dir().join(format!("finick_dirsize_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(base.join("sub"));
+        std::fs::write(base.join("a.bin"), vec![0u8; 100]).unwrap();
+        std::fs::write(base.join("sub").join("b.bin"), vec![0u8; 50]).unwrap();
+        assert_eq!(dir_byte_size(&base), 150);
+        assert_eq!(dir_byte_size(&base.join("a.bin")), 100);
+        assert_eq!(dir_byte_size(&base.join("missing-xyz")), 0);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -110,91 +110,94 @@ pub fn use_osd_state() -> (State<bool>, State<OsdKind>, State<f64>, State<bool>,
             });
         };
         spawn(async move {
-            let init = tokio::task::spawn_blocking(|| ipsea::settings::get_all_settings(SETTINGS_SOCKET_NAME))
-                .await
-                .unwrap_or(Ok(vec![]))
-                .unwrap_or_default();
-            for e in init {
-                if e.key == SettingKey::AudioVolume {
-                    if let Some(v) = e.value.as_f64() {
-                        val.set(v);
-                    }
-                    if let Some(v) = e.value.as_i64() {
-                        val.set(v as f64);
-                    }
-                }
-                if e.key == SettingKey::DisplayBrightness {
-                    if let Some(v) = e.value.as_f64() {
-                        val.set(v);
-                    }
-                }
-                if e.key == SettingKey::AudioMuted {
-                    if let Some(b) = e.value.as_bool() {
-                        mu.set(b);
-                    }
-                }
-                if e.key == SettingKey::AccessibilityReduceMotion {
-                    if let Some(b) = e.value.as_bool() {
-                        red.set(b);
-                    }
-                }
-            }
-            // Prefer live hardware values when the tools exist so the OSD
-            // reflects reality even if the daemon state is stale.
-            let live_vol = tokio::task::spawn_blocking(crate::state::query_sink_volume_pct).await.unwrap_or(None);
-            if let Some(v) = live_vol {
-                val.set(v);
-            }
-            let live_mute = tokio::task::spawn_blocking(crate::state::query_sink_muted).await.unwrap_or(None);
-            if let Some(m) = live_mute {
-                mu.set(m);
-            }
-            let live_bright = tokio::task::spawn_blocking(crate::state::query_brightness_pct).await.unwrap_or(None);
-            if let Some(b) = live_bright {
-                // Keep the settings value until we know which kind changed.
-                let _ = b;
-            }
-            if let Ok(mut rx) = subscribe_channel(SETTINGS_SOCKET_NAME, SubscriptionFilter::all()) {
-                while let Some(evt) = rx.recv().await {
-                    if let ipsea::settings::SettingsEvent::Changed { key, value: v, .. } = evt {
-                        let mut show = false;
-                        let mut new_kind = OsdKind::Volume;
-                        let mut new_val = 0.0;
-                        match key {
-                            SettingKey::AudioVolume => {
-                                new_kind = OsdKind::Volume;
-                                new_val = v.as_f64().unwrap_or(v.as_i64().map(|x| x as f64).unwrap_or(0.0));
-                                show = true;
-                            }
-                            SettingKey::AudioMuted => {
-                                if let Some(b) = v.as_bool() {
-                                    mu.set(b);
-                                }
-                                new_kind = OsdKind::Volume;
-                                new_val = tokio::task::spawn_blocking(crate::state::query_sink_volume_pct)
-                                    .await
-                                    .unwrap_or(None)
-                                    .unwrap_or(*val.read());
-                                show = true;
-                            }
-                            SettingKey::DisplayBrightness => {
-                                new_kind = OsdKind::Brightness;
-                                new_val = v.as_f64().unwrap_or(0.0);
-                                show = true;
-                            }
-                            SettingKey::AccessibilityReduceMotion => {
-                                if let Some(b) = v.as_bool() {
-                                    red.set_if_modified(b);
-                                }
-                            }
-                            _ => {}
+            loop {
+                let init = tokio::task::spawn_blocking(|| ipsea::settings::get_all_settings(SETTINGS_SOCKET_NAME))
+                    .await
+                    .unwrap_or(Ok(vec![]))
+                    .unwrap_or_default();
+                for e in init {
+                    if e.key == SettingKey::AudioVolume {
+                        if let Some(v) = e.value.as_f64() {
+                            val.set(v);
                         }
-                        if show {
-                            let cur = g.read().wrapping_add(1);
-                            show_for(new_kind, new_val, cur);
+                        if let Some(v) = e.value.as_i64() {
+                            val.set(v as f64);
+                        }
+                    }
+                    if e.key == SettingKey::DisplayBrightness {
+                        if let Some(v) = e.value.as_f64() {
+                            val.set(v);
+                        }
+                    }
+                    if e.key == SettingKey::AudioMuted {
+                        if let Some(b) = e.value.as_bool() {
+                            mu.set(b);
+                        }
+                    }
+                    if e.key == SettingKey::AccessibilityReduceMotion {
+                        if let Some(b) = e.value.as_bool() {
+                            red.set(b);
                         }
                     }
                 }
+                // Prefer live hardware values when the tools exist so the OSD
+                // reflects reality even if the daemon state is stale.
+                let live_vol = tokio::task::spawn_blocking(crate::state::query_sink_volume_pct).await.unwrap_or(None);
+                if let Some(v) = live_vol {
+                    val.set(v);
+                }
+                let live_mute = tokio::task::spawn_blocking(crate::state::query_sink_muted).await.unwrap_or(None);
+                if let Some(m) = live_mute {
+                    mu.set(m);
+                }
+                let live_bright = tokio::task::spawn_blocking(crate::state::query_brightness_pct).await.unwrap_or(None);
+                if let Some(b) = live_bright {
+                    // Keep the settings value until we know which kind changed.
+                    let _ = b;
+                }
+                if let Ok(mut rx) = subscribe_channel(SETTINGS_SOCKET_NAME, SubscriptionFilter::all()) {
+                    while let Some(evt) = rx.recv().await {
+                        if let ipsea::settings::SettingsEvent::Changed { key, value: v, .. } = evt {
+                            let mut show = false;
+                            let mut new_kind = OsdKind::Volume;
+                            let mut new_val = 0.0;
+                            match key {
+                                SettingKey::AudioVolume => {
+                                    new_kind = OsdKind::Volume;
+                                    new_val = v.as_f64().unwrap_or(v.as_i64().map(|x| x as f64).unwrap_or(0.0));
+                                    show = true;
+                                }
+                                SettingKey::AudioMuted => {
+                                    if let Some(b) = v.as_bool() {
+                                        mu.set(b);
+                                    }
+                                    new_kind = OsdKind::Volume;
+                                    new_val = tokio::task::spawn_blocking(crate::state::query_sink_volume_pct)
+                                        .await
+                                        .unwrap_or(None)
+                                        .unwrap_or(*val.read());
+                                    show = true;
+                                }
+                                SettingKey::DisplayBrightness => {
+                                    new_kind = OsdKind::Brightness;
+                                    new_val = v.as_f64().unwrap_or(0.0);
+                                    show = true;
+                                }
+                                SettingKey::AccessibilityReduceMotion => {
+                                    if let Some(b) = v.as_bool() {
+                                        red.set_if_modified(b);
+                                    }
+                                }
+                                _ => {}
+                            }
+                            if show {
+                                let cur = g.read().wrapping_add(1);
+                                show_for(new_kind, new_val, cur);
+                            }
+                        }
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
         });
         // Live poll: volume/brightness keys often change hardware directly

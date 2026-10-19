@@ -96,7 +96,7 @@ impl Component for Mouse {
             .width(Size::fill())
             .vertical()
             .child(page_head(
-                GENERAL,
+                MOUSE,
                 "Mouse & Touchpad",
                 "Pointer speed, acceleration and touchpad gestures",
             ))
@@ -271,7 +271,7 @@ impl Component for Mouse {
                             base = base.child(tile_sub("Reading input devices…"));
                         } else if no_devices {
                             base = base.child(empty_state(
-                                GENERAL,
+                                MOUSE,
                                 "No input devices found",
                                 "Connect a mouse or keyboard, or start Hyprland with libinput enabled.",
                             ));

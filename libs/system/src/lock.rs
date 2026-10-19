@@ -64,16 +64,16 @@ fn spawn_locker(locker: &Option<std::path::PathBuf>) {
             Err(e) => eprintln!("[finick] failed to spawn locker at {}: {e}", exe.display()),
         }
         let exe_str = exe.to_string_lossy().to_string();
-        match Command::new("hyprctl").args(["dispatch", "exec", "--", &exe_str]).spawn() {
-            Ok(_) => return,
-            Err(e) => eprintln!("[finick] hyprctl dispatch exec locker failed: {e}"),
+        if crate::hypr::hypr_exec(&exe_str) {
+            return;
         }
+        eprintln!("[finick] hyprctl exec locker failed for {exe_str}");
     } else {
         eprintln!("[finick] locker binary not found (set FINICK_LOCKER_BIN to override)");
     }
     // PATH fallbacks, session-lock client first.
     for name in LOCK_BINARIES {
-        if Command::new("hyprctl").args(["dispatch", "exec", "--", name]).spawn().is_ok() {
+        if crate::hypr::hypr_exec(name) {
             return;
         }
     }

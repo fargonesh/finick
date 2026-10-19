@@ -1,7 +1,8 @@
 # Build outputs
-/target/
+target/
 node_modules/
 dist/
+web/src/docs/content/
 
 # Nix
 result

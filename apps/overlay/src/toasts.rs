@@ -97,7 +97,7 @@ fn focus_notification_source(app_name: &str, summary: &str) {
         }
     }
     if let Some((_, addr)) = best {
-        let _ = std::process::Command::new("hyprctl").args(["dispatch", "focuswindow", &format!("address:{addr}")]).output();
+        system::hypr_focus_window(&format!("address:{addr}"));
     }
 }
 
@@ -279,7 +279,7 @@ pub async fn ensure_toasts_window(proxy: &LaunchProxy) {
     let w = TOAST_WIDTH;
     let h = TOAST_HEIGHT;
     let px = mon.x + mon.width as i32 - w - 12;
-    let py = mon.y + 44;
+    let py = mon.y + crate::PANEL_TOP_OFFSET;
     let mon_name = mon.name.clone();
     let _ = std::process::Command::new("hyprctl").args(["eval", &format!(r#"hl.window_rule({{ name = "finick-toasts-live-{mon_name}", match = {{ class = "^(overlay-toasts)$" }}, monitor = "{mon_name}", float = true, pin = true, move = {{ {px}, {py} }}, size = {{ {w}, {h} }}, border_size = 0, no_shadow = true, no_anim = true, no_blur = true, no_initial_focus = true, rounding = 20 }})"#, mon_name=mon_name, px=px, py=py, w=w, h=h)]).output();
     tokio::time::sleep(std::time::Duration::from_millis(35)).await;

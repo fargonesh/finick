@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node scripts/sync-docs.mjs",
+    "prebuild": "node scripts/sync-docs.mjs",
     "dev": "vite --host --port 5173",
     "build": "vite build",
     "preview": "vite preview --host --port 4173"

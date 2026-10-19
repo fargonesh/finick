@@ -56,10 +56,15 @@ const KEY_RETURN: u32 = 0xff0d;
 const KEY_BACKSPACE: u32 = 0xff08;
 const KEY_ESCAPE: u32 = 0xff1b;
 
-/// Events from helper threads (password check, fingerprint) to the main loop.
+/// Events from helper threads (password check, fingerprint, media/notification
+/// polling) to the main loop.
 enum BgEvent {
     Auth(bool),
     Finger(FingerEvent),
+    Status {
+        media: Option<render::MediaSnapshot>,
+        notifs: Vec<String>,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -235,6 +240,8 @@ struct Locker {
     auth_pending: bool,
     pw_failed: bool,
     finger: FingerStatus,
+    media: Option<render::MediaSnapshot>,
+    notifs: Vec<String>,
     theme: render::Theme,
     locked: bool,
     waiting_sync: bool,
@@ -307,6 +314,8 @@ impl Locker {
             finger: self.finger,
             clock: render::clock_text(self.theme.use_24h),
             hint: hint.as_deref(),
+            media: self.media.clone(),
+            notifs: self.notifs.clone(),
             font: self.theme.font.clone(),
         };
         let Some(out) = self.outputs.get_mut(&name) else { return };
@@ -454,6 +463,15 @@ impl Locker {
                     self.finger = FingerStatus::Waiting;
                 }
                 self.redraw_all(qh);
+            }
+            BgEvent::Status { media, notifs } => {
+                // Skip redundant redraws: the status thread polls every few
+                // seconds and usually reports no change.
+                if self.media != media || self.notifs != notifs {
+                    self.media = media;
+                    self.notifs = notifs;
+                    self.redraw_all(qh);
+                }
             }
         }
     }
@@ -721,6 +739,67 @@ delegate_noop!(Locker: ignore wl_buffer::WlBuffer);
 delegate_noop!(Locker: ignore wl_display::WlDisplay);
 delegate_noop!(Locker: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1);
 
+/// Best-effort now-playing snapshot via playerctl. No player or no playerctl
+/// means `None` (lock screen shows no media row rather than a stale one).
+fn query_media_snapshot() -> Option<render::MediaSnapshot> {
+    fn arg(args: &[&str]) -> Option<String> {
+        let out = std::process::Command::new("playerctl").args(args).output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if s.is_empty() { None } else { Some(s) }
+    }
+    if std::process::Command::new("playerctl")
+        .arg("--version")
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        return None;
+    }
+    let title = arg(&["metadata", "--format", "{{title}}"]).unwrap_or_default();
+    let artist = arg(&["metadata", "--format", "{{artist}}"]).unwrap_or_default();
+    let status = arg(&["status"]).unwrap_or_default();
+    if title.is_empty() && artist.is_empty() && status.is_empty() {
+        return None;
+    }
+    Some(render::MediaSnapshot { title, artist, status })
+}
+
+/// Active notification summaries ("App: summary", bodies withheld). Empty when
+/// the notification daemon is unreachable; the lock screen then shows no
+/// notification rows rather than an error.
+fn query_notif_lines() -> Vec<String> {
+    let notifs = ipsea::notifications::get_active_notifications(ipsea::notifications::NOTIFICATIONS_SOCKET_NAME)
+        .unwrap_or_default();
+    notifs
+        .iter()
+        .take(render::MAX_NOTIF_LINES)
+        .map(|n| render::notif_line(&n.app_name, &n.summary))
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+/// Poll media + notification state off the Wayland thread. Exits when the main
+/// loop is gone (send fails).
+fn spawn_status_poller(tx: calloop::channel::Sender<BgEvent>) {
+    std::thread::spawn(move || {
+        // Immediate first snapshot so the first frames already carry status.
+        let first = BgEvent::Status { media: query_media_snapshot(), notifs: query_notif_lines() };
+        if tx.send(first).is_err() {
+            return;
+        }
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let ev = BgEvent::Status { media: query_media_snapshot(), notifs: query_notif_lines() };
+            if tx.send(ev).is_err() {
+                return;
+            }
+        }
+    });
+}
+
 fn usage() -> ! {
     eprintln!("usage: finick-lock [--timeout <secs>]");
     eprintln!("  Locks the session via ext-session-lock-v1 until SIGINT/SIGTERM or --timeout.");
@@ -770,6 +849,8 @@ fn main() {
         auth_pending: false,
         pw_failed: false,
         finger: FingerStatus::Unavailable,
+        media: None,
+        notifs: Vec::new(),
         theme: render::load_theme(),
         locked: false,
         waiting_sync: false,
@@ -830,7 +911,8 @@ fn main() {
             }
         })
         .unwrap();
-    finger::spawn(bg_tx, locker.username.clone());
+    finger::spawn(bg_tx.clone(), locker.username.clone());
+    spawn_status_poller(bg_tx.clone());
 
     // SIGINT/SIGTERM -> unlock. Every other exit path goes through unlock() too.
     event_loop

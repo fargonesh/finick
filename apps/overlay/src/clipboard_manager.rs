@@ -37,49 +37,52 @@ impl Component for ClipboardManager {
         use_hook(move || {
             let mut it = items;
             spawn(async move {
-                let initial =
-                    tokio::task::spawn_blocking(|| ipsea::clipboard::get_history(CLIPBOARD_SOCKET_NAME).unwrap_or_default())
-                        .await
-                        .unwrap_or_default();
-                let mut sorted = initial;
-                sorted.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-                it.set(sorted);
-                if let Ok(mut rx) = ipsea::clipboard::subscribe_channel(CLIPBOARD_SOCKET_NAME) {
-                    while let Some(evt) = rx.recv().await {
-                        match evt {
-                            ClipboardEvent::Added(item) => {
-                                let mut cur = it.read().clone();
-                                cur.retain(|x| x.id != item.id);
-                                cur.insert(0, item);
-                                it.set(cur);
-                            }
-                            ClipboardEvent::Selected(item) => {
-                                let mut cur = it.read().clone();
-                                cur.retain(|x| x.id != item.id);
-                                cur.insert(0, item);
-                                it.set(cur);
-                            }
-                            ClipboardEvent::Deleted(id) => {
-                                let mut cur = it.read().clone();
-                                cur.retain(|x| x.id != id);
-                                it.set(cur);
-                            }
-                            ClipboardEvent::Pinned { id, pinned } => {
-                                let mut cur = it.read().clone();
-                                for x in cur.iter_mut() {
-                                    if x.id == id {
-                                        x.pinned = pinned;
-                                    }
+                loop {
+                    let initial =
+                        tokio::task::spawn_blocking(|| ipsea::clipboard::get_history(CLIPBOARD_SOCKET_NAME).unwrap_or_default())
+                            .await
+                            .unwrap_or_default();
+                    let mut sorted = initial;
+                    sorted.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                    it.set(sorted);
+                    if let Ok(mut rx) = ipsea::clipboard::subscribe_channel(CLIPBOARD_SOCKET_NAME) {
+                        while let Some(evt) = rx.recv().await {
+                            match evt {
+                                ClipboardEvent::Added(item) => {
+                                    let mut cur = it.read().clone();
+                                    cur.retain(|x| x.id != item.id);
+                                    cur.insert(0, item);
+                                    it.set(cur);
                                 }
-                                it.set(cur);
-                            }
-                            ClipboardEvent::Cleared => {
-                                let mut cur = it.read().clone();
-                                cur.retain(|x| x.pinned);
-                                it.set(cur);
+                                ClipboardEvent::Selected(item) => {
+                                    let mut cur = it.read().clone();
+                                    cur.retain(|x| x.id != item.id);
+                                    cur.insert(0, item);
+                                    it.set(cur);
+                                }
+                                ClipboardEvent::Deleted(id) => {
+                                    let mut cur = it.read().clone();
+                                    cur.retain(|x| x.id != id);
+                                    it.set(cur);
+                                }
+                                ClipboardEvent::Pinned { id, pinned } => {
+                                    let mut cur = it.read().clone();
+                                    for x in cur.iter_mut() {
+                                        if x.id == id {
+                                            x.pinned = pinned;
+                                        }
+                                    }
+                                    it.set(cur);
+                                }
+                                ClipboardEvent::Cleared => {
+                                    let mut cur = it.read().clone();
+                                    cur.retain(|x| x.pinned);
+                                    it.set(cur);
+                                }
                             }
                         }
                     }
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
             });
         });
@@ -370,12 +373,24 @@ pub fn start_clipboard_service() {
 pub fn clipboard_app() -> Element {
     let _st = use_init_app_theme(get_theme());
     let dismiss = use_state(|| false);
+    let wid = Platform::window_id();
     use_hook(move || {
-        crate::state::spawn_panel_focus_watcher(&["overlay-clipboard", "overlay", "topbar"], "clipboard", dismiss);
+        let my_wid = wid;
+        crate::state::spawn_panel_focus_watcher_guarded(
+            &["overlay-clipboard", "overlay", "topbar"],
+            "clipboard",
+            dismiss,
+            move || crate::state::is_clipboard_window_current(my_wid),
+        );
     });
     use_hook(move || {
+        let my_wid = wid;
         crate::state::clear_close_flag(&crate::state::CLOSE_CLIPBOARD);
-        crate::state::spawn_close_flag_watcher(&crate::state::CLOSE_CLIPBOARD, dismiss);
+        crate::state::spawn_close_flag_watcher_guarded(
+            &crate::state::CLOSE_CLIPBOARD,
+            dismiss,
+            move || crate::state::is_clipboard_window_current(my_wid),
+        );
     });
     ClipboardManager { dismiss }.into_element()
 }

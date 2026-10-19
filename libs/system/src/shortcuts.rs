@@ -295,19 +295,22 @@ pub fn add_shortcut(shortcut: &KeyboardShortcut) -> Result<(), String> {
     current.push(shortcut.clone());
     save_custom_shortcuts(&current)?;
 
-    // Dynamically bind in Hyprland
-    let hypr_mods = shortcut.mods.join(" ");
-    let hypr_key = &shortcut.key;
-    let hypr_cmd = if shortcut.command.starts_with("exec,") {
-        shortcut.command.clone()
+    // Dynamically bind in Hyprland (Lua-first, legacy fallback).
+    // Legacy `hyprctl keyword bind` is rejected on Lua configs
+    // ("keyword can't work with non-legacy parsers. Use eval."),
+    // so prefer `hl.bind` via the shared helper.
+    let exec_part = if let Some(rest) = shortcut.command.strip_prefix("exec,") {
+        rest.trim()
     } else {
-        format!("exec, {}", shortcut.command)
+        shortcut.command.trim()
     };
-
-    let bind_arg = format!("{hypr_mods}, {hypr_key}, {hypr_cmd}");
-    let _ = Command::new("hyprctl")
-        .args(["keyword", "bind", &bind_arg])
-        .output();
+    let mut combo_parts: Vec<String> = shortcut.mods.iter().map(|m| m.to_uppercase()).collect();
+    combo_parts.push(shortcut.key.to_uppercase());
+    let combo = combo_parts.join(" + ");
+    // Best effort: ignore errors here so saving the shortcut never fails
+    // just because Hyprland is unreachable (parity with previous behavior
+    // which ignored `hyprctl keyword bind` output).
+    let _ = crate::hypr::hypr_bind(&combo, exec_part);
 
     Ok(())
 }
@@ -318,12 +321,23 @@ pub fn remove_shortcut(id: &str) -> Result<(), String> {
         current.retain(|s| s.id != id);
         save_custom_shortcuts(&current)?;
 
-        // Unbind in Hyprland
-        let hypr_mods = target.mods.join(" ");
-        let hypr_key = &target.key;
-        let _ = Command::new("hyprctl")
-            .args(["keyword", "unbind", &format!("{hypr_mods}, {hypr_key}")])
-            .output();
+        // Unbind in Hyprland (Lua-first, legacy fallback).
+        let mut combo_parts: Vec<String> = target.mods.iter().map(|m| m.to_uppercase()).collect();
+        combo_parts.push(target.key.to_uppercase());
+        let combo = combo_parts.join(" + ");
+        let lua = format!(r#"hl.unbind("{combo}")"#);
+        let lua_ok = Command::new("hyprctl")
+            .args(["eval", &lua])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !lua_ok {
+            let hypr_mods = target.mods.join(" ");
+            let hypr_key = &target.key;
+            let _ = Command::new("hyprctl")
+                .args(["keyword", "unbind", &format!("{hypr_mods}, {hypr_key}")])
+                .output();
+        }
     }
     Ok(())
 }
@@ -439,21 +453,11 @@ pub fn ensure_finick_bind_now(id: &str) -> Result<bool, String> {
         ),
         _ => return Err(format!("unknown finick bind: {id}")),
     };
-    if let Some(binds) = hypr_binds_value() {
-        let (key, _) = match id {
-            "finick_launcher" => ("space", true),
-            _ => ("l", true),
-        };
-        if bind_active_in(&binds, key, true) {
-            return Ok(true);
-        }
-    }
-    let escaped = exec_cmd.replace('\\', "\\\\").replace('"', "\\\"");
-    let lua = format!(r#"hl.bind("{combo}", hl.dsp.exec_cmd("{escaped}"))"#);
-    let out =
-        Command::new("hyprctl").args(["eval", &lua]).output().map_err(|e| format!("hyprctl eval bind failed: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("hyprctl eval bind failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    Ok(true)
+    // Always (re)install the Lua bind instead of skipping when *any* bind
+    // with the same modmask+key exists. A legacy hyprlang bind
+    // (`bind = SUPER, SPACE, exec, /run/.../launcher`) satisfies the old
+    // `bind_active_in` check but fails at press time on Lua configs with
+    // `return hl.dispatch(exec /run/...)` / "nil value (global 'exec')".
+    // Re-binding via `hl.bind` heals that broken state and is idempotent.
+    crate::hypr::hypr_bind(combo, &exec_cmd)
 }

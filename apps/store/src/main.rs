@@ -927,11 +927,37 @@ fn app_header_row(entry: &StoreEntry) -> Element {
         .into_element()
 }
 
-fn store_app() -> impl IntoElement {
+impl Tab {
+    /// Map a CLI page slug to a store tab.
+    pub fn from_slug(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().replace('_', "-").as_str() {
+            "discover" | "search" | "browse" => Some(Self::Discover),
+            "installed" | "install" | "manage" => Some(Self::Installed),
+            "updates" | "update" | "upgrade" => Some(Self::Updates),
+            _ => None,
+        }
+    }
+}
+
+/// Page slugs accepted on the command line / via URI handlers.
+pub const STORE_PAGE_SLUGS: &[&str] = &["discover", "installed", "updates"];
+
+struct StoreApp {
+    initial_tab: Tab,
+    initial_query: String,
+}
+
+impl freya::prelude::App for StoreApp {
+    fn render(&self) -> impl IntoElement {
+        store_root(self.initial_tab, self.initial_query.clone())
+    }
+}
+
+fn store_root(initial_tab: Tab, initial_query: String) -> impl IntoElement {
     let _theme = use_init_app_theme(get_theme());
     let t = use_app_theme();
-    let tab = use_state(|| Tab::Discover);
-    let query = use_state(String::new);
+    let tab = use_state(move || initial_tab);
+    let query = use_state(move || initial_query.clone());
     let results = use_state(Vec::<StoreEntry>::new);
     let installed = use_state(Vec::<StoreEntry>::new);
     let updates = use_state(Vec::<system::store_flatpak::FlatpakApp>::new);
@@ -964,6 +990,22 @@ fn store_app() -> impl IntoElement {
             let f = hm_file.read().clone();
             if !f.is_empty() {
                 hm_imported.set(system::store_hm::is_imported(&f));
+            }
+        });
+    }
+
+    // Deep-link: when launched with a search query (URI `?search=` or
+    // `--search`), run it once on mount so handlers land on results.
+    {
+        let query = query;
+        let results = results;
+        let search_busy = search_busy;
+        let notice = notice;
+        let notice_detail = notice_detail;
+        use_hook(move || {
+            let q = query.read().clone();
+            if !q.trim().is_empty() {
+                run_search(q, results, search_busy, notice, notice_detail);
             }
         });
     }
@@ -1756,9 +1798,26 @@ fn store_app() -> impl IntoElement {
 }
 
 pub fn main() {
+    let args = config::LaunchArgs::parse();
+    if args.wants_help() {
+        args.print_help("store", STORE_PAGE_SLUGS);
+        return;
+    }
+    let initial_tab =
+        args.page.as_deref().and_then(Tab::from_slug).unwrap_or(Tab::Discover);
+    if args.page.is_some() && args.page.as_deref().and_then(Tab::from_slug).is_none() {
+        eprintln!("[store] unknown page {:?}, opening Discover", args.page);
+    }
+    // `--search foo`, `?search=foo`, or a trailing positional query.
+    let initial_query = args.extra.clone().filter(|q| q != "__help__").unwrap_or_default();
+    args.maybe_arm_screenshot("store");
+
     let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
     let _guard = _rt.as_ref().map(|rt| rt.enter());
     launch(LaunchConfig::new().with_window(
-        WindowConfig::new(store_app).with_title("Finick Apps").with_size(1080., 740.).with_min_size(640., 480.),
+        WindowConfig::new_app(StoreApp { initial_tab, initial_query })
+            .with_title("Finick Apps")
+            .with_size(1080., 740.)
+            .with_min_size(640., 480.),
     ))
 }

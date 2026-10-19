@@ -142,18 +142,25 @@ pub fn control_panel_app() -> Element {
             }
         });
     });
-    use_hook(|| {
-        crate::state::spawn_panel_focus_watcher(
+    let wid = Platform::window_id();
+    use_hook(move || {
+        let my_wid = wid;
+        crate::state::spawn_panel_focus_watcher_guarded(
             &["overlay-panel", "topbar-panel", "overlay", "topbar"],
             "control-panel",
             dismiss,
+            move || {
+                crate::state::is_panel_window_current(my_wid)
+            },
         );
     });
     use_hook(move || {
+        let my_wid = wid;
         crate::state::clear_close_flag(&crate::state::CLOSE_PANEL);
-        crate::state::spawn_close_flag_watcher(&crate::state::CLOSE_PANEL, dismiss);
+        crate::state::spawn_close_flag_watcher_guarded(&crate::state::CLOSE_PANEL, dismiss, move || {
+            crate::state::is_panel_window_current(my_wid)
+        });
     });
-    let wid = Platform::window_id();
     let _wifi_on = *wifi.read();
     let _bt_on = *bt.read();
     let wired_info = wired.read().clone();

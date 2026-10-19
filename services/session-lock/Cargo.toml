@@ -15,6 +15,7 @@ calloop-wayland-source = "0.4"
 tempfile = "3"
 system = { path = "../../libs/system" }
 config = { path = "../../libs/config" }
+ipsea = { path = "../../libs/protocol", package = "protocol" }
 xkbcommon-dl = "0.4"
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
 image = "0.24"

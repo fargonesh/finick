@@ -122,6 +122,13 @@ in
       Install.WantedBy = [ "graphical-session.target" ];
     };
 
+    # Hyprlang binds for hyprlang configs. On Hyprland >=0.55 Lua configs the
+    # legacy `exec` dispatcher is wrapped as `hl.dispatch(exec ...)` and fails
+    # with "attempt to perform arithmetic on a nil value (global 'exec')".
+    # The overlay heals this at startup via `hl.bind(..., hl.dsp.exec_cmd(...))`
+    # (`ensure_finick_default_bindings`), and all `hyprctl dispatch exec`
+    # call sites use the Lua-first `system::hypr_exec` helper, so the launcher
+    # works on both config providers.
     wayland.windowManager.hyprland.settings.bind = [
       # Session-lock client first; Freya `locker` remains the
       # `finished`-event fallback resolved via FINICK_LOCKER_BIN/PATH.

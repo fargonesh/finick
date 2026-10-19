@@ -3,26 +3,65 @@ use {
     freya::prelude::*,
 };
 
+#[derive(Clone, PartialEq)]
+struct StatusChipInner {
+    text: String,
+    is_on: bool,
+    on_press: Option<EventHandler<()>>,
+}
+
+impl Component for StatusChipInner {
+    fn render(&self) -> impl IntoElement {
+        let t = use_app_theme();
+        let hovered = use_state(|| false);
+        let is_hovered = *hovered.read();
+        let mut h1 = hovered;
+        let mut h2 = hovered;
+
+        let bg = if self.is_on {
+            if self.on_press.is_some() && is_hovered {
+                t.bg_hover
+            } else {
+                t.bg_active
+            }
+        } else if self.on_press.is_some() && is_hovered {
+            t.panel_raised
+        } else {
+            t.track
+        };
+        let text_color = if self.is_on { t.accent } else { t.text_dim };
+
+        rect()
+            .padding((3., 9.))
+            .corner_radius(RADIUS_PILL)
+            .background(bg)
+            .maybe(self.on_press.is_some(), |el| {
+                let cb = self.on_press.clone().unwrap();
+                el.cursor(CursorIcon::Pointer)
+                    .a11y_role(AccessibilityRole::Button)
+                    .a11y_focusable(true)
+                    .on_pointer_enter(move |_| h1.set(true))
+                    .on_pointer_leave(move |_| h2.set(false))
+                    .on_press(move |_| cb.call(()))
+            })
+            .child(
+                label()
+                    .font_size(11.)
+                    .font_weight(FontWeight::MEDIUM)
+                    .color(text_color)
+                    .max_lines(Some(1))
+                    .text(self.text.clone()),
+            )
+    }
+}
+
 /// A status chip matching .chip in ui_demo.html
 pub fn status_chip(text: impl Into<String>, is_on: bool, on_press: Option<EventHandler<()>>) -> impl IntoElement {
-    let t = use_app_theme();
-    let text_str = text.into();
-
-    let bg = if is_on { t.bg_active } else { t.track };
-
-    let text_color = if is_on { t.accent } else { t.text_dim };
-
-    rect()
-        .padding((3., 9.))
-        .corner_radius(RADIUS_PILL)
-        .background(bg)
-        .map(on_press, |el, cb| {
-            el.cursor(CursorIcon::Pointer)
-                .a11y_role(AccessibilityRole::Button)
-                .a11y_focusable(true)
-                .on_press(move |_| cb.call(()))
-        })
-        .child(label().font_size(11.).font_weight(FontWeight::MEDIUM).color(text_color).max_lines(Some(1)).text(text_str))
+    StatusChipInner {
+        text: text.into(),
+        is_on,
+        on_press,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

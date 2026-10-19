@@ -2,6 +2,7 @@
 
 pub mod clipboard_manager;
 pub mod launcher;
+mod date_panel;
 mod notification_panel;
 mod notification_popup;
 mod toasts;
@@ -33,6 +34,9 @@ pub struct PanelWindowId(pub Arc<Mutex<Option<winit::window::WindowId>>>);
 pub struct NotificationPanelWindowId(pub Arc<Mutex<Option<winit::window::WindowId>>>);
 
 #[derive(Clone, Default)]
+pub struct CalendarPanelWindowId(pub Arc<Mutex<Option<winit::window::WindowId>>>);
+
+#[derive(Clone, Default)]
 pub struct ClipboardWindowId(pub Arc<Mutex<Option<winit::window::WindowId>>>);
 
 #[derive(Clone, Default)]
@@ -40,6 +44,10 @@ pub struct ScreenshotWindowId(pub Arc<Mutex<Option<winit::window::WindowId>>>);
 
 #[derive(Clone, Default)]
 pub struct ToastWindowId(pub Arc<Mutex<Option<winit::window::WindowId>>>);
+
+/// Distance from the monitor top edge to the top of dropdown panels.
+/// Topbar is 36px tall with a reserved top of 36, so 48 leaves a 12px gap.
+pub const PANEL_TOP_OFFSET: i32 = 48;
 
 fn panel_window_config() -> WindowConfig {
     WindowConfig::new(control_panel_app)
@@ -89,16 +97,34 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
             if !crate::state::rate_limit_ok(&crate::state::LAST_PANEL_TOGGLE_MS, 350) {
                 return;
             }
-            let is_open = panel_ctx.0.lock().map(|g| g.is_some()).unwrap_or(false);
-            if is_open {
-                // Animated close: the panel maps this to its local dismiss
-                // so the PanelShell exit runs instead of popping.
-                crate::state::request_panel_close();
-                return;
-            }
             let panel_ctx = panel_ctx.clone();
             let mon_name = mon_name_for_panel.clone();
             spawn(async move {
+                let tracked = panel_ctx.0.lock().ok().and_then(|g| *g);
+                if tracked.is_some() {
+                    let hypr_live = tokio::task::spawn_blocking(|| {
+                        crate::state::hypr_has_any_class_blocking(&["overlay-panel", "topbar-panel"])
+                    })
+                    .await
+                    .unwrap_or(true);
+                    if hypr_live {
+                        // Animated close: the panel maps this to its local dismiss
+                        // so the PanelShell exit runs instead of popping.
+                        crate::state::request_panel_close();
+                        return;
+                    }
+                    if let Ok(mut g) = panel_ctx.0.lock() {
+                        if *g == tracked {
+                            *g = None;
+                        }
+                    }
+                    if let Some(id) = tracked {
+                        Platform::get().close_window(id);
+                    }
+                    let _ = std::process::Command::new("hyprctl")
+                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-panel)$' }))"])
+                        .output();
+                }
                 if let Some(notif_ctx) = GlobalContexts::get().try_get_context::<crate::NotificationPanelWindowId>() {
                     if let Ok(mut g) = notif_ctx.0.lock() {
                         if let Some(nid) = g.take() {
@@ -107,6 +133,19 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                                 .args([
                                     "eval",
                                     "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-notifications)$' }))",
+                                ])
+                                .output();
+                        }
+                    }
+                }
+                if let Some(cal_ctx) = GlobalContexts::get().try_get_context::<crate::CalendarPanelWindowId>() {
+                    if let Ok(mut g) = cal_ctx.0.lock() {
+                        if let Some(nid) = g.take() {
+                            Platform::get().close_window(nid);
+                            let _ = std::process::Command::new("hyprctl")
+                                .args([
+                                    "eval",
+                                    "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-calendar)$' }))",
                                 ])
                                 .output();
                         }
@@ -135,7 +174,7 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
 
                 let current_mon = get_monitor_state(&mon_name);
                 let panel_x = current_mon.x + current_mon.width as i32 - 460 - 12;
-                let panel_y = current_mon.y + 44;
+                let panel_y = current_mon.y + PANEL_TOP_OFFSET;
                 crate::state::arm_travel_guard(panel_x as f64, panel_y as f64, 460., 700., (panel_x + 380) as f64);
 
                 // Set placement rule before window maps via Hyprland 0.55 Lua API
@@ -226,14 +265,32 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
             if !crate::state::rate_limit_ok(&crate::state::LAST_NOTIF_TOGGLE_MS, 350) {
                 return;
             }
-            let is_open = notif_panel_ctx.0.lock().map(|g| g.is_some()).unwrap_or(false);
-            if is_open {
-                crate::state::request_notifications_close();
-                return;
-            }
             let notif_panel_ctx = notif_panel_ctx.clone();
             let mon_name = mon_name_for_notif.clone();
             spawn(async move {
+                let tracked = notif_panel_ctx.0.lock().ok().and_then(|g| *g);
+                if tracked.is_some() {
+                    let hypr_live = tokio::task::spawn_blocking(|| {
+                        crate::state::hypr_has_any_class_blocking(&["overlay-notifications"])
+                    })
+                    .await
+                    .unwrap_or(true);
+                    if hypr_live {
+                        crate::state::request_notifications_close();
+                        return;
+                    }
+                    if let Ok(mut g) = notif_panel_ctx.0.lock() {
+                        if *g == tracked {
+                            *g = None;
+                        }
+                    }
+                    if let Some(id) = tracked {
+                        Platform::get().close_window(id);
+                    }
+                    let _ = std::process::Command::new("hyprctl")
+                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-notifications)$' }))"])
+                        .output();
+                }
                 if let Some(panel_ctx) = GlobalContexts::get().try_get_context::<PanelWindowId>() {
                     if let Ok(mut g) = panel_ctx.0.lock() {
                         if let Some(pid) = g.take() {
@@ -242,6 +299,16 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                     }
                     let _ = std::process::Command::new("hyprctl")
                         .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-panel)$' }))"])
+                        .output();
+                }
+                if let Some(cal_ctx) = GlobalContexts::get().try_get_context::<crate::CalendarPanelWindowId>() {
+                    if let Ok(mut g) = cal_ctx.0.lock() {
+                        if let Some(pid) = g.take() {
+                            Platform::get().close_window(pid);
+                        }
+                    }
+                    let _ = std::process::Command::new("hyprctl")
+                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-calendar)$' }))"])
                         .output();
                 }
                 if let Some(cw) = GlobalContexts::get().try_get_context::<crate::ClipboardWindowId>() {
@@ -267,8 +334,8 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
 
                 let current_mon = get_monitor_state(&mon_name);
                 let panel_x = current_mon.x + current_mon.width as i32 - 400 - 12;
-                let panel_y = current_mon.y + 44;
-                crate::state::arm_travel_guard(panel_x as f64, panel_y as f64, 400., 520., (panel_x + 340) as f64);
+                let panel_y = current_mon.y + PANEL_TOP_OFFSET;
+                crate::state::arm_travel_guard(panel_x as f64, panel_y as f64, 400., 620., (panel_x + 340) as f64);
                 let lua_rule = format!(
                     r#"
                     hl.window_rule({{
@@ -307,7 +374,145 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                                     hl.dispatch(hl.dsp.window.float({{ window = addr }}))
                                     hl.dispatch(hl.dsp.window.pin({{ window = addr }}))
                                     hl.dispatch(hl.dsp.window.move({{ window = addr, x = {panel_x}, y = {panel_y} }}))
-                                    hl.dispatch(hl.dsp.window.resize({{ window = addr, x = 400, y = 520, relative = false }}))
+                                    hl.dispatch(hl.dsp.window.resize({{ window = addr, x = 400, y = 620, relative = false }}))
+                                    return true
+                                end
+                            end
+                            return false
+                            "#,
+                            panel_x = panel_x,
+                            panel_y = panel_y,
+                        );
+                        if let Ok(out) = std::process::Command::new("hyprctl").args(["eval", &lua]).output() {
+                            let s = String::from_utf8_lossy(&out.stdout);
+                            if s.contains("true") {
+                                break;
+                            }
+                        }
+                    }
+                });
+            });
+        })
+    };
+
+    let cal_panel_ctx: CalendarPanelWindowId = GlobalContexts::get().get_context::<CalendarPanelWindowId>();
+    let mon_name_for_cal = mon_name.clone();
+    let toggle_calendar = {
+        let cal_panel_ctx = cal_panel_ctx.clone();
+        std::rc::Rc::new(move || {
+            if !crate::state::rate_limit_ok(&crate::state::LAST_CALENDAR_TOGGLE_MS, 350) {
+                return;
+            }
+            let cal_panel_ctx = cal_panel_ctx.clone();
+            let mon_name = mon_name_for_cal.clone();
+            spawn(async move {
+                let tracked = cal_panel_ctx.0.lock().ok().and_then(|g| *g);
+                if tracked.is_some() {
+                    let hypr_live = tokio::task::spawn_blocking(|| {
+                        crate::state::hypr_has_any_class_blocking(&["overlay-calendar"])
+                    })
+                    .await
+                    .unwrap_or(true);
+                    if hypr_live {
+                        crate::state::request_calendar_close();
+                        return;
+                    }
+                    if let Ok(mut g) = cal_panel_ctx.0.lock() {
+                        if *g == tracked {
+                            *g = None;
+                        }
+                    }
+                    if let Some(id) = tracked {
+                        Platform::get().close_window(id);
+                    }
+                    let _ = std::process::Command::new("hyprctl")
+                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-calendar)$' }))"])
+                        .output();
+                }
+                if let Some(panel_ctx) = GlobalContexts::get().try_get_context::<PanelWindowId>() {
+                    if let Ok(mut g) = panel_ctx.0.lock() {
+                        if let Some(pid) = g.take() {
+                            Platform::get().close_window(pid);
+                        }
+                    }
+                    let _ = std::process::Command::new("hyprctl")
+                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-panel)$' }))"])
+                        .output();
+                }
+                if let Some(notif_ctx) = GlobalContexts::get().try_get_context::<crate::NotificationPanelWindowId>() {
+                    if let Ok(mut g) = notif_ctx.0.lock() {
+                        if let Some(pid) = g.take() {
+                            Platform::get().close_window(pid);
+                        }
+                    }
+                    let _ = std::process::Command::new("hyprctl")
+                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-notifications)$' }))"])
+                        .output();
+                }
+                if let Some(cw) = GlobalContexts::get().try_get_context::<crate::ClipboardWindowId>() {
+                    if let Ok(mut g) = cw.0.lock() {
+                        if let Some(id) = g.take() {
+                            Platform::get().close_window(id);
+                        }
+                    }
+                }
+                if let Some(sw) = GlobalContexts::get().try_get_context::<crate::ScreenshotWindowId>() {
+                    if let Ok(mut g) = sw.0.lock() {
+                        if let Some(id) = g.take() {
+                            Platform::get().close_window(id);
+                        }
+                    }
+                }
+                let _ = std::process::Command::new("hyprctl")
+                    .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-clipboard)$' }))"])
+                    .output();
+                let _ = std::process::Command::new("hyprctl")
+                    .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-screenshot)$' }))"])
+                    .output();
+
+                let current_mon = get_monitor_state(&mon_name);
+                let panel_x = current_mon.x + current_mon.width as i32 - 400 - 12;
+                let panel_y = current_mon.y + PANEL_TOP_OFFSET;
+                crate::state::arm_travel_guard(panel_x as f64, panel_y as f64, 400., 620., (panel_x + 340) as f64);
+                let lua_rule = format!(
+                    r#"
+                    hl.window_rule({{
+                        name = "finick-calendar-position",
+                        match = {{ class = "^(overlay-calendar)$" }},
+                        monitor = "{mon}",
+                        float = true,
+                        pin = true,
+                        move = {{ {panel_x}, {panel_y} }},
+                        border_size = 0,
+                        no_shadow = true,
+                        no_anim = true,
+                        no_blur = true,
+                        rounding = 20,
+                    }})
+                    "#,
+                    mon = current_mon.name,
+                    panel_x = panel_x,
+                    panel_y = panel_y,
+                );
+                let _ = std::process::Command::new("hyprctl").args(["eval", &lua_rule]).output();
+                tokio::time::sleep(std::time::Duration::from_millis(35)).await;
+                let cfg = crate::date_panel::date_panel_window_config();
+                let new_id = Platform::get().launch_window(cfg).await;
+                if let Ok(mut g) = cal_panel_ctx.0.lock() {
+                    *g = Some(new_id);
+                }
+                tokio::spawn(async move {
+                    for delay in [30, 80] {
+                        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                        let lua = format!(
+                            r#"
+                            for _, w in ipairs(hl.get_windows()) do
+                                if w.class == 'overlay-calendar' or w.title == 'calendar-panel' then
+                                    local addr = 'address:' .. tostring(w.address)
+                                    hl.dispatch(hl.dsp.window.float({{ window = addr }}))
+                                    hl.dispatch(hl.dsp.window.pin({{ window = addr }}))
+                                    hl.dispatch(hl.dsp.window.move({{ window = addr, x = {panel_x}, y = {panel_y} }}))
+                                    hl.dispatch(hl.dsp.window.resize({{ window = addr, x = 400, y = 620, relative = false }}))
                                     return true
                                 end
                             end
@@ -338,31 +543,34 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
     use_hook(move || {
         let mut fmt = use_24h;
         spawn(async move {
-            if let Ok(Ok(entries)) =
-                tokio::task::spawn_blocking(|| ipsea::settings::get_all_settings(ipsea::settings::SETTINGS_SOCKET_NAME))
-                    .await
-            {
-                for e in entries {
-                    if e.key == ipsea::settings::SettingKey::TimeFormat24h {
-                        if let Some(b) = e.value.as_bool() {
-                            fmt.set(b);
-                        }
-                    }
-                }
-            }
-            if let Ok(mut rx) = ipsea::settings::subscribe_channel(
-                ipsea::settings::SETTINGS_SOCKET_NAME,
-                ipsea::settings::SubscriptionFilter::all(),
-            ) {
-                while let Some(evt) = rx.recv().await {
-                    if let ipsea::settings::SettingsEvent::Changed { key, value, .. } = evt {
-                        if key == ipsea::settings::SettingKey::TimeFormat24h {
-                            if let Some(b) = value.as_bool() {
+            loop {
+                if let Ok(Ok(entries)) =
+                    tokio::task::spawn_blocking(|| ipsea::settings::get_all_settings(ipsea::settings::SETTINGS_SOCKET_NAME))
+                        .await
+                {
+                    for e in entries {
+                        if e.key == ipsea::settings::SettingKey::TimeFormat24h {
+                            if let Some(b) = e.value.as_bool() {
                                 fmt.set(b);
                             }
                         }
                     }
                 }
+                if let Ok(mut rx) = ipsea::settings::subscribe_channel(
+                    ipsea::settings::SETTINGS_SOCKET_NAME,
+                    ipsea::settings::SubscriptionFilter::all(),
+                ) {
+                    while let Some(evt) = rx.recv().await {
+                        if let ipsea::settings::SettingsEvent::Changed { key, value, .. } = evt {
+                            if key == ipsea::settings::SettingKey::TimeFormat24h {
+                                if let Some(b) = value.as_bool() {
+                                    fmt.set(b);
+                                }
+                            }
+                        }
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
         });
     });
@@ -526,7 +734,7 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                 .on_press(move |_| {
                     let id_str = w_id.to_string();
                     std::thread::spawn(move || {
-                        let _ = std::process::Command::new("hyprctl").args(["dispatch", "workspace", &id_str]).output();
+                        system::hypr_workspace(&id_str);
                     });
                 })
                 .child(
@@ -735,7 +943,7 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
                         .cursor(CursorIcon::Pointer)
                         .padding((4., 8.))
                         .on_press({
-                            let t = toggle_panel.clone();
+                            let t = toggle_calendar.clone();
                             move |_| t()
                         })
                         .child(
@@ -861,6 +1069,17 @@ pub fn apply_hyprland_base_rules() {
         hl.window_rule({
             name = "finick-notifications",
             match = { class = "^(overlay-notifications)$" },
+            float = true,
+            pin = true,
+            border_size = 0,
+            no_shadow = true,
+            no_anim = true,
+            no_blur = true,
+            rounding = 20,
+        })
+        hl.window_rule({
+            name = "finick-calendar",
+            match = { class = "^(overlay-calendar)$" },
             float = true,
             pin = true,
             border_size = 0,
@@ -1137,72 +1356,22 @@ pub fn ensure_finick_default_bindings() {
 }
 
 fn try_ensure_super_l_once() -> Result<bool, String> {
-    let out = std::process::Command::new("hyprctl")
-        .args(["binds", "-j"])
-        .output()
-        .map_err(|e| format!("hyprctl binds failed: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("hyprctl binds failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    let binds: serde_json::Value =
-        serde_json::from_slice(&out.stdout).map_err(|e| format!("hyprctl binds parse failed: {e}"))?;
-    let already_bound = binds.as_array().is_some_and(|binds| {
-        binds.iter().any(|b| {
-            let key = b["key"].as_str().unwrap_or_default();
-            let modmask = b["modmask"].as_i64().unwrap_or(0);
-            key.eq_ignore_ascii_case("l") && (modmask & 64 != 0)
-        })
-    });
-    if already_bound {
-        return Ok(true);
-    }
     let locker_cmd =
         system::locker_binary().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "finick-lock".to_string());
-    // Hyprland >=0.55 uses the Lua parser: `keyword bind` is rejected with
-    // "keyword can't work with non-legacy parsers. Use eval."
-    let escaped = locker_cmd.replace('\\', "\\\\").replace('"', "\\\"");
-    let lua = format!(r#"hl.bind("SUPER + L", hl.dsp.exec_cmd("{escaped}"))"#);
-    let out = std::process::Command::new("hyprctl")
-        .args(["eval", &lua])
-        .output()
-        .map_err(|e| format!("hyprctl eval bind failed: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("hyprctl eval bind failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    Ok(true)
+    // Always (re)install the Lua bind. Skipping when *any* SUPER+L bind exists
+    // leaves broken legacy hyprlang binds (`exec /run/...`) in place on Lua
+    // configs, where they fail at press time with
+    // `return hl.dispatch(exec ...)` / "nil value (global 'exec')".
+    // `hl.bind` is idempotent, so re-binding heals that state.
+    system::hypr_bind("SUPER + L", &locker_cmd).map_err(|e| format!("hyprctl eval bind failed: {e}"))
 }
 
 fn try_ensure_super_space_once() -> Result<bool, String> {
-    let out = std::process::Command::new("hyprctl")
-        .args(["binds", "-j"])
-        .output()
-        .map_err(|e| format!("hyprctl binds failed: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("hyprctl binds failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    let binds: serde_json::Value =
-        serde_json::from_slice(&out.stdout).map_err(|e| format!("hyprctl binds parse failed: {e}"))?;
-    let already_bound = binds.as_array().is_some_and(|binds| {
-        binds.iter().any(|b| {
-            let key = b["key"].as_str().unwrap_or_default();
-            let modmask = b["modmask"].as_i64().unwrap_or(0);
-            key.eq_ignore_ascii_case("space") && (modmask & 64 != 0)
-        })
-    });
-    if already_bound {
-        return Ok(true);
-    }
     let launcher_cmd = system::launcher_exec_cmd();
-    let escaped = launcher_cmd.replace('\\', "\\\\").replace('"', "\\\"");
-    let lua = format!(r#"hl.bind("SUPER + SPACE", hl.dsp.exec_cmd("{escaped}"))"#);
-    let out = std::process::Command::new("hyprctl")
-        .args(["eval", &lua])
-        .output()
-        .map_err(|e| format!("hyprctl eval bind failed: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("hyprctl eval bind failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    Ok(true)
+    // Same as SUPER+L above: always refresh the Lua bind so a legacy
+    // `bind = SUPER, SPACE, exec, /run/.../launcher` (broken on Lua configs)
+    // gets healed instead of being treated as "already bound".
+    system::hypr_bind("SUPER + SPACE", &launcher_cmd).map_err(|e| format!("hyprctl eval bind failed: {e}"))
 }
 
 pub fn register_hyprland_rules() {
@@ -1553,7 +1722,26 @@ impl Drop for ReservedSpaceGuard {
     fn drop(&mut self) { clear_hyprland_reserved_space(); }
 }
 
+/// Page slugs accepted on the command line / via URI handlers.
+/// Each names a utility window to open on startup alongside the topbars.
+pub const OVERLAY_PAGE_SLUGS: &[&str] =
+    &["panel", "clipboard", "screenshot", "notifications", "launcher", "session", "osd", "topbar"];
+
 pub fn run() {
+    let launch_args = config::LaunchArgs::parse();
+    if launch_args.wants_help() {
+        launch_args.print_help("overlay", OVERLAY_PAGE_SLUGS);
+        return;
+    }
+    let initial_page = launch_args.page.clone().map(|p| config::normalize_page_key(&p));
+    if let Some(page) = initial_page.as_deref() {
+        if !OVERLAY_PAGE_SLUGS.contains(&page) {
+            eprintln!("[overlay] unknown page {page:?}, opening topbars only");
+        }
+    }
+    launch_args.maybe_arm_screenshot("overlay");
+    let open_utility = initial_page.clone();
+
     let _reserved_guard = ReservedSpaceGuard;
 
     let default_panic_hook = std::panic::take_hook();
@@ -1605,6 +1793,7 @@ pub fn run() {
         .with_exit_on_close(false)
         .with_global(PanelWindowId::default())
         .with_global(NotificationPanelWindowId::default())
+        .with_global(CalendarPanelWindowId::default())
         .with_global(ClipboardWindowId::default())
         .with_global(ScreenshotWindowId::default())
         .with_global(ToastWindowId::default())
@@ -1612,6 +1801,33 @@ pub fn run() {
 
     for mon in &initial_monitors {
         launch_config = launch_config.with_window(make_topbar_window_config(mon));
+    }
+
+    // Deep-link: `--page <utility>` opens that utility window on startup
+    // (useful for URI handlers and screenshot debugging).
+    match open_utility.as_deref() {
+        Some("panel") => launch_config = launch_config.with_window(panel_window_config()),
+        Some("clipboard") => {
+            launch_config = launch_config.with_window(crate::clipboard_manager::clipboard_window_config())
+        }
+        Some("screenshot") => {
+            launch_config = launch_config.with_window(crate::screenshot::screenshot_window_config())
+        }
+        Some("notifications") => {
+            launch_config =
+                launch_config.with_window(crate::notification_panel::notification_panel_window_config())
+        }
+        Some("calendar") | Some("date") => {
+            launch_config = launch_config.with_window(crate::date_panel::date_panel_window_config())
+        }
+        Some("launcher") => launch_config = launch_config.with_window(crate::launcher::launcher_window_config()),
+        Some("session") => launch_config = launch_config.with_window(crate::session::session_window_config()),
+        Some("osd") => launch_config = launch_config.with_window(crate::osd::osd_window_config()),
+        Some("toasts") => launch_config = launch_config.with_window(crate::toasts::toasts_window_config()),
+        Some("topbar") | Some("") | None => {}
+        Some(other) => {
+            eprintln!("[overlay] unknown page {other:?}, opening topbars only");
+        }
     }
 
     let monitors_for_listener = initial_monitors.clone();
@@ -1633,7 +1849,7 @@ pub fn run() {
                                 for id in ids {
                                     if let Some(app) = ctx.windows().get(&id) {
                                         let title = app.window().title();
-                                        if title == "overlay-modal" || title == "clipboard" || title == "screenshot" || title == "notifications-panel" || title == "control-panel" {
+                                        if title == "overlay-modal" || title == "clipboard" || title == "screenshot" || title == "notifications-panel" || title == "calendar-panel" || title == "control-panel" {
                                             ctx.windows_mut().remove(&id);
                                         }
                                     }
@@ -1642,6 +1858,9 @@ pub fn run() {
                                     if let Ok(mut g) = ctx.0.lock() { *g = None; }
                                 }
                                 if let Some(ctx) = ctx.global_contexts.try_get_context::<crate::NotificationPanelWindowId>() {
+                                    if let Ok(mut g) = ctx.0.lock() { *g = None; }
+                                }
+                                if let Some(ctx) = ctx.global_contexts.try_get_context::<crate::CalendarPanelWindowId>() {
                                     if let Ok(mut g) = ctx.0.lock() { *g = None; }
                                 }
                                 if let Some(ctx) = ctx.global_contexts.try_get_context::<crate::ClipboardWindowId>() {
@@ -1658,23 +1877,51 @@ pub fn run() {
                                 }
                             }).await;
                         });
-                        let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-modal)$"]).output();
-                        let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-clipboard)$"]).output();
-                        let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-screenshot)$"]).output();
-                        let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-notifications)$"]).output();
-                        let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-toasts)$"]).output();
-                        let _ = std::process::Command::new("hyprctl").args(["dispatch", "closewindow", "class:^(overlay-panel)$"]).output();
+                        for cls in [
+                            "class:^(overlay-modal)$",
+                            "class:^(overlay-clipboard)$",
+                            "class:^(overlay-screenshot)$",
+                            "class:^(overlay-notifications)$",
+                            "class:^(overlay-calendar)$",
+                            "class:^(overlay-toasts)$",
+                            "class:^(overlay-panel)$",
+                        ] {
+                            system::hypr_close_window(cls);
+                        }
                     } else if let ipsea::modals::ModalRequest::Clipboard = req {
                         let proxy = proxy_clone.clone();
                         let h = handle.clone();
                         let tx2 = tx.clone();
                         h.spawn(async move {
-                            let is_open = proxy.post_callback(|ctx| {
+                            let mut is_open = proxy.post_callback(|ctx| {
                                 ctx.global_contexts
                                     .try_get_context::<crate::ClipboardWindowId>()
                                     .and_then(|cw| cw.0.lock().ok().and_then(|g| *g))
                                     .is_some_and(|id| ctx.windows().contains_key(&id))
                             }).await.unwrap_or(false);
+                            if is_open {
+                                let hypr_live = tokio::task::spawn_blocking(|| {
+                                    crate::state::hypr_has_any_class_blocking(&["overlay-clipboard"])
+                                })
+                                .await
+                                .unwrap_or(true);
+                                if !hypr_live {
+                                    let _ = proxy.post_callback(|ctx| {
+                                        if let Some(c) = ctx.global_contexts.try_get_context::<crate::ClipboardWindowId>() {
+                                            if let Ok(mut g) = c.0.lock() {
+                                                if let Some(id) = *g {
+                                                    *g = None;
+                                                    ctx.windows_mut().remove(&id);
+                                                }
+                                            }
+                                        }
+                                    }).await;
+                                    let _ = std::process::Command::new("hyprctl")
+                                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-clipboard)$' }))"])
+                                        .output();
+                                    is_open = false;
+                                }
+                            }
                             if is_open {
                                 crate::state::request_clipboard_close();
                                 let _ = tx2.send(ipsea::modals::ModalResponse::Success { data: None });
@@ -1691,6 +1938,9 @@ pub fn run() {
                                 .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-notifications)$' }))"])
                                 .output();
                             let _ = std::process::Command::new("hyprctl")
+                                .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-calendar)$' }))"])
+                                .output();
+                            let _ = std::process::Command::new("hyprctl")
                                 .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-screenshot)$' }))"])
                                 .output();
                             let _ = proxy.post_callback(|ctx| {
@@ -1700,6 +1950,9 @@ pub fn run() {
                                 if let Some(c) = ctx.global_contexts.try_get_context::<crate::NotificationPanelWindowId>() {
                                     if let Ok(mut g) = c.0.lock() { *g = None; }
                                 }
+                                if let Some(c) = ctx.global_contexts.try_get_context::<crate::CalendarPanelWindowId>() {
+                                    if let Ok(mut g) = c.0.lock() { *g = None; }
+                                }
                                 if let Some(c) = ctx.global_contexts.try_get_context::<crate::ScreenshotWindowId>() {
                                     if let Ok(mut g) = c.0.lock() { *g = None; }
                                 }
@@ -1707,7 +1960,7 @@ pub fn run() {
                                 for id in ids {
                                     if let Some(app) = ctx.windows().get(&id) {
                                         let title = app.window().title();
-                                        if title == "screenshot" || title == "control-panel" || title == "notifications-panel" {
+                                        if title == "screenshot" || title == "control-panel" || title == "notifications-panel" || title == "calendar-panel" {
                                             ctx.windows_mut().remove(&id);
                                         }
                                     }
@@ -1717,7 +1970,7 @@ pub fn run() {
                             let w = 520;
                             let hgt = 380;
                             let px = mon.x + mon.width as i32 - w - 12;
-                            let py = mon.y + 44;
+                            let py = mon.y + PANEL_TOP_OFFSET;
                             crate::state::arm_travel_guard(px as f64, py as f64, 520., 380., (px + 460) as f64);
                             let mon_name = mon.name.clone();
                             let _ = std::process::Command::new("hyprctl").args(["eval", &format!(r#"hl.window_rule({{ name = "finick-clipboard-live-{mon_name}", match = {{ class = "^(overlay-clipboard)$" }}, monitor = "{mon_name}", float = true, pin = true, move = {{ {px}, {py} }}, size = {{ {w}, {hgt} }}, border_size = 0, no_shadow = true, no_anim = true, no_blur = true, rounding = 20 }})"#, mon_name=mon_name, px=px, py=py, w=w, hgt=hgt)]).output();
@@ -1758,12 +2011,35 @@ pub fn run() {
                         let h = handle.clone();
                         let tx2 = tx.clone();
                         h.spawn(async move {
-                            let is_open = proxy.post_callback(|ctx| {
+                            let mut is_open = proxy.post_callback(|ctx| {
                                 ctx.global_contexts
                                     .try_get_context::<crate::ScreenshotWindowId>()
                                     .and_then(|sw| sw.0.lock().ok().and_then(|g| *g))
                                     .is_some_and(|id| ctx.windows().contains_key(&id))
                             }).await.unwrap_or(false);
+                            if is_open {
+                                let hypr_live = tokio::task::spawn_blocking(|| {
+                                    crate::state::hypr_has_any_class_blocking(&["overlay-screenshot"])
+                                })
+                                .await
+                                .unwrap_or(true);
+                                if !hypr_live {
+                                    let _ = proxy.post_callback(|ctx| {
+                                        if let Some(c) = ctx.global_contexts.try_get_context::<crate::ScreenshotWindowId>() {
+                                            if let Ok(mut g) = c.0.lock() {
+                                                if let Some(id) = *g {
+                                                    *g = None;
+                                                    ctx.windows_mut().remove(&id);
+                                                }
+                                            }
+                                        }
+                                    }).await;
+                                    let _ = std::process::Command::new("hyprctl")
+                                        .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-screenshot)$' }))"])
+                                        .output();
+                                    is_open = false;
+                                }
+                            }
                             if is_open {
                                 crate::state::request_screenshot_close();
                                 let _ = tx2.send(ipsea::modals::ModalResponse::Success { data: None });
@@ -1780,6 +2056,9 @@ pub fn run() {
                                 .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-notifications)$' }))"])
                                 .output();
                             let _ = std::process::Command::new("hyprctl")
+                                .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-calendar)$' }))"])
+                                .output();
+                            let _ = std::process::Command::new("hyprctl")
                                 .args(["eval", "hl.dispatch(hl.dsp.window.close({ window = 'class:^(overlay-clipboard)$' }))"])
                                 .output();
                             let _ = proxy.post_callback(|ctx| {
@@ -1789,6 +2068,9 @@ pub fn run() {
                                 if let Some(c) = ctx.global_contexts.try_get_context::<crate::NotificationPanelWindowId>() {
                                     if let Ok(mut g) = c.0.lock() { *g = None; }
                                 }
+                                if let Some(c) = ctx.global_contexts.try_get_context::<crate::CalendarPanelWindowId>() {
+                                    if let Ok(mut g) = c.0.lock() { *g = None; }
+                                }
                                 if let Some(c) = ctx.global_contexts.try_get_context::<crate::ClipboardWindowId>() {
                                     if let Ok(mut g) = c.0.lock() { *g = None; }
                                 }
@@ -1796,7 +2078,7 @@ pub fn run() {
                                 for id in ids {
                                     if let Some(app) = ctx.windows().get(&id) {
                                         let title = app.window().title();
-                                        if title == "clipboard" || title == "control-panel" || title == "notifications-panel" {
+                                        if title == "clipboard" || title == "control-panel" || title == "notifications-panel" || title == "calendar-panel" {
                                             ctx.windows_mut().remove(&id);
                                         }
                                     }
@@ -1806,7 +2088,7 @@ pub fn run() {
                             let w = 500;
                             let hgt = 264;
                             let px = mon.x + mon.width as i32 - w - 12;
-                            let py = mon.y + 44;
+                            let py = mon.y + PANEL_TOP_OFFSET;
                             crate::state::arm_travel_guard(px as f64, py as f64, 500., 264., (px + 440) as f64);
                             let mon_name = mon.name.clone();
                             let _ = std::process::Command::new("hyprctl").args(["eval", &format!(r#"hl.window_rule({{ name = "finick-screenshot-live-{mon_name}", match = {{ class = "^(overlay-screenshot)$" }}, monitor = "{mon_name}", float = true, pin = true, move = {{ {px}, {py} }}, size = {{ {w}, {hgt} }}, border_size = 0, no_shadow = true, no_anim = true, no_blur = true, rounding = 20 }})"#, mon_name=mon_name, px=px, py=py, w=w, hgt=hgt)]).output();
@@ -1893,7 +2175,7 @@ pub fn run() {
                                         mh = mh as i32,
                                     );
                                     let _ = std::process::Command::new("hyprctl").args(["eval", &lua]).output();
-                                    let _ = std::process::Command::new("hyprctl").args(["dispatch", "bringactivetotop"]).output();
+                                    system::hypr_bring_to_top("");
                                 }
                             });
                         });
