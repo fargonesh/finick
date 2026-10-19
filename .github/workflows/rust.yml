@@ -65,7 +65,9 @@ jobs:
             libgdk-pixbuf-2.0-dev \
             libwebkit2gtk-4.1-dev \
             librsvg2-dev \
-            libxdo-dev
+            libxdo-dev \
+            grim \
+            slurp
       - run: cargo clippy --workspace --locked --all-targets -- -D warnings
 
   test:
@@ -99,8 +101,12 @@ jobs:
             libgdk-pixbuf-2.0-dev \
             libwebkit2gtk-4.1-dev \
             librsvg2-dev \
-            libxdo-dev
+            libxdo-dev \
+            grim \
+            slurp
       - run: cargo check --workspace --locked
+      - name: Install wl-screenrec for screenshot tool detection test
+        run: cargo install wl-screenrec --locked --root ~/.cargo
       - run: cargo test --workspace --locked
 
   release:
@@ -138,7 +144,9 @@ jobs:
             libgdk-pixbuf-2.0-dev \
             libwebkit2gtk-4.1-dev \
             librsvg2-dev \
-            libxdo-dev
+            libxdo-dev \
+            grim \
+            slurp
       - name: Build release
         run: cargo build --release --locked
       - name: Stage binaries
