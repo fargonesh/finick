@@ -1972,6 +1972,7 @@ dependencies = [
  "config",
  "index",
  "ipc",
+ "protocol",
  "serde_json",
  "strum",
  "system",
@@ -1983,6 +1984,7 @@ version = "0.1.0"
 dependencies = [
  "config",
  "ipc",
+ "protocol",
  "serde",
  "serde_json",
  "system",
@@ -5136,6 +5138,7 @@ dependencies = [
  "freya",
  "index",
  "ipc",
+ "protocol",
  "serde",
  "serde_json",
  "system",
@@ -5424,9 +5427,9 @@ dependencies = [
 name = "polkit-agent"
 version = "0.1.0"
 dependencies = [
- "ipc",
  "log",
  "pretty_env_logger",
+ "protocol",
  "serde",
  "serde_json",
  "tokio",
@@ -5609,6 +5612,16 @@ checksum = "4488a4a36b9a4ba6b9334a32a39971f77c1436ec82c38707bce707699cc3bbcb"
 dependencies = [
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "protocol"
+version = "0.1.0"
+dependencies = [
+ "ipc",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -6490,7 +6503,7 @@ dependencies = [
  "freya",
  "freya-devtools",
  "freya-performance-plugin",
- "ipc",
+ "protocol",
  "rfd",
  "serde",
  "serde_json",
@@ -6830,7 +6843,7 @@ dependencies = [
  "freya",
  "freya-devtools",
  "freya-performance-plugin",
- "ipc",
+ "protocol",
  "serde",
  "serde_json",
  "system",

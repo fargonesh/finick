@@ -1,6 +1,6 @@
 use {
     image::ImageReader,
-    ipsea::log::trace,
+    ipc::log::trace,
     notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher},
     r2d2::Pool,
     r2d2_sqlite::SqliteConnectionManager,

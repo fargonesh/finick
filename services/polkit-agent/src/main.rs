@@ -33,12 +33,12 @@ impl Agent {
         let pending_map = self.pending.clone();
         tokio::spawn(async move {
             let prompt = if message.is_empty() { format!("Authenticate for {}", action_id) } else { message };
-            let req = ipc::modals::ModalRequest::PamAuth { prompt: prompt.clone() };
+            let req = ipsea::modals::ModalRequest::PamAuth { prompt: prompt.clone() };
             let resp =
-                tokio::task::spawn_blocking(move || ipc::modals::send_modal_request(req)).await.ok().and_then(|r| r.ok());
+                tokio::task::spawn_blocking(move || ipsea::modals::send_modal_request(req)).await.ok().and_then(|r| r.ok());
             let password = match resp {
-                Some(ipc::modals::ModalResponse::Success { data: Some(p) }) => p,
-                Some(ipc::modals::ModalResponse::Canceled) => {
+                Some(ipsea::modals::ModalResponse::Success { data: Some(p) }) => p,
+                Some(ipsea::modals::ModalResponse::Canceled) => {
                     warn!("polkit auth canceled for {}", cookie);
                     cancel_auth(&cookie).await;
                     pending_map.lock().await.remove(&cookie);

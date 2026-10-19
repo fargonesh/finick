@@ -81,7 +81,7 @@ Failings found:
 - `files/main.rs:426` `Input width px 140` fixed. Too narrow, cramped toolbar. Use `fill` or `flex`.
 - `files/main.rs:404` path field with `.flat()` inside a bordered parent is correct. Copy that.
 
-Rule: styled parent means transparent Input plus `width Size::fill()`. Unstyled row means use the pill search pattern instead of a bare Input. Never fixed `px` widths for search. Always `content(Content::Flex)` on any `rect` with `flex` children per `AGENTS.md`.
+Rule: styled parent means transparent Input plus `width Size::fill()`. Unstyled row means use the pill search pattern instead of a bare Input. Never fixed `px` widths for search. Always `content(Content::Flex)` on any `rect` with `flex` children per the `freya` skill.
 
 ## Lists and grids
 

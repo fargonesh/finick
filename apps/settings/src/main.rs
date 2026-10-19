@@ -257,8 +257,22 @@ fn app() -> impl IntoElement {
         })
         .collect();
 
-    let filtered_len = filtered_routes.len();
-    let _active_focus_idx = if filtered_len > 0 { (*focused_nav_idx.read()).min(filtered_len - 1) } else { 0 };
+    // Visual order: filtered routes without About, then About at the bottom
+    // (matches the sidebar rendering below). Keyboard nav must follow this order.
+    let visible_routes: Vec<RouteInfo> = {
+        let mut v: Vec<RouteInfo> = filtered_routes.iter().copied().filter(|i| i.route != Route::About).collect();
+        if filtered_routes.iter().any(|i| i.route == Route::About) {
+            if let Some(about) = filtered_routes.iter().copied().find(|i| i.route == Route::About) {
+                v.push(about);
+            }
+        }
+        v
+    };
+    let active_focus_idx = if visible_routes.is_empty() {
+        0
+    } else {
+        (*focused_nav_idx.read()).min(visible_routes.len() - 1)
+    };
 
     responsive_view(780.0, move |compact| {
         let sidebar_w = if compact { 180. } else { 232. };
@@ -278,7 +292,8 @@ fn app() -> impl IntoElement {
                 let mut focused_nav_idx = focused_nav_idx;
                 let search_focus = search_focus;
                 let search_a11y_id = search_a11y_id;
-                let routes = filtered_routes.clone();
+                // Keyboard order follows visual sidebar order (About last).
+                let routes = visible_routes.clone();
 
                 move |e: Event<KeyboardEventData>| {
                     let is_search_focused = search_focus.read().is_focused();
@@ -293,6 +308,8 @@ fn app() -> impl IntoElement {
                             search_a11y_id.request_unfocus();
                             if !search_query.read().is_empty() {
                                 search_query.set(String::new());
+                            } else if *current_route.read() != Route::Overview {
+                                current_route.set(Route::Overview);
                             }
                         }
                         Key::Named(NamedKey::ArrowDown) => {
@@ -357,11 +374,12 @@ fn app() -> impl IntoElement {
                     )
                     // Search bar
                     .child(sidebar_search(search_query, "Search"))
-                    // Scrollable nav list
+                    // Scrollable nav list (keyboard order matches this visual order)
                     .child(ScrollView::new().width(Size::fill()).height(Size::fill()).child(
                         rect().width(Size::fill()).vertical().spacing(2.).children({
                             let mut elements = Vec::new();
                             let mut current_grp: Option<&'static str> = None;
+                            let mut visual_idx: usize = 0;
 
                             for item in &filtered_routes {
                                 if item.route == Route::About {
@@ -377,12 +395,22 @@ fn app() -> impl IntoElement {
                                 }
 
                                 let is_active = *current_route.read() == item.route;
+                                let is_focused = visual_idx == active_focus_idx;
                                 let route_val = item.route;
                                 let mut cr = current_route;
+                                let focus_border = if is_focused { t.accent } else { Color::TRANSPARENT };
 
                                 elements.push(
-                                    nav_item(item.icon_svg, item.title, is_active, move || cr.set(route_val)).into_element(),
+                                    rect()
+                                        .width(Size::fill())
+                                        .corner_radius(6.)
+                                        .border(Border::new().width(1.).fill(focus_border))
+                                        .child(nav_item(item.icon_svg, item.title, is_active || is_focused, move || {
+                                            cr.set(route_val)
+                                        }))
+                                        .into_element(),
                                 );
+                                visual_idx += 1;
                             }
 
                             elements
@@ -396,8 +424,18 @@ fn app() -> impl IntoElement {
                             .border(Border::new().width(1.).fill(t.border))
                             .child({
                                 let is_active = *current_route.read() == Route::About;
+                                // About is last in visual/keyboard order.
+                                let about_idx = visible_routes.iter().position(|i| i.route == Route::About);
+                                let is_focused = about_idx == Some(active_focus_idx);
+                                let focus_border = if is_focused { t.accent } else { Color::TRANSPARENT };
                                 let mut cr = current_route;
-                                nav_item(ABOUT, "About", is_active, move || cr.set(Route::About))
+                                rect()
+                                    .width(Size::fill())
+                                    .corner_radius(6.)
+                                    .border(Border::new().width(1.).fill(focus_border))
+                                    .child(nav_item(ABOUT, "About", is_active || is_focused, move || {
+                                        cr.set(Route::About)
+                                    }))
                             }),
                     ),
             )

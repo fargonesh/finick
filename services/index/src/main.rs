@@ -43,7 +43,7 @@ async fn main() {
         let pool = pool.clone();
         move || index::index(None, pool.clone())
     });
-    ipsea::start_server(App::IndexService.to_string(), {
+    ipc::start_server(App::IndexService.to_string(), {
         let pool = pool.clone();
         move |req: Request, sender: Sender<SearchResult>| match req {
             Request::Search { query } => {

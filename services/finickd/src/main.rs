@@ -1,11 +1,9 @@
 use {
     config::{self, SettingsPayload},
-    ipsea::{
-        settings::{
-            ChangeSource, DenialReason, LockSource, LockState, SettingEntry, SettingKey, SettingValue, SettingsEvent,
-            SettingsRequest, SettingsResponse, SubscriptionFilter, SETTINGS_SOCKET_NAME,
-        },
-        start_server,
+    ipc::start_server,
+    ipsea::settings::{
+        ChangeSource, DenialReason, LockSource, LockState, SettingEntry, SettingKey, SettingValue, SettingsEvent,
+        SettingsRequest, SettingsResponse, SubscriptionFilter, SETTINGS_SOCKET_NAME,
     },
     std::sync::{mpsc::Sender, Arc, Mutex},
     system::{HyprlandBackend, SystemBackend},

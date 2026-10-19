@@ -1,5 +1,5 @@
 use {
-    crate::{resolve_socket_path, send_command, start_server},
+    ipc::{resolve_socket_path, send_command, start_server},
     serde::{Deserialize, Serialize},
     std::{
         fmt::Display,

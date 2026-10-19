@@ -61,25 +61,9 @@ enum IconSize {
 impl IconSize {
     fn px(self) -> f32 {
         match self {
-            Self::Small => 24.,
-            Self::Medium => 32.,
-            Self::Large => 48.,
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Small => "S",
-            Self::Medium => "M",
-            Self::Large => "L",
-        }
-    }
-
-    fn next(self) -> Self {
-        match self {
-            Self::Small => Self::Medium,
-            Self::Medium => Self::Large,
-            Self::Large => Self::Small,
+            Self::Small => 40.,
+            Self::Medium => 56.,
+            Self::Large => 72.,
         }
     }
 }
@@ -320,7 +304,7 @@ fn fetch_via_index(req: index::ty::Request, fallback_dir: Option<String>, mut it
     std::thread::spawn(move || {
         let (inner_tx, inner_rx) = std::sync::mpsc::channel();
         let tx_clone = inner_tx.clone();
-        let res = ipsea::send_command(
+        let res = ipc::send_command(
             App::IndexService,
             &req,
             Some(move |res: index::ty::SearchResult| {
@@ -692,18 +676,43 @@ fn file_type_label(name: &str, is_dir: bool) -> String {
     }
 }
 
-fn open_with_chooser(path: &str) {
+fn try_open_path(path: &str, mut notice: State<Option<(String, NoticeKind)>>) {
+    if let Err(e) = std::process::Command::new("xdg-open").arg(path).spawn() {
+        notice.set(Some((format!("Open failed: {path}: {e}"), NoticeKind::Error)));
+    }
+}
+
+fn danger_button_full_local(text: impl Into<String>, mut on_press: impl FnMut() + 'static) -> impl IntoElement {
+    let t = use_app_theme();
+    let text_str = text.into();
+    rect()
+        .width(Size::fill())
+        .padding((10., 16.))
+        .corner_radius(8.)
+        .background(t.accent_red)
+        .center()
+        .cursor(CursorIcon::Pointer)
+        .on_press(move |_| on_press())
+        .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text_primary).text(text_str))
+}
+
+fn open_with_chooser(path: &str, mut notice: State<Option<(String, NoticeKind)>>) {
     let p = path.to_string();
-    let _ = std::process::Command::new("mimeopen")
+    let r = std::process::Command::new("mimeopen")
         .arg("-d")
         .arg(&p)
         .spawn()
         .or_else(|_| std::process::Command::new("xdg-open").arg(&p).spawn());
+    if let Err(e) = r {
+        notice.set(Some((format!("Open failed: {p}: {e}"), NoticeKind::Error)));
+    }
 }
 
-fn show_in_folder(path: &str) {
+fn show_in_folder(path: &str, mut notice: State<Option<(String, NoticeKind)>>) {
     let parent = PathBuf::from(path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or("/".to_string());
-    let _ = std::process::Command::new("xdg-open").arg(&parent).spawn();
+    if let Err(e) = std::process::Command::new("xdg-open").arg(&parent).spawn() {
+        notice.set(Some((format!("Open location failed: {parent}: {e}"), NoticeKind::Error)));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -995,7 +1004,8 @@ fn app() -> Element {
         spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                t.set(*t.read() + 1);
+                let next = *t.read();
+                t.set(next + 1);
             }
         });
     });
@@ -1067,10 +1077,11 @@ fn app() -> Element {
     let is_trash_view = cp == trash_path;
 
     let sidebar = rect()
-        .width(Size::px(220.))
+        .width(Size::flex(0.6))
+        .max_width(Size::px(260.))
         .height(Size::fill())
-        .background(t.bg_sidebar)
-        .border(Border::new().width(1.).fill(t.border_card))
+        .background(t.sidebar_bg)
+        .border(Border::new().width(1.).fill(t.border))
         .padding(12.)
         .child(
             rect()
@@ -1078,19 +1089,12 @@ fn app() -> Element {
                 .width(Size::fill())
                 .cross_align(Alignment::Center)
                 .main_align(Alignment::SpaceBetween)
-                .margin((0., 0., 12., 0.))
-                .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("PLACES"))
-                .child(
-                    rect()
-                        .cursor(CursorIcon::Pointer)
-                        .padding((2., 6.))
-                        .corner_radius(6.)
-                        .on_press({
-                            let mut s = show_sidebar;
-                            move |_| s.set(false)
-                        })
-                        .child(label().font_size(10.).color(t.text_muted).text("Collapse")),
-                ),
+                .margin((0., 0., 4., 0.))
+                .child(nav_group_label("PLACES"))
+                .child(ghost_button("Collapse", {
+                    let mut s = show_sidebar;
+                    move || s.set(false)
+                })),
         )
         .child(sidebar_entry("Home", HOME, &current_path, home_path.clone(), items, pinned, clipboard))
         .maybe(path_exists(&docs_path), |el| {
@@ -1106,16 +1110,9 @@ fn app() -> Element {
         .maybe(!devices.is_empty(), |el| {
             el.child(
                 rect()
-                    .margin((12., 0., 0., 0.))
+                    .margin((4., 0., 0., 0.))
                     .content(Content::Flex)
-                    .child(
-                        label()
-                            .font_size(11.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(t.text_muted)
-                            .margin((0., 0., 8., 0.))
-                            .text("DEVICES"),
-                    )
+                    .child(nav_group_label("DEVICES"))
                     .children(devices.iter().map(|(name, path)| {
                         sidebar_entry(name, STORAGE, &current_path, path.clone(), items, pinned, clipboard)
                     })),
@@ -1124,16 +1121,9 @@ fn app() -> Element {
         .maybe(!recent_list.is_empty(), |el| {
             el.child(
                 rect()
-                    .margin((12., 0., 0., 0.))
+                    .margin((4., 0., 0., 0.))
                     .content(Content::Flex)
-                    .child(
-                        label()
-                            .font_size(11.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(t.text_muted)
-                            .margin((0., 0., 8., 0.))
-                            .text("RECENT"),
-                    )
+                    .child(nav_group_label("RECENT"))
                     .children(recent_list.iter().map(|path| {
                         let name =
                             PathBuf::from(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(path.clone());
@@ -1143,16 +1133,9 @@ fn app() -> Element {
         })
         .child(if !pinned.read().is_empty() {
             rect()
-                .margin((12., 0., 0., 0.))
+                .margin((4., 0., 0., 0.))
                 .content(Content::Flex)
-                .child(
-                    label()
-                        .font_size(11.)
-                        .font_weight(FontWeight::BOLD)
-                        .color(t.text_muted)
-                        .margin((0., 0., 8., 0.))
-                        .text("PINNED"),
-                )
+                .child(nav_group_label("PINNED"))
                 .children(
                     pinned
                         .read()
@@ -1164,62 +1147,39 @@ fn app() -> Element {
             rect().into_element()
         })
         .child(
-            rect().margin((12., 0., 0., 0.)).child(
-                rect()
-                    .width(Size::fill())
-                    .padding(8.)
-                    .corner_radius(8.)
-                    .background(t.bg_card)
-                    .border(Border::new().width(1.).fill(t.border_card))
-                    .cursor(CursorIcon::Pointer)
-                    .on_press({
-                        let mut show = show_add_place;
-                        let mut name_st = add_place_name;
-                        let cp2 = current_path.read().clone();
-                        move |_| {
-                            let base = PathBuf::from(&cp2)
-                                .file_name()
-                                .map(|n| n.to_string_lossy().to_string())
-                                .unwrap_or("Place".to_string());
-                            name_st.set(base);
-                            show.set(true);
-                        }
-                    })
-                    .child(
-                        rect()
-                            .horizontal()
-                            .cross_align(Alignment::Center)
-                            .spacing(6.)
-                            .content(Content::Flex)
-                            .child(icon(PLUS, 12., t.text_primary))
-                            .child(label().font_size(12.).color(t.text_primary).text("Add Place")),
-                    ),
+            rect().margin((12., 0., 0., 0.)).width(Size::fill()).content(Content::Flex).child(
+                secondary_button_full("Add Place", {
+                    let mut show = show_add_place;
+                    let mut name_st = add_place_name;
+                    let cp2 = current_path.read().clone();
+                    move || {
+                        let base = PathBuf::from(&cp2)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or("Place".to_string());
+                        name_st.set(base);
+                        show.set(true);
+                    }
+                }),
             ),
         );
 
-    let top_bar = rect()
-        .height(Size::px(56.))
-        .width(Size::fill())
+    let show_sidebar_val = *show_sidebar.read();
+    let view_mode_val = view_mode.read().clone();
+    let icon_size_val = icon_size.read().clone();
+    let grid_active = view_mode_val == ViewMode::Grid;
+    let list_active = view_mode_val == ViewMode::List;
+
+    let leading: Element = rect()
         .horizontal()
         .cross_align(Alignment::Center)
         .content(Content::Flex)
-        .padding(10.)
         .spacing(8.)
-        .background(t.bg_base)
-        .border(Border::new().width(1.).fill(t.border_card))
-        .child(
-            rect()
-                .padding(8.)
-                .corner_radius(8.)
-                .background(if *show_sidebar.read() { t.bg_card } else { t.bg_surface })
-                .border(Border::new().width(1.).fill(t.border_card))
-                .cursor(CursorIcon::Pointer)
-                .on_press({
-                    let mut s = show_sidebar;
-                    move |_| s.set(!*s.read())
-                })
-                .child(icon(SIDEBAR, 16., t.text_primary)),
-        )
+        .child(tool_button(SIDEBAR, t.text, {
+            let mut s = show_sidebar;
+            let next = !show_sidebar_val;
+            move || s.set(next)
+        }))
         .child(icon_button("‹", {
             let mut current = current_path;
             let items = items;
@@ -1263,152 +1223,80 @@ fn app() -> Element {
                 load_dir(current.read().clone(), items);
             }
         }))
-        .child(
-            rect()
-                .padding(8.)
-                .corner_radius(8.)
-                .background(t.bg_card)
-                .border(Border::new().width(1.).fill(t.border_card))
-                .cursor(CursorIcon::Pointer)
-                .on_press({
-                    let mut current = current_path;
-                    let items = items;
-                    move |_| {
-                        let path = PathBuf::from(current.read().clone());
-                        if let Some(parent) = path.parent() {
-                            let new_path = parent.to_string_lossy().to_string();
-                            current.set(new_path.clone());
-                            load_dir(new_path, items);
-                        }
-                    }
-                })
-                .child(icon(ARROW_LEFT, 16., t.text_primary)),
-        )
-        .child(
-            rect()
-                .width(Size::flex(1.))
-                .height(Size::px(36.))
-                .cross_align(Alignment::Center)
-                .content(Content::Flex)
-                .background(t.bg_card)
-                .border(Border::new().width(1.).fill(t.border_card))
-                .corner_radius(8.)
-                .padding((2., 10.))
-                .child(Input::new(uri_input).width(Size::fill()).flat().placeholder("Path").on_submit({
-                    let mut current = current_path;
-                    let items = items;
-                    move |val: String| {
-                        current.set(val.clone());
-                        load_dir(val, items);
-                    }
-                })),
-        )
+        .child(tool_button(ARROW_LEFT, t.text, {
+            let mut current = current_path;
+            let items = items;
+            move || {
+                let path = PathBuf::from(current.read().clone());
+                if let Some(parent) = path.parent() {
+                    let new_path = parent.to_string_lossy().to_string();
+                    current.set(new_path.clone());
+                    load_dir(new_path, items);
+                }
+            }
+        }))
+        .into_element();
+
+    let path_field: Element = rect()
+        .width(Size::fill())
+        .height(Size::px(36.))
+        .cross_align(Alignment::Center)
+        .content(Content::Flex)
+        .background(t.panel)
+        .border(Border::new().width(1.).fill(t.border))
+        .corner_radius(RADIUS_SM)
+        .padding((2., 10.))
+        .child(Input::new(uri_input).width(Size::fill()).flat().placeholder("Path").on_submit({
+            let mut current = current_path;
+            let items = items;
+            move |val: String| {
+                current.set(val.clone());
+                load_dir(val, items);
+            }
+        }))
+        .into_element();
+
+    let search_trail: Element = rect()
+        .horizontal()
+        .cross_align(Alignment::Center)
+        .content(Content::Flex)
+        .width(Size::fill())
+        .spacing(8.)
         .child(
             rect()
                 .horizontal()
-                .main_align(Alignment::End)
                 .cross_align(Alignment::Center)
                 .content(Content::Flex)
-                .spacing(6.)
-                .child(
-                    rect()
-                        .horizontal()
-                        .cross_align(Alignment::Center)
-                        .content(Content::Flex)
-                        .width(Size::px(220.))
-                        .background(t.bg_card)
-                        .border(Border::new().width(1.).fill(t.border_card))
-                        .corner_radius(999.)
-                        .padding((2., 6.))
-                        .spacing(4.)
-                        .child(icon(SEARCH, 14., t.text_muted))
-                        .child(Input::new(search_query).width(Size::fill()).flat().placeholder("Search").on_submit({
-                            let items = items;
-                            move |val: String| {
-                                perform_search(val, items);
-                            }
-                        })),
-                )
-                .maybe(!search_query.read().is_empty(), |el| {
-                    el.child(status_chip("Search", true, None)).child(ghost_button("Clear", {
-                        let mut q = search_query;
-                        let cp = current_path;
-                        let items_c = items;
-                        move || {
-                            q.set(String::new());
-                            load_dir(cp.read().clone(), items_c);
-                        }
-                    }))
-                })
-                .child(
-                    rect()
-                        .padding(6.)
-                        .corner_radius(8.)
-                        .background(t.bg_card)
-                        .cursor(CursorIcon::Pointer)
-                        .on_press({
-                            let mut s = icon_size;
-                            move |_| s.set(s.read().next())
-                        })
-                        .child(label().font_size(11.).color(t.text_primary).text(icon_size.read().label().to_string())),
-                )
-                .child(
-                    rect()
-                        .padding(8.)
-                        .corner_radius(8.)
-                        .background(if *view_mode.read() == ViewMode::Grid { t.bg_active } else { t.bg_card })
-                        .cursor(CursorIcon::Pointer)
-                        .on_press({
-                            let mut vm = view_mode;
-                            move |_| vm.set(ViewMode::Grid)
-                        })
-                        .child(icon(
-                            LAYOUT_GRID,
-                            14.,
-                            if *view_mode.read() == ViewMode::Grid { t.text_primary } else { t.text_muted },
-                        )),
-                )
-                .child(
-                    rect()
-                        .padding(8.)
-                        .corner_radius(8.)
-                        .background(if *view_mode.read() == ViewMode::List { t.bg_active } else { t.bg_card })
-                        .cursor(CursorIcon::Pointer)
-                        .on_press({
-                            let mut vm = view_mode;
-                            move |_| vm.set(ViewMode::List)
-                        })
-                        .child(icon(
-                            LIST,
-                            14.,
-                            if *view_mode.read() == ViewMode::List { t.text_primary } else { t.text_muted },
-                        )),
-                )
-                .child(
-                    rect()
-                        .padding(8.)
-                        .corner_radius(8.)
-                        .background(t.primary_accent)
-                        .cursor(CursorIcon::Pointer)
-                        .on_press({
-                            let path_state = current_path;
-                            let items_state = items;
-                            move |_| {
-                                let target_path = PathBuf::from(path_state.read().clone()).join("New Folder");
-                                let mut unique_path = target_path.clone();
-                                let mut counter = 1;
-                                while unique_path.exists() {
-                                    unique_path =
-                                        PathBuf::from(path_state.read().clone()).join(format!("New Folder ({})", counter));
-                                    counter += 1;
-                                }
-                                let _ = std::fs::create_dir_all(&unique_path);
-                                load_dir(path_state.read().clone(), items_state);
-                            }
-                        })
-                        .child(icon(PLUS, 14., t.bg_base)),
-                ),
-        );
+                .width(Size::flex(1.))
+                .child(sidebar_search(search_query, "Search all locations")),
+        )
+        .child(ghost_button("Search", {
+            let q = search_query;
+            let cp = current_path;
+            let items_c = items;
+            move || {
+                let val = q.read().clone();
+                if val.trim().is_empty() {
+                    load_dir(cp.read().clone(), items_c);
+                } else {
+                    perform_search(val, items_c);
+                }
+            }
+        }))
+        .maybe(!search_query.read().is_empty(), |el| {
+            el.child(ghost_button("Clear", {
+                let mut q = search_query;
+                let cp = current_path;
+                let items_c = items;
+                move || {
+                    q.set(String::new());
+                    load_dir(cp.read().clone(), items_c);
+                }
+            }))
+        })
+        .into_element();
+
+    let top_bar = top_bar_custom(leading, path_field, Some(search_trail));
 
     let is_grid = *view_mode.read() == ViewMode::Grid;
     let show_hidden_val = *show_hidden.read();
@@ -1458,11 +1346,57 @@ fn app() -> Element {
         ))
         .child(focus_pill("Dirs first", dirs_first_val, {
             let mut d = dirs_first;
-            move || d.set(!*d.read())
+            move || {
+                let next = !*d.read();
+                d.set(next)
+            }
         }))
         .child(focus_pill("Hidden", show_hidden_val, {
             let mut h = show_hidden;
-            move || h.set(!*h.read())
+            move || {
+                let next = !*h.read();
+                h.set(next)
+            }
+        }))
+        .child(segmented_control(
+            vec![("S", IconSize::Small), ("M", IconSize::Medium), ("L", IconSize::Large)],
+            icon_size_val,
+            {
+                let mut s = icon_size;
+                move |v: IconSize| s.set(v)
+            },
+        ))
+        .child(tool_button(
+            LAYOUT_GRID,
+            if grid_active { t.accent } else { t.text_dim },
+            {
+                let mut vm = view_mode;
+                move || vm.set(ViewMode::Grid)
+            },
+        ))
+        .child(tool_button(
+            LIST,
+            if list_active { t.accent } else { t.text_dim },
+            {
+                let mut vm = view_mode;
+                move || vm.set(ViewMode::List)
+            },
+        ))
+        .child(tool_button(PLUS, t.accent, {
+            let path_state = current_path;
+            let items_state = items;
+            move || {
+                let target_path = PathBuf::from(path_state.read().clone()).join("New Folder");
+                let mut unique_path = target_path.clone();
+                let mut counter = 1;
+                while unique_path.exists() {
+                    unique_path =
+                        PathBuf::from(path_state.read().clone()).join(format!("New Folder ({})", counter));
+                    counter += 1;
+                }
+                let _ = std::fs::create_dir_all(&unique_path);
+                load_dir(path_state.read().clone(), items_state);
+            }
         }))
         .into_element();
 
@@ -1564,8 +1498,8 @@ fn app() -> Element {
         rect()
             .direction(if is_grid { Direction::Horizontal } else { Direction::Vertical })
             .width(Size::fill())
-            .padding(12.)
-            .content(if is_grid { Content::Wrap { wrap_spacing: Some(6.0) } } else { Content::Flex })
+            .padding(GAP)
+            .content(if is_grid { Content::Wrap { wrap_spacing: Some(GAP) } } else { Content::Flex })
             .on_pointer_down({
                 let mut ds = drag_start;
                 let mut dc = drag_current;
@@ -1637,12 +1571,13 @@ fn app() -> Element {
                             let pc = path_c.clone();
                             let mut ps = path_state;
                             let is2 = is_folder_c;
+                            let open_notice = notice;
                             move || {
                                 if is2 {
                                     ps.set(pc.clone());
                                     load_dir(pc.clone(), items_c);
                                 } else {
-                                    let _ = std::process::Command::new("xdg-open").arg(&pc).spawn();
+                                    try_open_path(&pc, open_notice);
                                 }
                             }
                         }))
@@ -1700,11 +1635,13 @@ fn app() -> Element {
                         }))
                         .child(ctx_button("Open-With", {
                             let pc = path_c.clone();
-                            move || open_with_chooser(&pc)
+                            let n = notice;
+                            move || open_with_chooser(&pc, n)
                         }))
                         .child(ctx_button("Show in folder", {
                             let pc = path_c.clone();
-                            move || show_in_folder(&pc)
+                            let n = notice;
+                            move || show_in_folder(&pc, n)
                         }))
                         .child(ctx_button("Rename", {
                             let m1 = item_for_menu.clone();
@@ -1737,9 +1674,9 @@ fn app() -> Element {
                         rect()
                             .width(Size::px(icon_px + 16.))
                             .height(Size::px(icon_px + 16.))
-                            .corner_radius(8.)
+                            .corner_radius(RADIUS_SM)
                             .overflow(Overflow::Clip)
-                            .background(t.bg_card)
+                            .background(t.panel)
                             .center()
                             .child(
                                 ImageViewer::new(PathBuf::from(path.clone()))
@@ -1752,17 +1689,16 @@ fn app() -> Element {
                             .width(Size::px(icon_px + 16.))
                             .height(Size::px(icon_px + 16.))
                             .center()
-                            .child(icon(i_svg, icon_px, if is_folder { t.primary_accent } else { t.text_secondary }))
+                            .child(icon(i_svg, icon_px, if is_folder { t.accent } else { t.text_dim }))
                             .into_element()
                     };
                     rect()
                         .vertical()
-                        .width(Size::px(120.))
-                        .height(Size::px(140.))
-                        .padding(8.)
-                        .spacing(6.)
-                        .margin(6.)
-                        .corner_radius(12.)
+                        .width(Size::flex(1.))
+                        .max_width(Size::px(200.))
+                        .padding(12.)
+                        .spacing(8.)
+                        .corner_radius(RADIUS_MD)
                         .background(bg)
                         .cursor(CursorIcon::Pointer)
                         .cross_align(Alignment::Center)
@@ -1796,6 +1732,7 @@ fn app() -> Element {
                             let p = path.clone();
                             let it = item_clone.clone();
                             let is_f = is_folder;
+                            let open_notice = notice;
                             move |_| {
                                 let now = std::time::Instant::now();
                                 let is_double = if let Some((ref lp, lt)) = *lc.read() {
@@ -1809,7 +1746,7 @@ fn app() -> Element {
                                         ps.set(p.clone());
                                         load_dir(p.clone(), items_state);
                                     } else {
-                                        let _ = std::process::Command::new("xdg-open").arg(&p).spawn();
+                                        try_open_path(&p, open_notice);
                                     }
                                 } else {
                                     lc.set(Some((p.clone(), now)));
@@ -1844,7 +1781,7 @@ fn app() -> Element {
                         .child(thumb)
                         .child(
                             label()
-                                .font_size(11.)
+                                .font_size(12.)
                                 .color(t.text_primary)
                                 .text_align(TextAlign::Center)
                                 .text(item.name.clone()),
@@ -1890,6 +1827,7 @@ fn app() -> Element {
                             let p = path.clone();
                             let it = item_clone.clone();
                             let is_f = is_folder;
+                            let open_notice = notice;
                             move |_| {
                                 let now = std::time::Instant::now();
                                 let is_double = if let Some((ref lp, lt)) = *lc.read() {
@@ -1903,7 +1841,7 @@ fn app() -> Element {
                                         ps.set(p.clone());
                                         load_dir(p.clone(), items_state);
                                     } else {
-                                        let _ = std::process::Command::new("xdg-open").arg(&p).spawn();
+                                        try_open_path(&p, open_notice);
                                     }
                                 } else {
                                     lc.set(Some((p.clone(), now)));
@@ -2048,7 +1986,8 @@ fn app() -> Element {
         let is_folder = sel.ty == ItemType::Folder;
         let is_img_sel = !is_folder && is_image_ext(&sel.name);
         rect()
-            .width(Size::px(280.))
+            .width(Size::flex(0.8))
+            .max_width(Size::px(340.))
             .height(Size::fill())
             .background(t.bg_surface)
             .padding(16.)
@@ -2063,13 +2002,7 @@ fn app() -> Element {
                     .child(label().font_size(11.).font_weight(FontWeight::BOLD).color(t.text_muted).text("PROPERTIES"))
                     .child({
                         let mut sel_state = selected_item;
-                        rect()
-                            .cursor(CursorIcon::Pointer)
-                            .padding((2., 6.))
-                            .corner_radius(4.)
-                            .background(t.bg_card)
-                            .on_press(move |_| sel_state.set(None))
-                            .child(label().font_size(11.).color(t.text_muted).text("✕"))
+                        small_close_button(move || sel_state.set(None))
                     }),
             )
             .child({
@@ -2109,30 +2042,30 @@ fn app() -> Element {
                     .margin((0., 0., 4., 0.))
                     .text(sel.name.clone()),
             )
-            .child(label().font_size(11.).color(t.text_muted).margin((0., 0., 12., 0.)).text(format_size(sel.size)))
+            .child(label().font_size(12.).color(t.text_muted).margin((0., 0., 12., 0.)).text(format_size(sel.size)))
             .child(
                 rect()
                     .margin((0., 0., 12., 0.))
-                    .child(label().font_size(10.).color(t.text_muted).text("PATH"))
-                    .child(label().font_size(11.).color(t.text_primary).text(sel.path.clone())),
+                    .child(field_label("Path"))
+                    .child(label().font_size(12.).color(t.text_primary).text(sel.path.clone())),
             )
             .child(
                 rect()
                     .margin((0., 0., 12., 0.))
                     .child(field_label("Type"))
-                    .child(label().font_size(11.).color(t.text_primary).text(file_type_label(&sel.name, is_folder))),
+                    .child(label().font_size(12.).color(t.text_primary).text(file_type_label(&sel.name, is_folder))),
             )
             .child(
                 rect()
                     .margin((0., 0., 12., 0.))
                     .child(field_label("Modified"))
-                    .child(label().font_size(11.).color(t.text_primary).text(format_modified(sel.modified))),
+                    .child(label().font_size(12.).color(t.text_primary).text(format_modified(sel.modified))),
             )
             .child(
                 rect()
                     .margin((0., 0., 12., 0.))
                     .child(field_label("Permissions"))
-                    .child(label().font_size(11.).color(t.text_primary).text(format_perms(&sel.path))),
+                    .child(label().font_size(12.).color(t.text_primary).text(format_perms(&sel.path))),
             )
             .maybe(clipboard.read().clone().is_some_and(|(paths, is_cut)| is_cut && paths.contains(&sel.path)), |el| {
                 el.child(status_chip("Cut", true, None))
@@ -2141,14 +2074,17 @@ fn app() -> Element {
                 let s_path = sel.path.clone();
                 let mut path_state = current_path;
                 let items_state = items;
+                let open_notice = notice;
                 rect()
                     .margin((12., 0., 0., 0.))
+                    .width(Size::fill())
+                    .content(Content::Flex)
                     .child(primary_button(if is_folder { "Open Directory" } else { "Open File" }, move || {
                         if is_folder {
                             path_state.set(s_path.clone());
                             load_dir(s_path.clone(), items_state);
                         } else {
-                            let _ = std::process::Command::new("xdg-open").arg(&s_path).spawn();
+                            try_open_path(&s_path, open_notice);
                         }
                     }))
                     .into_element()
@@ -2161,7 +2097,9 @@ fn app() -> Element {
                     let is_pinned = pin_state.read().iter().any(|(_, p)| p == &s_path);
                     rect()
                         .margin((8., 0., 0., 0.))
-                        .child(secondary_button(
+                        .width(Size::fill())
+                        .content(Content::Flex)
+                        .child(secondary_button_full(
                             if is_pinned { "Unpin from Sidebar" } else { "Pin to Sidebar" },
                             move || {
                                 let mut current = pin_state.read().clone();
@@ -2187,6 +2125,7 @@ fn app() -> Element {
                     .horizontal()
                     .spacing(8.)
                     .margin((8., 0., 0., 0.))
+                    .width(Size::fill())
                     .content(Content::Flex)
                     .child(rect().width(Size::flex(1.)).content(Content::Flex).child(secondary_button_full("Cut", {
                         let p = s_path.clone();
@@ -2225,18 +2164,27 @@ fn app() -> Element {
                     .horizontal()
                     .spacing(8.)
                     .margin((8., 0., 0., 0.))
+                    .width(Size::fill())
                     .content(Content::Flex)
                     .child(
                         rect()
                             .width(Size::flex(1.))
                             .content(Content::Flex)
-                            .child(secondary_button_full("Open-With", move || open_with_chooser(&s_path))),
+                            .child(secondary_button_full("Open-With", {
+                                let p = s_path.clone();
+                                let n = notice;
+                                move || open_with_chooser(&p, n)
+                            })),
                     )
                     .child(
                         rect()
                             .width(Size::flex(1.))
                             .content(Content::Flex)
-                            .child(secondary_button_full("Show in folder", move || show_in_folder(&s_path2))),
+                            .child(secondary_button_full("Show in folder", {
+                                let p = s_path2.clone();
+                                let n = notice;
+                                move || show_in_folder(&p, n)
+                            })),
                     )
                     .into_element()
             })
@@ -2266,29 +2214,39 @@ fn app() -> Element {
                     .horizontal()
                     .spacing(8.)
                     .margin((8., 0., 0., 0.))
+                    .width(Size::fill())
                     .content(Content::Flex)
                     .child(
                         rect()
                             .width(Size::flex(1.))
-                            .child(secondary_button("Rename", move || {
-                                ri.set(name_c.clone());
-                                rt.set(Some(sel.clone()));
-                                sr.set(true);
-                            }))
-                            .content(Content::Flex),
+                            .content(Content::Flex)
+                            .child(secondary_button_full("Rename", {
+                                let name_c2 = name_c.clone();
+                                move || {
+                                    ri.set(name_c2.clone());
+                                    rt.set(Some(sel.clone()));
+                                    sr.set(true);
+                                }
+                            })),
                     )
-                    .child(rect().width(Size::flex(1.)).content(Content::Flex).child(danger_button("Delete", {
-                        let mut pend = pending_delete;
-                        let mut show = show_delete_confirm;
-                        move || {
-                            let mut paths = selected_paths.read().clone();
-                            if !paths.contains(&s_path) {
-                                paths.push(s_path.clone());
-                            }
-                            pend.set(paths);
-                            show.set(true);
-                        }
-                    })))
+                    .child(
+                        rect().width(Size::flex(1.)).content(Content::Flex).child(danger_button_full_local(
+                            "Delete",
+                            {
+                                let s = s_path.clone();
+                                let mut pend = pending_delete;
+                                let mut show = show_delete_confirm;
+                                move || {
+                                    let mut paths = selected_paths.read().clone();
+                                    if !paths.contains(&s) {
+                                        paths.push(s.clone());
+                                    }
+                                    pend.set(paths);
+                                    show.set(true);
+                                }
+                            },
+                        )),
+                    )
                     .into_element()
             })
             .child({
@@ -2832,7 +2790,7 @@ fn app() -> Element {
                                     cur.set(it.path.clone());
                                     load_dir(it.path, items2);
                                 } else {
-                                    let _ = std::process::Command::new("xdg-open").arg(&it.path).spawn();
+                                    try_open_path(&it.path, notice);
                                 }
                             }
                         }
@@ -3020,69 +2978,56 @@ fn sidebar_entry(
     pinned: State<Vec<(String, String)>>,
     _clipboard: State<Option<(Vec<String>, bool)>>,
 ) -> Element {
-    let t = use_app_theme();
     let mut cp = *current_path;
     let tp = target_path.clone();
     let is_active = *cp.read() == tp;
-    let bg = if is_active { t.bg_active } else { Color::TRANSPARENT };
     let name_owned = name.to_string();
     let tp_for_menu = tp.clone();
+    let is_pinned = pinned.read().iter().any(|(_, p)| p == &tp_for_menu);
     let ctx = Menu::new()
-        .child(
-            MenuButton::new()
-                .on_press({
-                    let tp2 = tp_for_menu.clone();
-                    let mut cp2 = cp;
-                    move |_| {
-                        cp2.set(tp2.clone());
-                        load_dir(tp2.clone(), items_state);
-                    }
-                })
-                .child("Open"),
-        )
-        .child(
-            MenuButton::new()
-                .on_press({
-                    let tp2 = tp_for_menu.clone();
-                    let name2 = name_owned.clone();
-                    let mut pin = pinned;
-                    move |_| {
-                        let mut v = pin.read().clone();
-                        if v.iter().any(|(_, p)| p == &tp2) {
-                            v.retain(|(_, p)| p != &tp2);
-                        } else {
-                            v.push((name2.clone(), tp2.clone()));
-                        }
-                        save_pinned(&v);
-                        pin.set(v);
-                    }
-                })
-                .child(if pinned.read().iter().any(|(_, p)| p == &tp_for_menu) { "Unpin" } else { "Pin" }),
-        );
+        .child(ctx_button("Open", {
+            let tp2 = tp_for_menu.clone();
+            let mut cp2 = cp;
+            move || {
+                cp2.set(tp2.clone());
+                load_dir(tp2.clone(), items_state);
+            }
+        }))
+        .child(ctx_button(if is_pinned { "Unpin" } else { "Pin" }, {
+            let tp2 = tp_for_menu.clone();
+            let name2 = name_owned.clone();
+            let mut pin = pinned;
+            move || {
+                let mut v = pin.read().clone();
+                if v.iter().any(|(_, p)| p == &tp2) {
+                    v.retain(|(_, p)| p != &tp2);
+                } else {
+                    v.push((name2.clone(), tp2.clone()));
+                }
+                save_pinned(&v);
+                pin.set(v);
+            }
+        }));
     rect()
         .width(Size::fill())
-        .horizontal()
-        .cross_align(Alignment::Center)
-        .content(Content::Flex)
-        .spacing(8.)
-        .padding(8.)
-        .corner_radius(8.)
-        .background(bg)
-        .margin((0., 0., 4., 0.))
-        .on_press(move |_| {
+        .on_secondary_down(move |_| ContextMenu::open_from_down(ctx.clone()))
+        .child(nav_item(icon_svg, name_owned.clone(), is_active, move || {
             cp.set(tp.clone());
             load_dir(tp.clone(), items_state);
-        })
-        .on_secondary_down(move |_| ContextMenu::open_from_down(ctx.clone()))
-        .child(icon(icon_svg, 14., t.text_primary))
-        .child(
-            label()
-                .font_size(13.)
-                .color(t.text_primary)
-                .font_weight(if is_active { FontWeight::BOLD } else { FontWeight::NORMAL })
-                .text(name_owned.clone()),
-        )
+        }))
         .into_element()
 }
 
-fn main() { launch(LaunchConfig::new().with_window(WindowConfig::new(app).with_title("Files").with_size(1100., 700.))) }
+fn main() {
+    let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
+    let _guard = _rt.as_ref().map(|rt| rt.enter());
+
+    launch(
+        LaunchConfig::new().with_window(
+            WindowConfig::new(app)
+                .with_title("Files")
+                .with_size(1100., 700.)
+                .with_min_size(640., 480.),
+        ),
+    )
+}

@@ -103,6 +103,9 @@ pub struct SettingsStore {
 
     // Lock states from finickd (e.g. NixOS-managed)
     pub lock_states: State<HashMap<SettingKey, LockState>>,
+
+    // Last mutation error for user-visible recovery (None = no error).
+    pub last_error: State<Option<String>>,
 }
 
 impl SettingsStore {
@@ -139,31 +142,78 @@ impl SettingsStore {
         })
     }
 
+    /// Clears the last mutation error (e.g. after user dismisses or retries).
+    pub fn clear_error(&self) {
+        let mut err = self.last_error;
+        err.set(None);
+    }
+
     /// Mutates and applies a setting via the daemon IPC.
-    /// If the setting is locked, the change is rejected and ignored.
+    /// Applies optimistically for responsiveness, then rolls back to the
+    /// daemon's authoritative value and surfaces `last_error` on denial/IPC failure.
+    /// Uses Freya `spawn` (UI thread) + blocking IPC so `State` is never
+    /// touched from a `std::thread`.
     pub fn set(&self, key: SettingKey, val: impl Into<SettingValue>) {
         let val = val.into();
         if self.is_locked(&key) {
+            let msg = self
+                .lock_label(&key)
+                .unwrap_or_else(|| "Setting is locked by policy".to_string());
+            let mut err = self.last_error;
+            err.set(Some(msg));
             return;
         }
 
         // Optimistically apply to local reactive state
         self.apply_to_local_state(&key, &val);
 
+        let store = *self;
         let key_clone = key.clone();
         let val_clone = val.clone();
 
-        std::thread::spawn(move || {
-            match set_and_apply(SETTINGS_SOCKET_NAME, key_clone.clone(), val_clone) {
-                Ok(Ok(())) => {}
-                Ok(Err(denial)) => {
-                    eprintln!("[SettingsStore] Mutation denied for {:?}: {:?}", key_clone, denial);
+        spawn(async move {
+            let key_for_ipc = key_clone.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                set_and_apply(SETTINGS_SOCKET_NAME, key_for_ipc, val_clone)
+            })
+            .await;
+            match result {
+                Ok(Ok(Ok(()))) => {
+                    let mut err = store.last_error;
+                    err.set(None);
                 }
-                Err(e) => {
+                Ok(Ok(Err(denial))) => {
+                    let msg = format!("{}", denial);
+                    eprintln!("[SettingsStore] Mutation denied for {:?}: {:?}", key_clone, denial);
+                    store.rollback_from_daemon(&key_clone, &msg).await;
+                }
+                Ok(Err(e)) => {
+                    let msg = format!("Could not save setting: {}", e);
                     eprintln!("[SettingsStore] IPC error setting {:?}: {}", key_clone, e);
+                    store.rollback_from_daemon(&key_clone, &msg).await;
+                }
+                Err(join_err) => {
+                    let msg = format!("Could not save setting: {}", join_err);
+                    store.rollback_from_daemon(&key_clone, &msg).await;
                 }
             }
         });
+    }
+
+    /// Reverts local state for `key` to the daemon's authoritative value and
+    /// records a user-visible error. Falls back to keeping the error set when
+    /// the daemon cannot be reached (no silent failure).
+    async fn rollback_from_daemon(&self, key: &SettingKey, message: &str) {
+        let mut err = self.last_error;
+        err.set(Some(message.to_string()));
+        let key_clone = key.clone();
+        if let Ok(Ok(entries)) =
+            tokio::task::spawn_blocking(|| get_all_settings(SETTINGS_SOCKET_NAME)).await
+        {
+            if let Some(entry) = entries.iter().find(|e| e.key == key_clone) {
+                self.apply_to_local_state(&entry.key, &entry.value);
+            }
+        }
     }
 
     /// Updates the local Freya reactive state for a key without sending IPC requests.
@@ -646,6 +696,7 @@ pub fn use_init_settings_store() -> SettingsStore {
     let firewall_enabled = use_state(|| true);
 
     let lock_states = use_state(HashMap::<SettingKey, LockState>::new);
+    let last_error = use_state(|| None::<String>);
 
     let store = SettingsStore {
         wifi_power,
@@ -708,6 +759,7 @@ pub fn use_init_settings_store() -> SettingsStore {
         location_access,
         firewall_enabled,
         lock_states,
+        last_error,
         topbar_text_size,
         topbar_theme,
         topbar_text_color,

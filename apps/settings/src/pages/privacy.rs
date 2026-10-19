@@ -156,7 +156,7 @@ impl Component for Privacy {
                 .height(Size::fill())
                 .vertical()
                 .spacing(GAP)
-                .child(page_head(LOCK, "Privacy and security", "Manage permissions and security settings."))
+                .child(page_head(LOCK, "Privacy and security", "View detected status. Toggles here are preview only and do not enforce system policy."))
                 .child(
                     tile()
                         .child(tile_head(
@@ -167,19 +167,12 @@ impl Component for Privacy {
                                 move || l.set(false)
                             })),
                         ))
+                        .child(tile_sub("Preview only — status is read-only and does not enforce system policy. Change firewall with ufw / firewall-cmd in a terminal."))
                         .child(setting_row(
-                            "Firewall protection",
-                            Some("Block unauthorized network access and guard local ports."),
+                            "Firewall status",
+                            Some("Detected system firewall state (read-only). This view does not block network access."),
                             false,
-                            pill_switch(fw.is_active, {
-                                let mut fw_state = firewall_info;
-                                move |v| {
-                                    let mut current = fw_state.read().clone();
-                                    current.is_active = v;
-                                    current.status_text = if v { "Active".to_string() } else { "Inactive".to_string() };
-                                    fw_state.set(current);
-                                }
-                            }),
+                            status_chip(if fw.is_active { "Protected" } else { "Off" }, fw.is_active, None),
                         ))
                         .child(dot_status_row(
                             "Firewall",
@@ -191,15 +184,17 @@ impl Component for Privacy {
                 .child(
                     tile()
                         .child(tile_head(None, "Hardware permissions", None::<String>))
+                        .child(tile_sub("Preview only — does not enforce system policy."))
+                        .child(field_label("Toggles below are local preview state only"))
                         .child(setting_row(
-                            "Camera access",
+                            "Camera access (preview)",
                             Some(if dev.camera_count > 0 {
                                 format!(
-                                    "Allow applications to use connected video capture devices ({} detected).",
+                                    "Preview only — does not block app access to video devices ({} detected).",
                                     dev.camera_count
                                 )
                             } else {
-                                "Allow applications to capture video streams from webcam devices.".to_string()
+                                "Preview only — does not block app access to webcam devices.".to_string()
                             }),
                             false,
                             pill_switch(is_cam, {
@@ -208,8 +203,8 @@ impl Component for Privacy {
                             }),
                         ))
                         .child(setting_row(
-                            "Microphone access",
-                            Some("Allow desktop applications to record audio and capture sound input."),
+                            "Microphone access (preview)",
+                            Some("Preview only — does not block app audio recording or sound input."),
                             true,
                             pill_switch(is_mic, {
                                 let mut mic = mic_enabled;
@@ -220,9 +215,11 @@ impl Component for Privacy {
                 .child(
                     tile()
                         .child(tile_head(None, "Location and sandboxing", None::<String>))
+                        .child(tile_sub("Preview only — does not enforce system policy."))
+                        .child(field_label("Toggles below are local preview state only"))
                         .child(setting_row(
-                            "Location services",
-                            Some("Allow location-aware applications to determine your geographic coordinates."),
+                            "Location services (preview)",
+                            Some("Preview only — does not change whether apps can read your location."),
                             false,
                             pill_switch(is_loc, {
                                 let mut loc = location_enabled;
@@ -230,8 +227,8 @@ impl Component for Privacy {
                             }),
                         ))
                         .child(setting_row(
-                            "Application sandboxing",
-                            Some("Enforce portal restrictions and filesystem boundaries for untrusted software."),
+                            "Application sandboxing (preview)",
+                            Some("Preview only — does not enforce portal or filesystem restrictions."),
                             true,
                             pill_switch(is_sandboxing, {
                                 let mut s = sandboxing_enabled;

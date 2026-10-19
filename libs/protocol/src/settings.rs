@@ -1,5 +1,5 @@
 use {
-    crate::send_command,
+    ipc::send_command,
     serde::{Deserialize, Serialize},
     std::{
         fmt::{self, Display},
@@ -1226,7 +1226,7 @@ pub fn subscribe_channel(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::start_server;
+    use ipc::start_server;
     use std::{sync::mpsc::Sender, thread, time::Duration};
 
     #[test]

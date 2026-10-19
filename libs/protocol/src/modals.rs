@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::send_command;
+use ipc::send_command;
 
 pub const MODALS_SOCKET_NAME: &str = "finick-modals";
 

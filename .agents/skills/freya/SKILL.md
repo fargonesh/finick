@@ -138,6 +138,25 @@ rect()
 
 Name the element argument `el` in `.maybe` / `.map` callbacks (not `r`, `rect`, `e`, etc.).
 
+## Layout
+
+- Any `rect()` with children using `Size::flex(...)` must also set `.content(Content::Flex)` on that immediate parent container. Without it layout silently breaks.
+
+```rust
+// Good: flex child inside a flex content parent
+rect()
+    .content(Content::Flex)
+    .child(
+        rect().width(Size::flex(1.)).child("fills")
+    )
+
+// Bad: flex child with no Content::Flex on parent - layout breaks
+rect()
+    .child(
+        rect().width(Size::flex(1.)).child("broken")
+    )
+```
+
 **Prefer one outer `.maybe` / `.map` over several consecutive `.maybe_child` calls gated on the same condition** - it keeps the gating in one place and avoids re-evaluating the same predicate.
 
 ```rust
@@ -263,6 +282,59 @@ Hooks are prefixed with `use_` (e.g. `use_state`, `use_animation`). Follow these
 let mut state = use_state(|| false);
 let on_click = move |_| state.set(true); // capture, not call inside handler
 rect().on_mouse_up(on_click)
+```
+
+### Forbidden hook patterns (runtime error)
+
+1. You cannot call hooks conditionally:
+
+```rust
+#[derive(PartialEq)]
+struct CoolComp(u8);
+
+impl Component for CoolComp {
+    fn render(&self) -> impl IntoElement {
+        if self.0 == 2 {
+            let state = use_state(|| 5);
+        }
+
+        rect().into()
+    }
+}
+```
+
+2. You cannot call hooks in for-loops:
+
+```rust
+#[derive(PartialEq)]
+struct CoolComp(u8);
+
+impl Component for CoolComp {
+    fn render(&self) -> impl IntoElement {
+        for i in 0..self.0 {
+            let state = use_state(|| 5);
+        }
+
+        rect().into()
+    }
+}
+```
+
+3. You cannot call hooks inside other hooks or event handlers, they must be called at the top of `render` methods from components:
+
+```rust
+#[derive(PartialEq)]
+struct CoolComp(u8);
+
+impl Component for CoolComp {
+    fn render(&self) -> impl IntoElement {
+        use_side_effect(|| {
+            let state = use_state(|| 5);
+        })
+
+        rect().into()
+    }
+}
 ```
 
 ## State Management

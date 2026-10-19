@@ -208,6 +208,7 @@ fn format_calc(v: f64) -> String {
 pub enum ProviderKind {
     Calculator,
     FinickCommand,
+    ShellCommand,
 }
 
 pub fn provider_kind(query: &str) -> Option<ProviderKind> {
@@ -217,6 +218,9 @@ pub fn provider_kind(query: &str) -> Option<ProviderKind> {
     }
     if t.starts_with(':') {
         return Some(ProviderKind::FinickCommand);
+    }
+    if t.starts_with('!') {
+        return Some(ProviderKind::ShellCommand);
     }
     None
 }
@@ -267,10 +271,35 @@ fn finick_cmd_results(query: &str) -> Vec<index::ty::SearchResult> {
         .collect()
 }
 
+fn shell_cmd_result(query: &str) -> Option<index::ty::SearchResult> {
+    let t = query.trim();
+    let cmd = t.strip_prefix('!')?.trim();
+    if cmd.is_empty() {
+        return None;
+    }
+    Some(index::ty::SearchResult {
+        name: format!("Run command: {cmd}"),
+        path: format!("shell:{cmd}"),
+        is_desktop: false,
+        is_executable: true,
+        icon: None,
+        is_dir: false,
+        size: None,
+        modified: None,
+    })
+}
+
+pub fn shell_command_for_query(query: &str) -> Option<String> {
+    let t = query.trim();
+    let cmd = t.strip_prefix('!')?.trim();
+    if cmd.is_empty() { None } else { Some(cmd.to_string()) }
+}
+
 pub fn provider_results(query: &str) -> Vec<index::ty::SearchResult> {
     match provider_kind(query) {
         Some(ProviderKind::Calculator) => calc_result(query).into_iter().collect(),
         Some(ProviderKind::FinickCommand) => finick_cmd_results(query),
+        Some(ProviderKind::ShellCommand) => shell_cmd_result(query).into_iter().collect(),
         None => Vec::new(),
     }
 }
@@ -400,12 +429,27 @@ fn parse_desktop_launch(desktop_path: &str) -> Option<DesktopLaunch> {
     Some(DesktopLaunch { args, terminal })
 }
 
-fn dispatch_exec(args: &[String]) {
+fn dispatch_exec(args: &[String]) -> bool {
     if args.is_empty() {
-        return;
+        return false;
     }
     let cmd = args.join(" ");
-    let _ = Command::new("hyprctl").args(["dispatch", "exec", "--", &cmd]).spawn();
+    run_hyprctl_exec(&cmd)
+}
+
+fn run_hyprctl_exec(cmd: &str) -> bool {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    Command::new("hyprctl").args(["dispatch", "exec", "--", trimmed]).spawn().is_ok()
+}
+
+fn run_xdg_open(path: &str) -> bool {
+    if path.trim().is_empty() {
+        return false;
+    }
+    Command::new("xdg-open").arg(path).spawn().is_ok()
 }
 
 fn copy_to_clipboard(text: &str) {
@@ -416,63 +460,101 @@ fn copy_to_clipboard(text: &str) {
     }
 }
 
-pub fn launch_item(r: &index::ty::SearchResult) {
+/// Returns true when the item was handed off successfully (caller should exit).
+/// Returns false when the spawn failed (caller should surface an error, not exit).
+pub fn launch_item(r: &index::ty::SearchResult) -> bool {
     if let Some(val) = r.path.strip_prefix("calc:") {
         copy_to_clipboard(val);
         exit_launcher(0);
     }
+    if let Some(shell_cmd) = r.path.strip_prefix("shell:") {
+        let ok = run_hyprctl_exec(shell_cmd);
+        if ok {
+            index::bump_recent(r);
+            exit_launcher(0);
+        }
+        return false;
+    }
     if let Some(cmd) = r.path.strip_prefix("finick:") {
-        match cmd {
+        let ok = match cmd {
             "lock" => {
-                if Command::new("locker").spawn().is_err() {
-                    let _ = Command::new("loginctl").args(["lock-session"]).spawn();
+                if Command::new("locker").spawn().is_ok() {
+                    true
+                } else {
+                    Command::new("loginctl").args(["lock-session"]).spawn().is_ok()
                 }
             }
-            "settings" => {
-                let _ = Command::new("hyprctl").args(["dispatch", "exec", "--", "finick-settings"]).spawn();
-            }
+            "settings" => run_hyprctl_exec("finick-settings"),
             "files" => {
                 let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-                let _ = Command::new("xdg-open").arg(home).spawn();
+                run_xdg_open(&home)
             }
-            _ => {}
+            _ => true,
+        };
+        if ok {
+            exit_launcher(0);
         }
-        exit_launcher(0);
+        return false;
     }
     index::bump_recent(r);
-    if r.is_desktop && r.path.ends_with(".desktop") {
+    let ok = if r.is_desktop && r.path.ends_with(".desktop") {
         if let Some(launch) = parse_desktop_launch(&r.path) {
-            if launch.terminal {
+            let launched = if launch.terminal {
                 let term = default_terminal();
                 let mut full = vec![term, "-e".to_string()];
                 full.extend(launch.args);
-                dispatch_exec(&full);
+                dispatch_exec(&full)
             } else {
-                dispatch_exec(&launch.args);
+                dispatch_exec(&launch.args)
+            };
+            if launched {
+                exit_launcher(0);
             }
+            launched
+        } else {
+            let launched = run_xdg_open(&r.path);
+            if launched {
+                exit_launcher(0);
+            }
+            launched
+        }
+    } else if r.is_dir {
+        let launched = run_xdg_open(&r.path);
+        if launched {
             exit_launcher(0);
         }
-        let _ = Command::new("xdg-open").arg(&r.path).spawn();
-    } else if r.is_dir {
-        let _ = Command::new("xdg-open").arg(&r.path).spawn();
+        launched
     } else if r.is_executable {
-        let _ = Command::new("hyprctl").args(["dispatch", "exec", "--", &r.path]).spawn();
+        let launched = run_hyprctl_exec(&r.path);
+        if launched {
+            exit_launcher(0);
+        }
+        launched
     } else {
-        let _ = Command::new("xdg-open").arg(&r.path).spawn();
+        let launched = run_xdg_open(&r.path);
+        if launched {
+            exit_launcher(0);
+        }
+        launched
+    };
+    if ok {
+        exit_launcher(0);
     }
-    exit_launcher(0);
+    false
 }
 
-pub fn launch_item_secondary(r: &index::ty::SearchResult) {
-    if r.path.starts_with("calc:") || r.path.starts_with("finick:") {
-        launch_item(r);
-        return;
+pub fn launch_item_secondary(r: &index::ty::SearchResult) -> bool {
+    if r.path.starts_with("calc:") || r.path.starts_with("finick:") || r.path.starts_with("shell:") {
+        return launch_item(r);
     }
     index::bump_recent(r);
     let p = PathBuf::from(&r.path);
     let target = if r.is_dir { p } else { p.parent().map(|x| x.to_path_buf()).unwrap_or(PathBuf::from("/")) };
-    let _ = Command::new("xdg-open").arg(&target).spawn();
-    exit_launcher(0);
+    let target_s = target.to_string_lossy().to_string();
+    if run_xdg_open(&target_s) {
+        exit_launcher(0);
+    }
+    false
 }
 
 fn recent_results() -> Vec<index::ty::SearchResult> {
@@ -516,7 +598,7 @@ fn search(query: String, results: State<Vec<index::ty::SearchResult>>, selected:
     std::thread::spawn(move || {
         let (inner_tx, inner_rx) = std::sync::mpsc::channel();
         let inner_tx2 = inner_tx.clone();
-        let res = ipsea::send_command(
+        let res = ipc::send_command(
             App::IndexService,
             &index::ty::Request::Search { query: q },
             Some(move |r: index::ty::SearchResult| {
@@ -564,6 +646,15 @@ fn format_modified(modified: Option<u64>) -> Option<String> {
 }
 
 fn row_meta(r: &index::ty::SearchResult) -> String {
+    if let Some(cmd) = r.path.strip_prefix("shell:") {
+        return format!("! {cmd}  •  Run via hyprctl");
+    }
+    if let Some(val) = r.path.strip_prefix("calc:") {
+        return format!("= {val}  •  Copy result");
+    }
+    if r.path.starts_with("finick:") {
+        return "Finick command  •  Runs immediately".to_string();
+    }
     let mut meta = r.path.clone();
     let extra: Vec<String> = [format_size(r.size), format_modified(r.modified)].into_iter().flatten().collect();
     if !extra.is_empty() {
@@ -577,6 +668,8 @@ fn kind_icon(r: &index::ty::SearchResult) -> &'static str {
         COPY
     } else if r.path.starts_with("finick:") {
         GENERAL
+    } else if r.path.starts_with("shell:") {
+        TERMINAL
     } else if r.is_desktop {
         APPS
     } else if r.is_dir {
@@ -593,6 +686,8 @@ fn kind_label(r: &index::ty::SearchResult) -> &'static str {
         "Calc"
     } else if r.path.starts_with("finick:") {
         "Cmd"
+    } else if r.path.starts_with("shell:") {
+        "Run"
     } else if r.is_desktop {
         "App"
     } else if r.is_dir {
@@ -604,12 +699,27 @@ fn kind_label(r: &index::ty::SearchResult) -> &'static str {
     }
 }
 
+fn secondary_hint(r: &index::ty::SearchResult) -> &'static str {
+    if r.path.starts_with("calc:") {
+        "⏎ Copy"
+    } else if r.path.starts_with("shell:") {
+        "⏎ Run command"
+    } else if r.path.starts_with("finick:") {
+        "⏎ Run"
+    } else if r.is_dir {
+        "⏎ Open  ·  ⇧⏎ Reveal"
+    } else {
+        "⏎ Open  ·  ⇧⏎ Reveal in folder"
+    }
+}
+
 pub fn launcher_app() -> Element {
     let _st = use_init_app_theme(get_theme());
     let t = use_app_theme();
     let query = use_state(String::new);
     let results = use_state(Vec::<index::ty::SearchResult>::new);
     let selected = use_state(|| 0usize);
+    let launch_error = use_state(|| Option::<String>::None);
     let input_id = use_hook(AccessibilityId::new_unique);
     use_hook(move || {
         let id = input_id;
@@ -647,6 +757,7 @@ pub fn launcher_app() -> Element {
             let mut sel_state = selected;
             let mut q_state = query;
             let res_state = results;
+            let mut err_state = launch_error;
             move |e: Event<KeyboardEventData>| {
                 let len = res_state.read().len();
                 let cur = *sel_state.read();
@@ -681,7 +792,10 @@ pub fn launcher_app() -> Element {
                     }
                     Key::Named(NamedKey::Tab) => {
                         if let Some(item) = res_state.read().get(cur).cloned() {
-                            if !item.path.starts_with("calc:") && !item.path.starts_with("finick:") {
+                            if !item.path.starts_with("calc:")
+                                && !item.path.starts_with("finick:")
+                                && !item.path.starts_with("shell:")
+                            {
                                 q_state.set(item.name.clone());
                             }
                         }
@@ -689,20 +803,32 @@ pub fn launcher_app() -> Element {
                     Key::Named(NamedKey::Enter) => {
                         if e.data().modifiers.shift() {
                             if let Some(item) = res_state.read().get(cur).cloned() {
-                                launch_item_secondary(&item);
+                                if !launch_item_secondary(&item) {
+                                    err_state.set(Some("Could not reveal — xdg-open failed.".to_string()));
+                                }
                             }
                             return;
                         }
                         if let Some(item) = res_state.read().get(cur).cloned() {
-                            launch_item(&item);
+                            if !launch_item(&item) {
+                                err_state.set(Some("Launch failed — hyprctl/xdg-open unavailable.".to_string()));
+                            }
                         } else if !q_state.read().trim().is_empty() {
                             let q = q_state.read().trim().to_string();
                             if let Some(v) = q.strip_prefix('=').and_then(try_eval_expr) {
                                 copy_to_clipboard(&format_calc(v));
                                 exit_launcher(0);
                             }
-                            let _ = Command::new("hyprctl").args(["dispatch", "exec", "--", &q]).spawn();
-                            exit_launcher(0);
+                            // Do not silently exec arbitrary text: require explicit `!` prefix.
+                            if let Some(cmd) = shell_command_for_query(&q) {
+                                if !run_hyprctl_exec(&cmd) {
+                                    err_state.set(Some("Could not run command — hyprctl failed.".to_string()));
+                                } else {
+                                    exit_launcher(0);
+                                }
+                            } else {
+                                err_state.set(Some("Prefix with ! to run as command (e.g. ! htop).".to_string()));
+                            }
                         }
                     }
                     _ => {}
@@ -729,19 +855,35 @@ pub fn launcher_app() -> Element {
                                 rect()
                                     .width(Size::flex(1.))
                                     .content(Content::Flex)
-                                    .child(sidebar_search(query, "Search apps, files…  (= calc, : cmd)")),
+                                    .child(sidebar_search(query, "Search apps, files…  (= calc, : cmd, ! run)")),
                             )
                             .maybe(!query.read().is_empty(), |el| {
                                 let mut q = query;
                                 el.child(small_close_button(move || q.set(String::new())))
                             }),
                     )
+                    .maybe_child(launch_error.read().clone().map(|msg| {
+                        rect()
+                            .width(Size::fill())
+                            .corner_radius(10.)
+                            .background(t.accent_red)
+                            .padding((8., 12.))
+                            .child(label().font_size(12.).font_weight(FontWeight::SEMI_BOLD).color(Color::WHITE).text(msg))
+                            .into_element()
+                    }))
                     .child(rect().width(Size::fill()).height(Size::px(320.)).content(Content::Flex).child(
                         if results_len == 0 {
                             if query.read().trim().is_empty() {
                                 empty_state(APPS, "Type to search apps & files", "Recents appear here").into_element()
+                            } else if shell_command_for_query(&query.read()).is_some() {
+                                empty_state(
+                                    TERMINAL,
+                                    format!("Run command: {}", shell_command_for_query(&query.read()).unwrap_or_default()),
+                                    "Press Enter to run via hyprctl",
+                                )
+                                .into_element()
                             } else {
-                                empty_state(APPS, "No results", "Press Enter to run as command").into_element()
+                                empty_state(APPS, "No results", "Prefix with ! to run as command (e.g. ! htop)").into_element()
                             }
                         } else {
                             ScrollView::new()
@@ -755,8 +897,14 @@ pub fn launcher_app() -> Element {
                                         let item_for_press = item.clone();
                                         let item_for_icon = item.clone();
                                         let item_for_label = item.clone();
+                                        let item_for_meta = item.clone();
+                                        let mut err_press = launch_error;
                                         let icon_path = item.icon.clone().unwrap_or_default();
                                         let has_img = !icon_path.is_empty() && PathBuf::from(&icon_path).exists();
+                                        let mut meta_text = row_meta(&item_for_meta);
+                                        if is_sel {
+                                            meta_text.push_str(&format!("  •  {}", secondary_hint(&item_for_meta)));
+                                        }
                                         rect()
                                             .width(Size::fill())
                                             .height(Size::px(56.))
@@ -769,7 +917,13 @@ pub fn launcher_app() -> Element {
                                             .content(Content::Flex)
                                             .spacing(12.)
                                             .cursor(CursorIcon::Pointer)
-                                            .on_press(move |_| launch_item(&item_for_press))
+                                            .on_press(move |_| {
+                                                if !launch_item(&item_for_press) {
+                                                    err_press.set(Some(
+                                                        "Launch failed — hyprctl/xdg-open unavailable.".to_string(),
+                                                    ));
+                                                }
+                                            })
                                             .child(
                                                 rect()
                                                     .width(Size::px(36.))
@@ -805,10 +959,7 @@ pub fn launcher_app() -> Element {
                                                             .text(item_for_label.name.clone()),
                                                     )
                                                     .child(
-                                                        label()
-                                                            .font_size(11.)
-                                                            .color(t.text_dim)
-                                                            .text(row_meta(&item_for_label)),
+                                                        label().font_size(11.).color(t.text_dim).text(meta_text),
                                                     ),
                                             )
                                             .child(status_chip(kind_label(item).to_string(), is_sel, None))
@@ -827,7 +978,7 @@ pub fn launcher_app() -> Element {
                             .content(Content::Flex)
                             .padding((8., 4., 0., 4.))
                             .child(label().font_size(11.).color(t.text_dim).text(
-                                "↑↓/Ctrl+J/K Navigate  Tab Complete  ⏎ Launch  ⇧⏎ Reveal  Esc Close",
+                                "↑↓ Navigate  Tab Complete  ⏎ Launch  ⇧⏎ Reveal in folder  ! Run  Esc Close",
                             ))
                             .child(label().font_size(11.).color(t.text_dim).text(format!("{} results", results_len))),
                     ),

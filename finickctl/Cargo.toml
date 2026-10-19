@@ -7,7 +7,8 @@ edition = "2021"
 clap = { version = "4.5.30", features = ["derive"] }
 config = { path = "../libs/config" }
 index = { path = "../services/index" }
-ipsea = { path = "../libs/ipc", package = "ipc" }
+ipsea = { path = "../libs/protocol", package = "protocol" }
+ipc = { path = "../libs/ipc", package = "ipc" }
 serde_json = "1.0.139"
 strum = "0.27.1"
 system = { path = "../libs/system" }

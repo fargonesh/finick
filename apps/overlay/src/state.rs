@@ -325,10 +325,6 @@ pub fn clock_now_with_format(use_24h: bool) -> String {
     }
 }
 
-pub fn clock_now() -> String {
-    clock_now_with_format(true)
-}
-
 pub fn power_action(action: &'static str) {
     std::thread::spawn(move || {
         let ok = match action {

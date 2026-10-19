@@ -6,7 +6,8 @@ default-run = "overlay"
 
 [dependencies]
 config = { path = "../../libs/config" }
-ipsea = { path = "../../libs/ipc", package = "ipc" }
+ipc = { path = "../../libs/ipc", package = "ipc" }
+ipsea = { path = "../../libs/protocol", package = "protocol" }
 ui = { version = "0.1.0", path = "../../libs/ui" }
 system = { path = "../../libs/system" }
 index = { path = "../../services/index" }

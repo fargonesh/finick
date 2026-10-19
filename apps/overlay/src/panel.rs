@@ -15,75 +15,6 @@ fn trunc(s: &str, n: usize) -> String {
     }
 }
 
-pub fn compute_panel_height(
-    wifi_on: bool,
-    has_connected_wifi: bool,
-    available_wifi_count: usize,
-    has_wired: bool,
-    bt_on: bool,
-    connected_bt_count: usize,
-    other_bt_count: usize,
-    has_battery: bool,
-) -> i32 {
-    let base = 12 + 20 + 28; // window padding + panel inner padding + header
-
-    // Left column: Wi-Fi (+ Wired)
-    let wifi_card_h = if !wifi_on {
-        76
-    } else {
-        let conn_h = if has_connected_wifi { 28 } else { 0 };
-        let shown_networks = available_wifi_count.min(5);
-        let net_h = if shown_networks == 0 && !has_connected_wifi { 22 } else { shown_networks * 28 };
-        66 + conn_h + net_h
-    };
-    let wired_card_h = if has_wired { 10 + 64 } else { 0 };
-    let left_col_h = wifi_card_h + wired_card_h;
-
-    // Right column: Bluetooth + Focus
-    let bt_card_h = if !bt_on {
-        76
-    } else {
-        let conn_h = if connected_bt_count > 0 { connected_bt_count.min(3) * 36 } else { 22 };
-        let other_h = other_bt_count.min(4) * 28;
-        let empty_h = if connected_bt_count == 0 && other_bt_count == 0 { 22 } else { 0 };
-        66 + conn_h + other_h + empty_h
-    };
-    let focus_card_h = 10 + 64;
-    let right_col_h = bt_card_h + focus_card_h;
-
-    let cards_row_h = left_col_h.max(right_col_h);
-
-    // Sliders
-    let sliders_h = 76;
-
-    // Battery
-    let battery_h = if has_battery { 10 + 60 } else { 0 };
-
-    // Actions row
-    let actions_h = 68;
-
-    let _ = (cards_row_h, sliders_h, battery_h);
-    700
-}
-
-fn resize_panel_window(target_h: i32) {
-    std::thread::spawn(move || {
-        let lua = format!(
-            r#"
-            for _, w in ipairs(hl.get_windows()) do
-                if w.title == 'control-panel' or w.class == 'overlay-panel' or w.class == 'topbar-panel' then
-                    local addr = 'address:' .. tostring(w.address)
-                    hl.dispatch(hl.dsp.window.resize({{ window = addr, x = 460, y = {target_h}, relative = false }}))
-                    break
-                end
-            end
-            "#
-        );
-        let _ = std::process::Command::new("hyprctl").args(["eval", &lua]).output();
-    });
-}
-fn should_resize(last: i32, target: i32) -> bool { (last - target).abs() >= 12 }
-
 pub fn control_panel_app() -> Element {
     let theme_state = use_init_app_theme(get_theme());
     let t = use_app_theme();
@@ -100,15 +31,7 @@ pub fn control_panel_app() -> Element {
     let wifi_details = use_state(|| (CurrentWifiInfo::default(), Vec::<WifiNetworkDetail>::new()));
     let bt_devices = use_state(Vec::<BluetoothDevice>::new);
     let topbar_settings = use_state(crate::state::TopbarSettings::default);
-    let wifi_modal_target: State<Option<WifiNetworkDetail>> = use_state(|| None);
-    let wifi_password: State<String> = use_state(String::new);
-    let wifi_connecting: State<bool> = use_state(|| false);
-    let wifi_error: State<Option<String>> = use_state(|| None);
-
-    let bt_modal_target: State<Option<BluetoothDevice>> = use_state(|| None);
-    let bt_pin: State<String> = use_state(String::new);
-    let bt_pairing: State<bool> = use_state(|| false);
-    let bt_error: State<Option<String>> = use_state(|| None);
+    let pending_power = use_state(|| Option::<&'static str>::None);
     let mut dismiss = use_state(|| false);
     use_hook(move || {
         load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
@@ -535,7 +458,26 @@ pub fn control_panel_app() -> Element {
                     })),
             ),
     );
-    let power_btn = |label_text: &'static str, svg: &'static str, bg: Color, fg: Color, action: fn()| {
+    const POWER_ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/></svg>"#;
+    // Two-step arm/confirm for destructive power actions. First press arms,
+    // second press executes. Armed state auto-reverts after a timeout.
+    let arm_power = move |key: &'static str, action: &'static str| {
+        let mut pp = pending_power;
+        if *pp.read() == Some(key) {
+            pp.set(None);
+            power_action(action);
+        } else {
+            pp.set(Some(key));
+            spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                if *pp.read() == Some(key) {
+                    pp.set(None);
+                }
+            });
+        }
+    };
+    let armed: Option<&'static str> = *pending_power.read();
+    let mk_power_btn = |label_text: &'static str, svg: &'static str, bg: Color, fg: Color, on_press: EventHandler<()>| {
         let txt = label_text.to_string();
         rect()
             .width(Size::flex(1.))
@@ -545,7 +487,7 @@ pub fn control_panel_app() -> Element {
             .border(Border::new().width(1.).fill(if bg == t.accent_red { t.accent_red } else { t.border }))
             .center()
             .cursor(CursorIcon::Pointer)
-            .on_press(move |_| action())
+            .on_press(move |_| on_press.call(()))
             .child(
                 rect()
                     .vertical()
@@ -555,16 +497,78 @@ pub fn control_panel_app() -> Element {
                     .child(label().font_size(11.).font_weight(FontWeight::SEMI_BOLD).color(fg).text(txt.clone())),
             )
     };
-    const POWER_ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/></svg>"#;
+    let lock_btn = mk_power_btn(
+        "Lock",
+        LOCK,
+        t.panel_raised,
+        t.text,
+        EventHandler::new(move |()| system::trigger_lock()),
+    );
+    let logout_armed = armed == Some("logout");
+    let logout_btn = mk_power_btn(
+        if logout_armed { "Sure?" } else { "Log out" },
+        ARROW_RIGHT,
+        if logout_armed { t.accent_red } else { t.panel_raised },
+        if logout_armed { Color::WHITE } else { t.text },
+        EventHandler::new(move |()| arm_power("logout", "logout")),
+    );
+    let reboot_armed = armed == Some("reboot");
+    let reboot_btn = mk_power_btn(
+        if reboot_armed { "Sure?" } else { "Restart" },
+        REFRESH_CW,
+        if reboot_armed { t.accent_red } else { t.panel_raised },
+        if reboot_armed { Color::WHITE } else { t.text },
+        EventHandler::new(move |()| arm_power("reboot", "reboot")),
+    );
+    let shutdown_armed = armed == Some("shutdown");
+    let shutdown_btn = mk_power_btn(
+        if shutdown_armed { "Sure?" } else { "Shut down" },
+        POWER_ICON,
+        t.accent_red,
+        Color::WHITE,
+        EventHandler::new(move |()| arm_power("shutdown", "shutdown")),
+    );
     let actions_row = rect()
         .width(Size::fill())
         .horizontal()
         .spacing(10.)
         .content(Content::Flex)
-        .child(power_btn("Lock", LOCK, t.panel_raised, t.text, || system::trigger_lock()))
-        .child(power_btn("Log out", ARROW_RIGHT, t.panel_raised, t.text, || power_action("logout")))
-        .child(power_btn("Restart", REFRESH_CW, t.panel_raised, t.text, || power_action("reboot")))
-        .child(power_btn("Shut down", POWER_ICON, t.accent_red, Color::WHITE, || power_action("shutdown")));
+        .child(lock_btn)
+        .child(logout_btn)
+        .child(reboot_btn)
+        .child(shutdown_btn);
+    let confirm_title: Option<(&'static str, &'static str)> = match armed {
+        Some("logout") => Some(("Log out?", "End the current session.")),
+        Some("reboot") => Some(("Restart?", "Unsaved work may be lost.")),
+        Some("shutdown") => Some(("Shut down?", "Unsaved work may be lost.")),
+        _ => None,
+    };
+    let confirm_card: Option<Element> = confirm_title.map(|(title, subtitle)| {
+        let mut pp_cancel = pending_power;
+        let key: &'static str = armed.unwrap_or("logout");
+        let action: &'static str = match key {
+            "reboot" => "reboot",
+            "shutdown" => "shutdown",
+            _ => "logout",
+        };
+        dialog_card(0.)
+            .width(Size::fill())
+            .spacing(8.)
+            .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title))
+            .child(label().font_size(11.).color(t.text_dim).text(format!("{subtitle} Press confirm again or use the button below. Auto-cancels in a few seconds.")))
+            .child(
+                rect().width(Size::fill()).horizontal().spacing(10.).content(Content::Flex).child(
+                    rect().width(Size::flex(1.)).child(secondary_button("Cancel", move || pp_cancel.set(None))),
+                ).child(
+                    rect().width(Size::flex(1.)).child(danger_button("Confirm", move || {
+                        let mut pp = pending_power;
+                        pp.set(None);
+                        power_action(action);
+                    })),
+                ),
+            )
+            .into_element()
+    });
     let header = rect()
         .width(Size::fill())
         .horizontal()
@@ -634,6 +638,7 @@ pub fn control_panel_app() -> Element {
                 ),
         ))
         .maybe(has_battery, |el| el.child(StaggerRow::new(2, stagger_total, stagger_dr.clone()).child(battery_card)))
+        .maybe_child(confirm_card)
         .child(StaggerRow::new(stagger_last, stagger_total, stagger_dr.clone()).child(actions_row));
     let panel_inner = rect()
         .width(Size::fill())

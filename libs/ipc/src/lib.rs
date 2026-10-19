@@ -2,8 +2,6 @@
 use bincode;
 pub use log;
 
-pub mod settings;
-pub use settings::*;
 #[cfg(not(feature = "bincode"))]
 use {
     log::{error, info, trace},
@@ -276,7 +274,3 @@ where
     }
     Ok(())
 }
-pub mod notifications;
-pub use notifications::{Notification, NotificationBroadcaster, NotificationEvent, NotificationRequest};
-pub mod clipboard;
-pub mod modals;

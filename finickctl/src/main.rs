@@ -44,7 +44,7 @@ fn main() {
             });
 
             println!("Searching for: {}", q);
-            ipsea::send_command(
+            ipc::send_command(
                 App::IndexService,
                 &index::ty::Request::Search { query: q },
                 Some(move |value: index::ty::SearchResult| match args.json {

@@ -403,6 +403,24 @@ fn is_error_notice(notice: &str) -> bool {
         || low.contains("unexpected")
 }
 
+fn copy_to_clipboard(text: &str) {
+    for (bin, args) in [("wl-copy", Vec::new()), ("xclip", vec!["-selection", "clipboard"])] {
+        if std::process::Command::new(bin).args(&args).arg(text).spawn().is_ok() {
+            return;
+        }
+    }
+}
+
+fn save_error_log(detail: &str) -> String {
+    let path = std::env::var("XDG_RUNTIME_DIR")
+        .map(|r| format!("{r}/finick-store-error.log"))
+        .unwrap_or_else(|_| "/tmp/finick-store-error.log".to_string());
+    match std::fs::write(&path, detail) {
+        Ok(()) => path,
+        Err(e) => format!("save failed: {e}"),
+    }
+}
+
 #[derive(PartialEq)]
 struct NoticeBanner {
     notice: String,
@@ -412,13 +430,17 @@ struct NoticeBanner {
 impl Component for NoticeBanner {
     fn render(&self) -> impl IntoElement {
         let t = use_app_theme();
-        let mut expanded = use_state(|| false);
+        let expanded = use_state(|| false);
+        let copied = use_state(|| false);
+        let saved_path = use_state(|| None::<String>);
         let notice = self.notice.clone();
         let detail = self.detail.clone();
         if !is_error_notice(&notice) {
             return label().font_size(12.).color(t.text_dim).text(notice).into_element();
         }
         let open = *expanded.read();
+        let was_copied = *copied.read();
+        let saved = saved_path.read().clone();
         let detail_lines: Vec<String> =
             detail.lines().map(|l| l.to_string()).filter(|l| !l.trim().is_empty()).take(30).collect();
         let has_detail = !detail_lines.is_empty();
@@ -470,7 +492,32 @@ impl Component for NoticeBanner {
                         ),
                 )
             })
-            .child(label().font_size(11.).color(t.text_dim).text("Full log in terminal as STORE_ERROR_JSON"))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .horizontal()
+                    .cross_align(Alignment::Center)
+                    .spacing(8.)
+                    .content(Content::Flex)
+                    .child({
+                        let detail = detail.clone();
+                        let mut copied = copied;
+                        ghost_button(if was_copied { "Copied ✓" } else { "Copy log" }, move || {
+                            copy_to_clipboard(&detail);
+                            copied.set(true);
+                        })
+                    })
+                    .child({
+                        let detail = detail.clone();
+                        let mut saved_path = saved_path;
+                        ghost_button("Save log", move || {
+                            saved_path.set(Some(save_error_log(&detail)));
+                        })
+                    })
+                    .maybe_child(saved.map(|p| {
+                        label().font_size(11.).color(t.text_dim).text(format!("Saved to {p}")).into_element()
+                    })),
+            )
             .into_element()
     }
 }
@@ -797,6 +844,36 @@ fn source_label(source: &StoreSource) -> &'static str {
     }
 }
 
+fn ownership_blurb(entry: &StoreEntry) -> String {
+    match entry.source {
+        StoreSource::Flathub => "Flathub Flatpak · installed per-user · sandboxed".to_string(),
+        StoreSource::Nixpkgs => {
+            if entry.nix_locked {
+                "nixpkgs · declared in Home Manager apps.nix · reproducible".to_string()
+            } else {
+                "nixpkgs · declarative via Home Manager apps.nix".to_string()
+            }
+        }
+        StoreSource::System => "System · preinstalled OS image · managed outside the Store".to_string(),
+    }
+}
+
+fn action_timing_note(source: &StoreSource) -> &'static str {
+    match source {
+        StoreSource::Flathub => "Install and removal apply immediately.",
+        StoreSource::Nixpkgs => "Declarative — edits apps.nix, then requires Apply to rebuild.",
+        StoreSource::System => "Managed by the OS image — not installable or removable here.",
+    }
+}
+
+fn removal_note(source: &StoreSource) -> &'static str {
+    match source {
+        StoreSource::Flathub => "Removal starts immediately and cannot be undone.",
+        StoreSource::Nixpkgs => "Removes the apps.nix declaration now — run Apply to rebuild.",
+        StoreSource::System => "System apps cannot be removed.",
+    }
+}
+
 fn app_initial(name: &str) -> String {
     name.trim().chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "?".to_string())
 }
@@ -874,6 +951,7 @@ fn store_app() -> impl IntoElement {
     let opt_loading = use_state(|| false);
     let opt_edit_path = use_state(|| None::<String>);
     let opt_draft = use_state(String::new);
+    let pending_remove = use_state(|| None::<StoreEntry>);
 
     {
         let installed = installed;
@@ -904,7 +982,8 @@ fn store_app() -> impl IntoElement {
     responsive_view(780.0, move |compact| {
         let sidebar_w = if compact { 180. } else { 232. };
         let content_pad = if compact { (18., 16., 32., 16.) } else { (30., 34., 64., 34.) };
-        rect()
+        let confirm = pending_remove.read().clone();
+        let body = rect()
             .width(Size::fill())
             .height(Size::fill())
             .horizontal()
@@ -1112,7 +1191,6 @@ fn store_app() -> impl IntoElement {
                         ScrollView::new().width(Size::fill()).height(Size::fill()).child(
                             rect().width(Size::fill()).padding(content_pad).vertical().spacing(GAP).child({
                                 if let Some(entry) = detail.clone() {
-                                    let mut selected = selected;
                                     let nix_meta = nix_detail.read().clone();
                                     let perm_list = perms.read().clone();
                                     let mut perms = perms;
@@ -1138,6 +1216,32 @@ fn store_app() -> impl IntoElement {
                                             false,
                                             status_chip(source_label(&entry.source), entry.installed, None),
                                         )))
+                                        .child(
+                                            tile()
+                                                .child(tile_head(
+                                                    None,
+                                                    "Source & ownership",
+                                                    Some(status_chip(
+                                                        source_label(&entry.source),
+                                                        entry.installed,
+                                                        None,
+                                                    )),
+                                                ))
+                                                .child(tile_sub(ownership_blurb(&entry)))
+                                                .child(tile_sub(format!(
+                                                    "id {} · version {}",
+                                                    if entry.id.is_empty() { "unknown" } else { entry.id.as_str() },
+                                                    if entry.version.is_empty() {
+                                                        "unknown"
+                                                    } else {
+                                                        entry.version.as_str()
+                                                    }
+                                                )))
+                                                .child(tile_sub(action_timing_note(&entry.source)))
+                                                .maybe(dirty_val, |el| {
+                                                    el.child(tile_sub("Unapplied changes — Requires Apply to rebuild"))
+                                                }),
+                                        )
                                         .maybe_child(nix_meta.map(|m| {
                                             tile()
                                                 .child(tile_head(None, "Package info", None::<String>))
@@ -1222,16 +1326,10 @@ fn store_app() -> impl IntoElement {
                                                 .child(if entry.source == StoreSource::System {
                                                     status_chip("Preinstalled", false, None).into_element()
                                                 } else if entry.installed {
+                                                    let mut pending_remove = pending_remove;
+                                                    let entry_c = entry_c.clone();
                                                     danger_button("Remove", move || {
-                                                        do_remove(
-                                                            entry_c.clone(),
-                                                            notice_c,
-                                                            notice_detail_c,
-                                                            job_busy_c,
-                                                            dirty_c,
-                                                            installed_c,
-                                                        );
-                                                        selected.set(None);
+                                                        pending_remove.set(Some(entry_c.clone()));
                                                     })
                                                     .into_element()
                                                 } else {
@@ -1297,6 +1395,37 @@ fn store_app() -> impl IntoElement {
                                                     }),
                                             )
                                             .child(notice_banner_full(notice_val.clone(), notice_detail_val.clone()))
+                                            .maybe(is_error_notice(&notice_val), |el| {
+                                                el.child(
+                                                    rect()
+                                                        .width(Size::fill())
+                                                        .horizontal()
+                                                        .spacing(8.)
+                                                        .content(Content::Flex)
+                                                        .child({
+                                                            let query = query;
+                                                            let results = results;
+                                                            let search_busy = search_busy;
+                                                            let notice = notice;
+                                                            let notice_detail = notice_detail;
+                                                            secondary_button("Retry search", move || {
+                                                                if *search_busy.read() {
+                                                                    return;
+                                                                }
+                                                                run_search(
+                                                                    query.read().clone(),
+                                                                    results,
+                                                                    search_busy,
+                                                                    notice,
+                                                                    notice_detail,
+                                                                );
+                                                            })
+                                                        })
+                                                        .child(tile_sub(
+                                                            "Or pick Install again below to retry that action.",
+                                                        )),
+                                                )
+                                            })
                                             .child({
                                                 let items = results.read().clone();
                                                 if items.is_empty() {
@@ -1411,11 +1540,6 @@ fn store_app() -> impl IntoElement {
                                                             .vertical()
                                                             .spacing(GAP)
                                                             .children(items.iter().cloned().map(|entry| {
-                                                                let notice_c = notice;
-                                                                let notice_detail_c = notice_detail;
-                                                                let job_busy_c = job_busy;
-                                                                let dirty_c = dirty;
-                                                                let installed_c = installed;
                                                                 let entry_c = entry.clone();
                                                                 let entry_d = entry.clone();
                                                                 tile()
@@ -1472,17 +1596,14 @@ fn store_app() -> impl IntoElement {
                                                                                     .maybe(
                                                                                         entry.source != StoreSource::System,
                                                                                         |el| {
+                                                                                            let mut pending_remove =
+                                                                                                pending_remove;
                                                                                             el.child(danger_button(
                                                                                                 "Remove",
                                                                                                 move || {
-                                                                                                    do_remove(
+                                                                                                    pending_remove.set(Some(
                                                                                                         entry_c.clone(),
-                                                                                                        notice_c,
-                                                                                                        notice_detail_c,
-                                                                                                        job_busy_c,
-                                                                                                        dirty_c,
-                                                                                                        installed_c,
-                                                                                                    );
+                                                                                                    ));
                                                                                                 },
                                                                                             ))
                                                                                         },
@@ -1580,8 +1701,57 @@ fn store_app() -> impl IntoElement {
                             }),
                         ),
                     )),
-            )
-            .into_element()
+            );
+        let mut root = rect().width(Size::fill()).height(Size::fill()).background(t.bg).child(body);
+        if let Some(target) = confirm {
+            let target_c = target.clone();
+            let mut pending_cancel = pending_remove;
+            let mut pending_confirm = pending_remove;
+            let mut selected = selected;
+            root = root.child(
+                rect()
+                    .position(Position::new_global().top(0.).left(0.))
+                    .width(Size::fill())
+                    .height(Size::fill())
+                    .background(Color::from_argb(140, 0, 0, 0))
+                    .center()
+                    .content(Content::Flex)
+                    .child(
+                        dialog_card(420.)
+                            .spacing(12.)
+                            .child(tile_head(None, format!("Remove {}", target.name), None::<String>))
+                            .child(tile_sub(format!(
+                                "{} · {}",
+                                source_label(&target.source),
+                                short_entry_id(&target)
+                            )))
+                            .child(tile_sub(removal_note(&target.source)))
+                            .child(tile_sub(action_timing_note(&target.source)))
+                            .child(
+                                rect()
+                                    .width(Size::fill())
+                                    .horizontal()
+                                    .main_align(Alignment::End)
+                                    .spacing(8.)
+                                    .content(Content::Flex)
+                                    .child(ghost_button("Cancel", move || pending_cancel.set(None)))
+                                    .child(danger_button("Remove", move || {
+                                        do_remove(
+                                            target_c.clone(),
+                                            notice,
+                                            notice_detail,
+                                            job_busy,
+                                            dirty,
+                                            installed,
+                                        );
+                                        pending_confirm.set(None);
+                                        selected.set(None);
+                                    })),
+                            ),
+                    ),
+            );
+        }
+        root.into_element()
     })
 }
 

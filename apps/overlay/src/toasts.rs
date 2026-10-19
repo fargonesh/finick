@@ -22,7 +22,7 @@ pub struct ToastItem {
 
 impl Component for ToastItem {
     fn render(&self) -> impl IntoElement {
-        let mut dismissed = use_state(|| false);
+        let dismissed = use_state(|| false);
         let timeout = self.notif.timeout;
         let id = self.notif.id;
         let notif = self.notif.clone();

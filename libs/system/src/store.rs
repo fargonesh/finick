@@ -193,7 +193,7 @@ pub fn remove_nix_reproducible(attr: &str) -> Result<String, String> {
 }
 
 // --- Daemon jobs (progress IPC) -------------------------------------------
-// Transport is the generic ipsea socket pair; types live here so daemon,
+// Transport is the generic ipc socket pair; types live here so daemon,
 // store app and finickctl share one definition. Workers stream
 // Started/Log/Finished for live notice lines.
 
@@ -328,7 +328,7 @@ fn run_job_on_socket(
 ) -> Result<String, String> {
     let req = StoreRequest::Run { job: job.clone() };
     let (tx, rx) = std::sync::mpsc::channel();
-    let res = ipsea::send_command(socket, &req, Some(move |resp: StoreResponse| {
+    let res = ipc::send_command(socket, &req, Some(move |resp: StoreResponse| {
         let _ = tx.send(resp);
     }));
     if res.is_err() {
@@ -370,7 +370,7 @@ mod tests {
         let server = socket.clone();
         std::thread::spawn(move || {
             // Stub worker: no real jobs run in tests, just the protocol.
-            let _ = ipsea::start_server(server, |req: StoreRequest, sender: std::sync::mpsc::Sender<StoreResponse>| {
+            let _ = ipc::start_server(server, |req: StoreRequest, sender: std::sync::mpsc::Sender<StoreResponse>| {
                 let StoreRequest::Run { job } = req;
                 let _ = sender.send(StoreResponse::Started { job: describe(&job) });
                 let _ = sender.send(StoreResponse::Log("halfway".to_string()));

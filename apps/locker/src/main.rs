@@ -59,6 +59,7 @@ fn locker_app() -> Element {
     let _t = use_app_theme();
     let mut password = use_state(String::new);
     let mut error = use_state(|| Option::<String>::None);
+    let authenticating = use_state(|| false);
     let attempts = use_state(|| 0u32);
     let time_str = use_state(|| chrono::Local::now().format("%H:%M").to_string());
     let date_str = use_state(|| chrono::Local::now().format("%A, %B %-d").to_string());
@@ -99,17 +100,23 @@ fn locker_app() -> Element {
         let mut err = error;
         let att = attempts;
         let user = username.clone();
+        let mut busy = authenticating;
         move |_| {
+            if *busy.read() {
+                return;
+            }
             let p = pwd.read().clone();
             if p.is_empty() {
                 err.set(Some("Enter your password".to_string()));
                 return;
             }
             err.set(None);
+            busy.set(true);
             let user_c = user.clone();
             let mut err_c = err;
             let mut att_c = att;
             let mut pwd_c = pwd;
+            let mut busy_c = busy;
             spawn(async move {
                 let p2 = p.clone();
                 let user2 = user_c.clone();
@@ -119,7 +126,8 @@ fn locker_app() -> Element {
                     start_shell_overlay();
                     std::process::exit(0);
                 } else {
-                    err_c.set(Some("Incorrect password — try again".to_string()));
+                    busy_c.set(false);
+                    err_c.set(Some("Incorrect password - try again".to_string()));
                     let next = *att_c.read() + 1;
                     att_c.set(next);
                     pwd_c.set(String::new());
@@ -139,6 +147,7 @@ fn locker_app() -> Element {
     let has_error = error.read().is_some();
     let err_msg = error.read().clone().unwrap_or_default();
     let fail_count = *attempts.read();
+    let is_authenticating = *authenticating.read();
     let bat_info = battery.read().clone();
     let bat_txt = if bat_info.capacity == "Unknown" || bat_info.capacity.is_empty() {
         String::new()
@@ -172,7 +181,13 @@ fn locker_app() -> Element {
                     .width(Size::fill())
                     .height(Size::fill())
                     .overflow(Overflow::Clip)
-                    .child(ImageViewer::new(PathBuf::from(path)).width(Size::fill()).height(Size::fill()))
+                    .child(
+                        ImageViewer::new(PathBuf::from(path))
+                            .width(Size::fill())
+                            .height(Size::fill())
+                            .aspect_ratio(AspectRatio::Max)
+                            .image_cover(ImageCover::Center),
+                    )
                     .into_element(),
                 _ => rect().into_element(),
             }
@@ -260,6 +275,7 @@ fn locker_app() -> Element {
                             .border(Border::new().width(1.).fill(Color::from_argb(55, 255, 255, 255)))
                             .shadow(Shadow::new().blur(40.).color(Color::from_argb(120, 0, 0, 0)))
                             .spacing(14.)
+                            .content(Content::Flex)
                             .child(hero_identity(initial.clone(), username.clone(), hostname.clone()))
                             .child(
                                 rect()
@@ -324,10 +340,23 @@ fn locker_app() -> Element {
                                     )),
                                 ))
                             })
-                            .child(primary_button_full("Unlock", {
+                            .child(primary_button_full(if is_authenticating { "Checking..." } else { "Unlock" }, {
                                 let mut h = do_unlock.clone();
                                 move || h(())
                             }))
+                            .child(
+                                rect()
+                                    .width(Size::fill())
+                                    .cross_align(Alignment::Center)
+                                    .spacing(4.)
+                                    .child(
+                                        label()
+                                            .font_size(11.)
+                                            .color(Color::from_rgb(165, 166, 174))
+                                            .text("Having trouble? This bypasses password checking."),
+                                    )
+                                    .child(secondary_button_full("Emergency exit", emergency_exit)),
+                            )
                             .into_element(),
                     ),
                 ),
@@ -385,6 +414,12 @@ fn stop_shell_overlay() {
 
 fn start_shell_overlay() {
     let _ = std::process::Command::new("systemctl").args(["--user", "start", "finick-overlay"]).output();
+}
+
+fn emergency_exit() {
+    release_single_instance();
+    start_shell_overlay();
+    std::process::exit(0);
 }
 
 fn locker_audit_lua(mons: &[LockerMonitor]) -> String {
