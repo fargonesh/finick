@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+config = { path = "../../libs/config" }
 overlay = { path = "../overlay" }
 tokio = { version = "1.43", features = ["full"] }
 freya = { workspace = true }

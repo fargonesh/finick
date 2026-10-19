@@ -36,6 +36,7 @@ html[data-theme="light"] {
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
+  min-height: 100vh;
   font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);

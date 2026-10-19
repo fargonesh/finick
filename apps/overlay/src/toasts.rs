@@ -1,7 +1,5 @@
 use {
-    crate::{
-        ToastWindowId, get_monitor_states, notification_popup::NotificationPopup, state::cursor_pos_blocking,
-    },
+    crate::{ToastWindowId, get_monitor_states, notification_popup::NotificationPopup, state::cursor_pos_blocking},
     freya::prelude::*,
     ipsea::notifications::{
         NOTIFICATIONS_SOCKET_NAME, Notification, NotificationEvent, get_active_notifications, subscribe_channel,
@@ -18,6 +16,11 @@ const TOAST_DEFAULT_TIMEOUT_MS: u64 = 5000;
 pub struct ToastItem {
     notif: Notification,
     on_remove: EventHandler<u32>,
+    key: DiffKey,
+}
+
+impl KeyExt for ToastItem {
+    fn write_key(&mut self) -> &mut DiffKey { &mut self.key }
 }
 
 impl Component for ToastItem {
@@ -52,17 +55,13 @@ impl Component for ToastItem {
             })
             .child(
                 PanelShell::new(dismissed.into_readable())
-                    .duration(240)
-                    .scale_from(1.0)
                     .on_dismiss(EventHandler::new(move |()| on_remove.call(id)))
                     .child(popup),
             )
     }
 }
 
-fn norm_text(s: &str) -> String {
-    s.to_lowercase().chars().filter(|c| c.is_alphanumeric() || *c == ' ').collect()
-}
+fn norm_text(s: &str) -> String { s.to_lowercase().chars().filter(|c| c.is_alphanumeric() || *c == ' ').collect() }
 
 fn focus_notification_source(app_name: &str, summary: &str) {
     let app = norm_text(app_name);
@@ -98,9 +97,7 @@ fn focus_notification_source(app_name: &str, summary: &str) {
         }
     }
     if let Some((_, addr)) = best {
-        let _ = std::process::Command::new("hyprctl")
-            .args(["dispatch", "focuswindow", &format!("address:{addr}")])
-            .output();
+        system::hypr_focus_window(&format!("address:{addr}"));
     }
 }
 
@@ -122,11 +119,10 @@ pub fn toasts_app() -> Element {
         let mut ts = toasts;
         let w = wid;
         spawn(async move {
-            let initial = tokio::task::spawn_blocking(|| {
-                get_active_notifications(NOTIFICATIONS_SOCKET_NAME).unwrap_or_default()
-            })
-            .await
-            .unwrap_or_default();
+            let initial =
+                tokio::task::spawn_blocking(|| get_active_notifications(NOTIFICATIONS_SOCKET_NAME).unwrap_or_default())
+                    .await
+                    .unwrap_or_default();
             ts.set(initial);
             loop {
                 if let Ok(mut rx) = subscribe_channel(NOTIFICATIONS_SOCKET_NAME) {
@@ -139,6 +135,17 @@ pub fn toasts_app() -> Element {
                     while let Some(evt) = rx.recv().await {
                         match evt {
                             NotificationEvent::Show(notif) => {
+                                // DND (manual or schedule) and per-app mute silence
+                                // toasts; the notification stays in the center.
+                                let app = notif.app_name.clone();
+                                let suppressed = tokio::task::spawn_blocking(move || {
+                                    crate::state::dnd_silenced_blocking() || crate::state::load_muted_apps().contains(&app)
+                                })
+                                .await
+                                .unwrap_or(false);
+                                if suppressed {
+                                    continue;
+                                }
                                 let mut current = ts.read().clone();
                                 if let Some(idx) = current.iter().position(|n| n.id == notif.id) {
                                     current[idx] = notif;
@@ -176,14 +183,10 @@ pub fn toasts_app() -> Element {
         .vertical()
         .content(Content::Flex)
         .main_align(Alignment::Start)
-        .child(
-            rect()
-                .width(Size::fill())
-                .height(Size::auto())
-                .vertical()
-                .spacing(10.)
-                .content(Content::Flex)
-                .children(list[start..].iter().cloned().map(|n| ToastItem {
+        .child(rect().width(Size::fill()).height(Size::auto()).vertical().spacing(10.).content(Content::Flex).children(
+            list[start..].iter().cloned().map(|n| {
+                let id = n.id;
+                ToastItem {
                     notif: n,
                     on_remove: EventHandler::new(move |rid: u32| {
                         let mut current = remover.read().clone();
@@ -192,12 +195,16 @@ pub fn toasts_app() -> Element {
                         }
                         let empty = current.is_empty();
                         remover.set(current);
+                        crate::state::dismiss_notification(rid);
                         if empty {
                             Platform::get().close_window(wid);
                         }
                     }),
-                })),
-        )
+                    key: DiffKey::None,
+                }
+                .key(format!("toast-{id}"))
+            }),
+        ))
         .into_element()
 }
 
@@ -228,6 +235,11 @@ pub async fn run_toast_manager(proxy: LaunchProxy) {
             eprintln!("[toasts] subscribed");
             while let Some(evt) = rx.recv().await {
                 if matches!(evt, NotificationEvent::Show(_)) {
+                    // Never pop a toast window while DND silences banners.
+                    let silenced = tokio::task::spawn_blocking(crate::state::dnd_silenced_blocking).await.unwrap_or(false);
+                    if silenced {
+                        continue;
+                    }
                     eprintln!("[toasts] show event, ensuring window");
                     ensure_toasts_window(&proxy).await;
                 }
@@ -241,10 +253,7 @@ pub async fn run_toast_manager(proxy: LaunchProxy) {
 pub async fn ensure_toasts_window(proxy: &LaunchProxy) {
     let exists = proxy
         .post_callback(|ctx| {
-            ctx.global_contexts
-                .try_get_context::<ToastWindowId>()
-                .and_then(|c| c.0.lock().ok().and_then(|g| *g))
-                .is_some()
+            ctx.global_contexts.try_get_context::<ToastWindowId>().and_then(|c| c.0.lock().ok().and_then(|g| *g)).is_some()
         })
         .await
         .unwrap_or(true);
@@ -259,26 +268,17 @@ pub async fn ensure_toasts_window(proxy: &LaunchProxy) {
             cursor.and_then(|(cx, cy)| {
                 mons.iter()
                     .find(|m| {
-                        cx >= m.x as f64
-                            && cx < (m.x as f64 + m.width)
-                            && cy >= m.y as f64
-                            && cy < (m.y as f64 + m.height)
+                        cx >= m.x as f64 && cx < (m.x as f64 + m.width) && cy >= m.y as f64 && cy < (m.y as f64 + m.height)
                     })
                     .cloned()
             })
         })
         .or_else(|| mons.iter().find(|m| m.x == 0).cloned())
-        .unwrap_or(crate::MonitorState {
-            name: "default".to_string(),
-            x: 0,
-            y: 0,
-            width: 1920.0,
-            height: 1080.0,
-        });
+        .unwrap_or(crate::MonitorState { name: "default".to_string(), x: 0, y: 0, width: 1920.0, height: 1080.0 });
     let w = TOAST_WIDTH;
     let h = TOAST_HEIGHT;
     let px = mon.x + mon.width as i32 - w - 12;
-    let py = mon.y + 44;
+    let py = mon.y + crate::PANEL_TOP_OFFSET;
     let mon_name = mon.name.clone();
     let _ = std::process::Command::new("hyprctl").args(["eval", &format!(r#"hl.window_rule({{ name = "finick-toasts-live-{mon_name}", match = {{ class = "^(overlay-toasts)$" }}, monitor = "{mon_name}", float = true, pin = true, move = {{ {px}, {py} }}, size = {{ {w}, {h} }}, border_size = 0, no_shadow = true, no_anim = true, no_blur = true, no_initial_focus = true, rounding = 20 }})"#, mon_name=mon_name, px=px, py=py, w=w, h=h)]).output();
     tokio::time::sleep(std::time::Duration::from_millis(35)).await;

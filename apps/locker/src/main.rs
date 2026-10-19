@@ -54,9 +54,88 @@ fn hex_to_color(hex: &str) -> Option<Color> {
     Some(Color::from_rgb(r, g, b))
 }
 
+#[derive(Clone, PartialEq)]
+struct LockMedia {
+    available: bool,
+    title: String,
+    artist: String,
+    status: String,
+}
+
+impl LockMedia {
+    fn unavailable() -> Self {
+        Self { available: false, title: String::new(), artist: String::new(), status: String::new() }
+    }
+
+    fn headline(&self) -> String {
+        let t = self.title.trim();
+        let a = self.artist.trim();
+        if t.is_empty() && a.is_empty() {
+            return "No track info".to_string();
+        }
+        if a.is_empty() {
+            return t.to_string();
+        }
+        if t.is_empty() {
+            return a.to_string();
+        }
+        format!("{t} — {a}")
+    }
+
+    fn playing(&self) -> bool { self.status.eq_ignore_ascii_case("playing") }
+}
+
+#[derive(Clone, PartialEq)]
+struct LockNotif {
+    app: String,
+    summary: String,
+}
+
+impl LockNotif {
+    fn row_text(&self) -> String {
+        let a = self.app.trim();
+        let s = self.summary.trim().replace('\n', " ");
+        if a.is_empty() { s } else { format!("{a}: {s}") }
+    }
+}
+
+fn playerctl_output(args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("playerctl").args(args).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
+fn query_lock_media() -> LockMedia {
+    if playerctl_output(&["--version"]).is_none() {
+        return LockMedia::unavailable();
+    }
+    let title = playerctl_output(&["metadata", "--format", "{{title}}"]).unwrap_or_default();
+    let artist = playerctl_output(&["metadata", "--format", "{{artist}}"]).unwrap_or_default();
+    let status = playerctl_output(&["status"]).unwrap_or_default();
+    if title.is_empty() && artist.is_empty() && status.is_empty() {
+        return LockMedia::unavailable();
+    }
+    LockMedia { available: true, title, artist, status }
+}
+
+fn query_lock_notifs() -> Vec<LockNotif> {
+    ipsea::notifications::get_active_notifications(ipsea::notifications::NOTIFICATIONS_SOCKET_NAME)
+        .unwrap_or_default()
+        .into_iter()
+        .take(3)
+        .map(|n| LockNotif { app: n.app_name, summary: n.summary })
+        .filter(|n| !n.row_text().trim().is_empty())
+        .collect()
+}
+
 fn locker_app() -> Element {
     let _st = use_init_app_theme(get_theme());
     let _t = use_app_theme();
+    let media = use_state(LockMedia::unavailable);
+    let notifs = use_state(Vec::<LockNotif>::new);
     let mut password = use_state(String::new);
     let mut error = use_state(|| Option::<String>::None);
     let authenticating = use_state(|| false);
@@ -73,14 +152,27 @@ fn locker_app() -> Element {
         let mut ts = time_str;
         let mut ds = date_str;
         let mut bat = battery;
+        let mut med = media;
+        let mut nts = notifs;
         spawn(async move {
+            // First snapshot up front so the cards never show stale data.
+            let m0 = tokio::task::spawn_blocking(query_lock_media).await.unwrap_or(LockMedia::unavailable());
+            med.set_if_modified(m0);
+            let n0 = tokio::task::spawn_blocking(query_lock_notifs).await.unwrap_or_default();
+            nts.set_if_modified(n0);
             let mut tick = 0u32;
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 ts.set(chrono::Local::now().format("%H:%M").to_string());
                 ds.set(chrono::Local::now().format("%A, %B %-d").to_string());
                 tick += 1;
-                if tick.is_multiple_of(30) {
+                if tick % 5 == 0 {
+                    let m = tokio::task::spawn_blocking(query_lock_media).await.unwrap_or(LockMedia::unavailable());
+                    med.set_if_modified(m);
+                    let n = tokio::task::spawn_blocking(query_lock_notifs).await.unwrap_or_default();
+                    nts.set_if_modified(n);
+                }
+                if tick % 30 == 0 {
                     let info = tokio::task::spawn_blocking(|| HyprlandBackend.get_power_info()).await.unwrap_or(
                         system::PowerInfo {
                             capacity: "Unknown".to_string(),
@@ -94,6 +186,29 @@ fn locker_app() -> Element {
             }
         });
     });
+
+fn media_press(action: &'static str, media: State<LockMedia>) -> impl FnMut() + 'static {
+    move || {
+        spawn(async move {
+            let mut med = media;
+            // playerctl is the only transport backend here; when it is
+            // missing the media card stays hidden and this never fires.
+            let ran = tokio::task::spawn_blocking(move || {
+                std::process::Command::new("playerctl")
+                    .arg(action)
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+            })
+            .await
+            .unwrap_or(false);
+            if ran {
+                let m = tokio::task::spawn_blocking(query_lock_media).await.unwrap_or(LockMedia::unavailable());
+                med.set_if_modified(m);
+            }
+        });
+    }
+}
 
     let do_unlock = {
         let pwd = password;
@@ -148,6 +263,8 @@ fn locker_app() -> Element {
     let err_msg = error.read().clone().unwrap_or_default();
     let fail_count = *attempts.read();
     let is_authenticating = *authenticating.read();
+    let lock_media = media.read().clone();
+    let lock_notifs = notifs.read().clone();
     let bat_info = battery.read().clone();
     let bat_txt = if bat_info.capacity == "Unknown" || bat_info.capacity.is_empty() {
         String::new()
@@ -357,12 +474,123 @@ fn locker_app() -> Element {
                                     .child(secondary_button_full("Emergency exit", emergency_exit)),
                             )
                             .into_element(),
-                    ),
+                    )
+                    .maybe(lock_media.available, |el| {
+                        let headline = lock_media.headline();
+                        let playing = lock_media.playing();
+                        let status_label = if lock_media.status.trim().is_empty() {
+                            "Playing".to_string()
+                        } else {
+                            lock_media.status.clone()
+                        };
+                        el.child(
+                            rect()
+                                .width(Size::px(380.))
+                                .padding(18.)
+                                .corner_radius(24.)
+                                .background(Color::from_argb(205, 26, 27, 33))
+                                .border(Border::new().width(1.).fill(Color::from_argb(55, 255, 255, 255)))
+                                .shadow(Shadow::new().blur(40.).color(Color::from_argb(120, 0, 0, 0)))
+                                .spacing(10.)
+                                .content(Content::Flex)
+                                .child(
+                                    rect()
+                                        .width(Size::fill())
+                                        .horizontal()
+                                        .cross_align(Alignment::Center)
+                                        .content(Content::Flex)
+                                        .spacing(8.)
+                                        .child(icon(MUSIC, 15., Color::from_rgb(200, 200, 210)))
+                                        .child(
+                                            label()
+                                                .font_size(13.)
+                                                .font_weight(FontWeight::SEMI_BOLD)
+                                                .color(Color::WHITE)
+                                                .text(headline),
+                                        ),
+                                )
+                                .child(
+                                    rect()
+                                        .width(Size::fill())
+                                        .horizontal()
+                                        .cross_align(Alignment::Center)
+                                        .content(Content::Flex)
+                                        .spacing(8.)
+                                        .child(status_chip(status_label, playing, None))
+                                        .child(
+                                            label()
+                                                .font_size(11.)
+                                                .color(Color::from_rgb(165, 166, 174))
+                                                .text("Media keys still work while locked."),
+                                        ),
+                                )
+                                .child(
+                                    rect()
+                                        .width(Size::fill())
+                                        .horizontal()
+                                        .main_align(Alignment::Center)
+                                        .content(Content::Flex)
+                                        .spacing(8.)
+                                        .child(ghost_button("Prev", media_press("previous", media)))
+                                        .child(ghost_button("Play/Pause", media_press("play-pause", media)))
+                                        .child(ghost_button("Next", media_press("next", media))),
+                                ),
+                        )
+                    })
+                    .maybe(!lock_notifs.is_empty(), |el| {
+                        let count = lock_notifs.len();
+                        let mut card = rect()
+                            .width(Size::px(380.))
+                            .padding(18.)
+                            .corner_radius(24.)
+                            .background(Color::from_argb(205, 26, 27, 33))
+                            .border(Border::new().width(1.).fill(Color::from_argb(55, 255, 255, 255)))
+                            .shadow(Shadow::new().blur(40.).color(Color::from_argb(120, 0, 0, 0)))
+                            .spacing(8.)
+                            .content(Content::Flex)
+                            .child(
+                                rect()
+                                    .width(Size::fill())
+                                    .horizontal()
+                                    .cross_align(Alignment::Center)
+                                    .content(Content::Flex)
+                                    .spacing(8.)
+                                    .child(icon(NOTIFICATIONS, 14., Color::from_rgb(200, 200, 210)))
+                                    .child(
+                                        label()
+                                            .font_size(13.)
+                                            .font_weight(FontWeight::SEMI_BOLD)
+                                            .color(Color::WHITE)
+                                            .text(format!("Notifications ({count})")),
+                                    ),
+                            );
+                        for n in lock_notifs.iter().take(3) {
+                            let text = n.row_text();
+                            card = card.child(
+                                label().font_size(12.).color(Color::from_rgb(210, 210, 215)).text(text),
+                            );
+                        }
+                        el.child(card.child(
+                            label()
+                                .font_size(11.)
+                                .color(Color::from_rgb(165, 166, 174))
+                                .text("Bodies hidden while locked."),
+                        ))
+                    }),
                 ),
         )
         .into_element()
 }
 
+// P3 status: this Freya window-layer locker is bypassable by design (any
+// shell access defeats it) and stays only as the session-lock
+// `finished`-event fallback. Super+L and all trigger paths resolve to
+// `finick-lock` first (see system::locker_binary); both `finick-lock`
+// entry points exec this binary when the session client exits 42
+// (denied/superseded/manager missing). The per-window audit loop below is
+// retained on purpose: HM ships no locker window rules, so the fallback
+// self-pins while shown. Emergency exit stays as a safety valve so a
+// broken auth stack can never brick the session.
 #[derive(Clone)]
 struct LockerMonitor {
     name: String,
@@ -481,7 +709,19 @@ fn place_locker_windows(mons: Vec<LockerMonitor>) {
     });
 }
 
+/// Locker has no sub-pages; this lists the (empty) page set for `--help`.
+pub const LOCKER_PAGE_SLUGS: &[&str] = &[];
+
 fn main() {
+    let args = config::LaunchArgs::parse();
+    if args.wants_help() {
+        args.print_help("locker", LOCKER_PAGE_SLUGS);
+        return;
+    }
+    if args.page.is_some() {
+        eprintln!("[locker] locker has no pages; ignoring page argument");
+    }
+    args.maybe_arm_screenshot("locker");
     let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
     let _guard = _rt.as_ref().map(|rt| rt.enter());
 
@@ -529,5 +769,37 @@ fn watch_lid_and_lock() {
         if std::env::var("FINICK_LOCKER_WATCH_LID").is_err() {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn media(title: &str, artist: &str, status: &str) -> LockMedia {
+        LockMedia { available: true, title: title.to_string(), artist: artist.to_string(), status: status.to_string() }
+    }
+
+    #[test]
+    fn headline_joins_title_and_artist() {
+        assert_eq!(media("Song", "Band", "Playing").headline(), "Song — Band");
+        assert_eq!(media("Song", "", "Paused").headline(), "Song");
+        assert_eq!(media("", "Band", "Playing").headline(), "Band");
+        assert_eq!(media("", "", "Stopped").headline(), "No track info");
+    }
+
+    #[test]
+    fn playing_matches_case_insensitively() {
+        assert!(media("t", "a", "Playing").playing());
+        assert!(media("t", "a", "playing").playing());
+        assert!(!media("t", "a", "Paused").playing());
+    }
+
+    #[test]
+    fn notif_row_withholds_body() {
+        let n = LockNotif { app: "Chat".to_string(), summary: "hi there".to_string() };
+        assert_eq!(n.row_text(), "Chat: hi there");
+        let n = LockNotif { app: "".to_string(), summary: "update done".to_string() };
+        assert_eq!(n.row_text(), "update done");
     }
 }

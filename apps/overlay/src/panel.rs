@@ -1,7 +1,10 @@
 use {
-    crate::state::{apply, load_initial_batch, parse_capacity_pct, power_action, subscribe_live},
+    crate::state::{
+        apply, load_extended_batch, load_initial_batch, open_in_settings, parse_capacity_pct, power_action,
+        subscribe_extended_live, subscribe_live,
+    },
     freya::prelude::*,
-    ipsea::settings::SettingKey,
+    ipsea::settings::{SettingKey, SettingValue, set_and_apply},
     system::{BluetoothDevice, CurrentWifiInfo, HyprlandBackend, SystemBackend, WifiNetworkDetail, WiredInfo},
     ui::*,
 };
@@ -32,15 +35,40 @@ pub fn control_panel_app() -> Element {
     let bt_devices = use_state(Vec::<BluetoothDevice>::new);
     let topbar_settings = use_state(crate::state::TopbarSettings::default);
     let pending_power = use_state(|| Option::<&'static str>::None);
+    let airplane = use_state(|| false);
+    let night = use_state(|| false);
+    let power_profile = use_state(|| "balanced".to_string());
+    let kbd_level = use_state(|| Option::<u32>::None);
+    let kbd_supported = use_state(|| false);
+    let bg_apps = use_state(|| 0usize);
+    let power_supported = use_state(|| true);
+    let last_error = use_state(|| Option::<String>::None);
+    let dnd_sched = use_state(crate::state::DndSchedule::default);
     let mut dismiss = use_state(|| false);
     use_hook(move || {
         load_initial_batch(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
         subscribe_live(wifi, bt, volume, muted, brightness, dnd, connected, topbar_settings, theme_state);
+        load_extended_batch(airplane, night, power_profile);
+        subscribe_extended_live(airplane, night, power_profile);
+        {
+            let mut ds = dnd_sched;
+            spawn(async move {
+                let sched = tokio::task::spawn_blocking(crate::state::load_dnd_schedule).await.unwrap_or_default();
+                ds.set_if_modified(sched);
+            });
+        }
         let mut wired_state = wired;
         let mut pct_state = battery_pct;
         let mut status_state = battery_status;
         let mut wifi_state = wifi_details;
         let mut bt_state = bt_devices;
+        let mut airplane_state = airplane;
+        let mut night_state = night;
+        let mut profile_state = power_profile;
+        let mut kbd_level_state = kbd_level;
+        let mut kbd_supported_state = kbd_supported;
+        let mut bg_state = bg_apps;
+        let mut power_supported_state = power_supported;
 
         // Fetch initial data asynchronously without blocking window creation
 
@@ -71,6 +99,24 @@ pub fn control_panel_app() -> Element {
         });
 
         spawn(async move {
+            let ap = tokio::task::spawn_blocking(system::query_airplane_mode).await.unwrap_or(false);
+            airplane_state.set_if_modified(ap);
+            let prof = tokio::task::spawn_blocking(|| HyprlandBackend.get_power_profile()).await.unwrap_or_default();
+            if !prof.is_empty() {
+                profile_state.set_if_modified(prof);
+            }
+            let sup = tokio::task::spawn_blocking(system::supports_power_profiles).await.unwrap_or(false);
+            power_supported_state.set_if_modified(sup);
+            let kbd = tokio::task::spawn_blocking(system::query_keyboard_backlight).await.unwrap_or(None);
+            kbd_supported_state.set_if_modified(kbd.is_some());
+            kbd_level_state.set_if_modified(kbd);
+            let bg = tokio::task::spawn_blocking(system::query_background_app_count).await.unwrap_or(0);
+            bg_state.set_if_modified(bg);
+            let nz = tokio::task::spawn_blocking(system::load_night_schedule).await.unwrap_or_default();
+            night_state.set_if_modified(nz.mode == 1);
+        });
+
+        spawn(async move {
             let _ = std::process::Command::new("bluetoothctl").args(["scan", "on"]).output();
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(8)).await;
@@ -91,17 +137,38 @@ pub fn control_panel_app() -> Element {
                 let b =
                     tokio::task::spawn_blocking(|| HyprlandBackend.get_paired_bluetooth_devices()).await.unwrap_or_default();
                 bt_state.set_if_modified(b);
+                let ap = tokio::task::spawn_blocking(system::query_airplane_mode).await.unwrap_or(false);
+                airplane_state.set_if_modified(ap);
+                let prof = tokio::task::spawn_blocking(|| HyprlandBackend.get_power_profile()).await.unwrap_or_default();
+                if !prof.is_empty() {
+                    profile_state.set_if_modified(prof);
+                }
+                let kbd = tokio::task::spawn_blocking(system::query_keyboard_backlight).await.unwrap_or(None);
+                kbd_level_state.set_if_modified(kbd);
+                let bg = tokio::task::spawn_blocking(system::query_background_app_count).await.unwrap_or(0);
+                bg_state.set_if_modified(bg);
             }
         });
     });
-    use_hook(|| {
-        crate::state::spawn_panel_focus_watcher(
+    let wid = Platform::window_id();
+    use_hook(move || {
+        let my_wid = wid;
+        crate::state::spawn_panel_focus_watcher_guarded(
             &["overlay-panel", "topbar-panel", "overlay", "topbar"],
             "control-panel",
             dismiss,
+            move || {
+                crate::state::is_panel_window_current(my_wid)
+            },
         );
     });
-    let wid = Platform::window_id();
+    use_hook(move || {
+        let my_wid = wid;
+        crate::state::clear_close_flag(&crate::state::CLOSE_PANEL);
+        crate::state::spawn_close_flag_watcher_guarded(&crate::state::CLOSE_PANEL, dismiss, move || {
+            crate::state::is_panel_window_current(my_wid)
+        });
+    });
     let _wifi_on = *wifi.read();
     let _bt_on = *bt.read();
     let wired_info = wired.read().clone();
@@ -402,17 +469,39 @@ pub fn control_panel_app() -> Element {
             )
             .into_element()
         });
-    let focus_card = tile().height(Size::px(row2_h)).child(tile_head(
-        Some(FOCUS),
-        "Focus",
-        Some({
-            let mut f = dnd;
-            pill_switch(*f.read(), move |v| {
-                f.set_if_modified(v);
-                apply(SettingKey::DoNotDisturb, if v { "on".to_string().into() } else { "off".to_string().into() });
-            })
-        }),
-    ));
+    let focus_card = {
+        let sched = dnd_sched.read().clone();
+        let sched_meta = format!("{}–{}", sched.start, sched.end);
+        let sched_on = sched.enabled;
+        tile().height(Size::px(row2_h)).child(tile_head(
+            Some(FOCUS),
+            "Focus",
+            Some({
+                let mut f = dnd;
+                pill_switch(*f.read(), move |v| {
+                    f.set_if_modified(v);
+                    apply(SettingKey::DoNotDisturb, if v { "on".to_string().into() } else { "off".to_string().into() });
+                })
+            }),
+        )).child(setting_row(
+            format!("Schedule · {sched_meta}"),
+            Some(if crate::state::dnd_schedule_active(&sched, &crate::state::now_hm_local()) {
+                "In quiet hours now"
+            } else {
+                "Silences banners on schedule"
+            }),
+            false,
+            {
+                let mut ds = dnd_sched;
+                pill_switch(sched_on, move |v| {
+                    let mut s = ds.read().clone();
+                    s.enabled = v;
+                    crate::state::save_dnd_schedule(&s);
+                    ds.set(s);
+                })
+            },
+        ))
+    };
     let sound_card = tile().child(tile_head(Some(SOUND), "Sound", None::<Element>)).child({
         let mut v = volume;
         slider_row(Some(SOUND), *v.read(), move |nv| {
@@ -457,7 +546,197 @@ pub fn control_panel_app() -> Element {
                     })),
             ),
     );
-    const POWER_ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/></svg>"#;
+    let airplane_on = *airplane.read();
+    let airplane_card = {
+        let mut card = tile().child(tile_head(
+            Some(AIRPLANE),
+            "Airplane",
+            Some({
+                let mut ap = airplane;
+                let mut err = last_error;
+                pill_switch(airplane_on, move |v| {
+                    let prev = *ap.read();
+                    ap.set_if_modified(v);
+                    err.set(None);
+                    let mut ap_rb = ap;
+                    let mut err_rb = err;
+                    spawn(async move {
+                        let res = tokio::task::spawn_blocking(move || {
+                            set_and_apply(crate::state::socket(), SettingKey::AirplaneMode, SettingValue::Bool(v))
+                        })
+                        .await;
+                        match res {
+                            Ok(Ok(Ok(()))) => {}
+                            Ok(Ok(Err(denial))) => {
+                                ap_rb.set(prev);
+                                err_rb.set(Some(format!("Airplane mode denied: {denial}")));
+                            }
+                            Ok(Err(e)) => {
+                                ap_rb.set(prev);
+                                err_rb.set(Some(format!("Couldn't reach settings daemon: {e}")));
+                            }
+                            Err(e) => {
+                                ap_rb.set(prev);
+                                err_rb.set(Some(format!("Couldn't apply airplane mode: {e}")));
+                            }
+                        }
+                    });
+                })
+            }),
+        ));
+        card = card.child(setting_row(
+            if airplane_on { "Radios off".to_string() } else { "Radios on".to_string() },
+            Some(if airplane_on { "Wi-Fi and Bluetooth paused" } else { "Tap to pause all radios" }),
+            false,
+            status_chip(if airplane_on { "On" } else { "Off" }, airplane_on, None::<EventHandler<()>>),
+        ));
+        card
+    };
+    let night_on = *night.read();
+    let night_card = {
+        let mut card = tile().child(tile_head(
+            Some(MOON),
+            "Night light",
+            Some({
+                let mut n = night;
+                let mut err = last_error;
+                pill_switch(night_on, move |v| {
+                    let prev = *n.read();
+                    n.set_if_modified(v);
+                    err.set(None);
+                    let mut n_rb = n;
+                    let mut err_rb = err;
+                    spawn(async move {
+                        let res = tokio::task::spawn_blocking(move || {
+                            set_and_apply(crate::state::socket(), SettingKey::DisplayNightShift, SettingValue::Bool(v))
+                        })
+                        .await;
+                        match res {
+                            Ok(Ok(Ok(()))) => {}
+                            Ok(Ok(Err(denial))) => {
+                                n_rb.set(prev);
+                                err_rb.set(Some(format!("Night light denied: {denial}")));
+                            }
+                            Ok(Err(e)) => {
+                                n_rb.set(prev);
+                                err_rb.set(Some(format!("Couldn't reach settings daemon: {e}")));
+                            }
+                            Err(e) => {
+                                n_rb.set(prev);
+                                err_rb.set(Some(format!("Couldn't apply night light: {e}")));
+                            }
+                        }
+                    });
+                })
+            }),
+        ));
+        if night_on {
+            card = card.child(tile_sub("Warmer display in the evening"));
+        } else {
+            card = card.child(tile_sub("Off"));
+        }
+        card
+    };
+    let current_profile = power_profile.read().clone();
+    let is_power_supported = *power_supported.read();
+    let power_card = {
+        let mut card = tile().child(tile_head(Some(POWER), "Power mode", None::<Element>));
+        if !is_power_supported {
+            card = card.child(tile_sub("Unavailable: powerprofilesctl not found"));
+        } else {
+            let selected = current_profile.clone();
+            card = card.child(segmented_control(
+                vec![
+                    ("Performance", "performance".to_string()),
+                    ("Balanced", "balanced".to_string()),
+                    ("Saver", "power-saver".to_string()),
+                ],
+                selected.clone(),
+                EventHandler::new({
+                    let mut pp = power_profile;
+                    let mut err = last_error;
+                    let prev = selected.clone();
+                    move |v: String| {
+                        pp.set_if_modified(v.clone());
+                        err.set(None);
+                        let mut pp_rb = pp;
+                        let mut err_rb = err;
+                        let prev_c = prev.clone();
+                        spawn(async move {
+                            let res = tokio::task::spawn_blocking(move || {
+                                set_and_apply(
+                                    crate::state::socket(),
+                                    SettingKey::PowerProfile,
+                                    SettingValue::String(v),
+                                )
+                            })
+                            .await;
+                            match res {
+                                Ok(Ok(Ok(()))) => {}
+                                Ok(Ok(Err(denial))) => {
+                                    pp_rb.set(prev_c);
+                                    err_rb.set(Some(format!("Power profile denied: {denial}")));
+                                }
+                                Ok(Err(e)) => {
+                                    pp_rb.set(prev_c);
+                                    err_rb.set(Some(format!("Couldn't reach settings daemon: {e}")));
+                                }
+                                Err(e) => {
+                                    pp_rb.set(prev_c);
+                                    err_rb.set(Some(format!("Couldn't apply power profile: {e}")));
+                                }
+                            }
+                        });
+                    }
+                }),
+            ));
+        }
+        card
+    };
+    let kbd_opt = *kbd_level.read();
+    let is_kbd_supported = *kbd_supported.read();
+    let kbd_card = {
+        let mut card = tile().child(tile_head(Some(KEYBOARD), "Keyboard light", None::<Element>));
+        if !is_kbd_supported || kbd_opt.is_none() {
+            card = card.child(tile_sub("Unavailable: no keyboard backlight found"));
+        } else {
+            let lvl = kbd_opt.unwrap_or(0) as f64;
+            card = card.child({
+                let mut kl = kbd_level;
+                let mut err = last_error;
+                slider_row(Some(KEYBOARD), lvl, move |nv| {
+                    let v = nv.round().clamp(0.0, 100.0) as u32;
+                    kl.set_if_modified(Some(v));
+                    err.set(None);
+                    let mut err_rb = err;
+                    spawn(async move {
+                        let r = tokio::task::spawn_blocking(move || system::apply_keyboard_backlight(v))
+                            .await
+                            .unwrap_or(Err("task failed".to_string()));
+                        if let Err(e) = r {
+                            err_rb.set(Some(format!("Keyboard light failed: {e}")));
+                        }
+                    });
+                })
+            });
+            card = card.child(setting_row(
+                format!("{}%", kbd_opt.unwrap_or(0)),
+                None::<String>,
+                false,
+                status_chip("On", kbd_opt.unwrap_or(0) > 0, None::<EventHandler<()>>),
+            ));
+        }
+        card
+    };
+    let bg_count = *bg_apps.read();
+    let bg_card = tile()
+        .child(tile_head(Some(APPS), "Background apps", None::<Element>))
+        .child(setting_row(
+            format!("{bg_count} running"),
+            None::<String>,
+            false,
+            status_chip(if bg_count > 0 { "Active" } else { "Idle" }, bg_count > 0, None::<EventHandler<()>>),
+        ));
     // Two-step arm/confirm for destructive power actions. First press arms,
     // second press executes. Armed state auto-reverts after a timeout.
     let arm_power = move |key: &'static str, action: &'static str| {
@@ -476,61 +755,27 @@ pub fn control_panel_app() -> Element {
         }
     };
     let armed: Option<&'static str> = *pending_power.read();
-    let mk_power_btn = |label_text: &'static str, svg: &'static str, bg: Color, fg: Color, on_press: EventHandler<()>| {
-        let txt = label_text.to_string();
-        rect()
-            .width(Size::flex(1.))
-            .height(Size::px(60.))
-            .corner_radius(14.)
-            .background(bg)
-            .border(Border::new().width(1.).fill(if bg == t.accent_red { t.accent_red } else { t.border }))
-            .center()
-            .cursor(CursorIcon::Pointer)
-            .on_press(move |_| on_press.call(()))
-            .child(
-                rect()
-                    .vertical()
-                    .center()
-                    .spacing(5.)
-                    .child(icon(svg, 18., fg))
-                    .child(label().font_size(11.).font_weight(FontWeight::SEMI_BOLD).color(fg).text(txt.clone())),
-            )
-    };
-    let lock_btn = mk_power_btn(
-        "Lock",
-        LOCK,
-        t.panel_raised,
-        t.text,
-        EventHandler::new(move |()| system::trigger_lock()),
-    );
+    let lock_btn = action_tile_flex_column(LOCK, "Lock", ActionTileTone::Default, move || system::trigger_lock());
     let logout_armed = armed == Some("logout");
-    let logout_btn = mk_power_btn(
-        if logout_armed { "Sure?" } else { "Log out" },
+    let logout_btn = action_tile_flex_column(
         ARROW_RIGHT,
-        if logout_armed { t.accent_red } else { t.panel_raised },
-        if logout_armed { Color::WHITE } else { t.text },
-        EventHandler::new(move |()| arm_power("logout", "logout")),
+        if logout_armed { "Sure?" } else { "Log out" },
+        if logout_armed { ActionTileTone::Danger } else { ActionTileTone::Default },
+        move || arm_power("logout", "logout"),
     );
     let reboot_armed = armed == Some("reboot");
-    let reboot_btn = mk_power_btn(
-        if reboot_armed { "Sure?" } else { "Restart" },
+    let reboot_btn = action_tile_flex_column(
         REFRESH_CW,
-        if reboot_armed { t.accent_red } else { t.panel_raised },
-        if reboot_armed { Color::WHITE } else { t.text },
-        EventHandler::new(move |()| arm_power("reboot", "reboot")),
+        if reboot_armed { "Sure?" } else { "Restart" },
+        if reboot_armed { ActionTileTone::Danger } else { ActionTileTone::Default },
+        move || arm_power("reboot", "reboot"),
     );
-    let shutdown_armed = armed == Some("shutdown");
-    let shutdown_btn = mk_power_btn(
-        if shutdown_armed { "Sure?" } else { "Shut down" },
-        POWER_ICON,
-        t.accent_red,
-        Color::WHITE,
-        EventHandler::new(move |()| arm_power("shutdown", "shutdown")),
-    );
+    let shutdown_btn =
+        action_tile_flex_column(POWER, "Shut down", ActionTileTone::Danger, move || arm_power("shutdown", "shutdown"));
     let actions_row = rect()
         .width(Size::fill())
         .horizontal()
-        .spacing(10.)
+        .spacing(GAP)
         .content(Content::Flex)
         .child(lock_btn)
         .child(logout_btn)
@@ -550,16 +795,15 @@ pub fn control_panel_app() -> Element {
             "shutdown" => "shutdown",
             _ => "logout",
         };
-        dialog_card(0.)
-            .width(Size::fill())
+        tile()
             .spacing(8.)
             .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title))
             .child(label().font_size(11.).color(t.text_dim).text(format!("{subtitle} Press confirm again or use the button below. Auto-cancels in a few seconds.")))
             .child(
-                rect().width(Size::fill()).horizontal().spacing(10.).content(Content::Flex).child(
-                    rect().width(Size::flex(1.)).child(secondary_button("Cancel", move || pp_cancel.set(None))),
+                rect().width(Size::fill()).horizontal().spacing(GAP).content(Content::Flex).child(
+                    rect().width(Size::flex(1.)).child(secondary_button_full("Cancel", move || pp_cancel.set(None))),
                 ).child(
-                    rect().width(Size::flex(1.)).child(danger_button("Confirm", move || {
+                    rect().width(Size::flex(1.)).child(danger_button_full("Confirm", move || {
                         let mut pp = pending_power;
                         pp.set(None);
                         power_action(action);
@@ -580,36 +824,20 @@ pub fn control_panel_app() -> Element {
                 .cross_align(Alignment::Center)
                 .spacing(8.)
                 .content(Content::Flex)
-                .child(
-                    rect()
-                        .width(Size::px(28.))
-                        .height(Size::px(28.))
-                        .corner_radius(999.)
-                        .background(t.panel_raised)
-                        .border(Border::new().width(1.).fill(t.border))
-                        .center()
-                        .cursor(CursorIcon::Pointer)
-                        .on_press(|_| {
-                            std::thread::spawn(|| {
-                                let _ = std::process::Command::new("finick-settings").spawn().or_else(|_| {
-                                    std::process::Command::new("hyprctl")
-                                        .args(["dispatch", "exec", "finick-settings"])
-                                        .spawn()
-                                });
-                            });
-                        })
-                        .child(icon(GENERAL, 14., t.text_dim)),
-                )
+                .child(tool_button(GENERAL, t.text_dim, open_in_settings))
                 .child(label().font_size(12.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text("Overlay")),
         )
         .child(small_close_button(move || dismiss.set(true)));
-    let stagger_total = if has_battery { 4 } else { 3 };
+    let stagger_total = 7;
     let stagger_last = stagger_total - 1;
     let stagger_dr = dismiss.into_readable();
+    let error_notice: Option<Element> = last_error.read().clone().map(|e| {
+        notice_pill(e, NoticeKind::Error).into_element()
+    });
     let panel_inner_content = rect()
         .width(Size::fill())
         .vertical()
-        .spacing(10.)
+        .spacing(GAP)
         .content(Content::Flex)
         .child(header)
         .child(
@@ -617,17 +845,17 @@ pub fn control_panel_app() -> Element {
             rect()
                 .width(Size::fill())
                 .horizontal()
-                .spacing(10.)
+                .spacing(GAP)
                 .content(Content::Flex)
-                .child(rect().width(Size::flex(1.)).vertical().spacing(10.).child(wifi_card).child(wired_card))
-                .child(rect().width(Size::flex(1.)).vertical().spacing(10.).child(bt_card).child(focus_card)),
+                .child(rect().width(Size::flex(1.)).vertical().spacing(GAP).child(wifi_card).child(wired_card))
+                .child(rect().width(Size::flex(1.)).vertical().spacing(GAP).child(bt_card).child(focus_card)),
         ))
         .child(
             StaggerRow::new(1, stagger_total, stagger_dr.clone()).child(
             rect()
                 .width(Size::fill())
                 .horizontal()
-                .spacing(10.)
+                .spacing(GAP)
                 .content(Content::Flex)
                 .child(rect().width(Size::flex(1.)).child(sound_card))
                 .maybe_child(
@@ -636,7 +864,29 @@ pub fn control_panel_app() -> Element {
                         .then(|| rect().width(Size::flex(1.)).child(brightness_card).into_element()),
                 ),
         ))
-        .maybe(has_battery, |el| el.child(StaggerRow::new(2, stagger_total, stagger_dr.clone()).child(battery_card)))
+        .child(
+            StaggerRow::new(2, stagger_total, stagger_dr.clone()).child(
+            rect()
+                .width(Size::fill())
+                .horizontal()
+                .spacing(GAP)
+                .content(Content::Flex)
+                .child(rect().width(Size::flex(1.)).child(airplane_card))
+                .child(rect().width(Size::flex(1.)).child(night_card)),
+        ))
+        .child(StaggerRow::new(3, stagger_total, stagger_dr.clone()).child(power_card))
+        .child(
+            StaggerRow::new(4, stagger_total, stagger_dr.clone()).child(
+            rect()
+                .width(Size::fill())
+                .horizontal()
+                .spacing(GAP)
+                .content(Content::Flex)
+                .child(rect().width(Size::flex(1.)).child(kbd_card))
+                .child(rect().width(Size::flex(1.)).child(bg_card)),
+        ))
+        .maybe(has_battery, |el| el.child(StaggerRow::new(5, stagger_total, stagger_dr.clone()).child(battery_card)))
+        .maybe_child(error_notice)
         .maybe_child(confirm_card)
         .child(StaggerRow::new(stagger_last, stagger_total, stagger_dr.clone()).child(actions_row));
     let panel_inner = rect()
@@ -647,7 +897,7 @@ pub fn control_panel_app() -> Element {
         .content(Content::Flex)
         .corner_radius(20.)
         .border(Border::new().width(1.).fill(t.border))
-        .child(ScrollView::new().width(Size::fill()).height(Size::auto()).show_scrollbar(false).child(panel_inner_content));
+        .child(ScrollView::new().width(Size::fill()).height(Size::px(640.)).show_scrollbar(true).child(panel_inner_content));
     rect()
         .width(Size::fill())
         .height(Size::fill())
@@ -656,8 +906,6 @@ pub fn control_panel_app() -> Element {
         .content(Content::Flex)
         .child(
             PanelShell::new(dismiss.into_readable())
-                .duration(300)
-                .scale_from(1.0)
                 .on_dismiss(EventHandler::new(move |()| Platform::get().close_window(wid)))
                 .child(panel_inner),
         )

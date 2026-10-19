@@ -73,7 +73,8 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkMerge [
+    (lib.mkIf cfg.enable {
     home.packages = lib.optionals (cfg.settings.enable || cfg.files.enable || cfg.overlay.enable || cfg.topbar.enable || cfg.store.enable) [ cfg.package ]
       ++ map (attr: lib.getAttrFromPath (lib.splitString "." attr) pkgs) cfg.store.extraPackages;
 
@@ -121,22 +122,32 @@ in
       Install.WantedBy = [ "graphical-session.target" ];
     };
 
+    # Hyprlang binds for hyprlang configs. On Hyprland >=0.55 Lua configs the
+    # legacy `exec` dispatcher is wrapped as `hl.dispatch(exec ...)` and fails
+    # with "attempt to perform arithmetic on a nil value (global 'exec')".
+    # The overlay heals this at startup via `hl.bind(..., hl.dsp.exec_cmd(...))`
+    # (`ensure_finick_default_bindings`), and all `hyprctl dispatch exec`
+    # call sites use the Lua-first `system::hypr_exec` helper, so the launcher
+    # works on both config providers.
     wayland.windowManager.hyprland.settings.bind = [
-      "SUPER, L, exec, ${cfg.package}/bin/locker"
+      # Session-lock client first; Freya `locker` remains the
+      # `finished`-event fallback resolved via FINICK_LOCKER_BIN/PATH.
+      "SUPER, L, exec, ${cfg.package}/bin/finick-lock"
       "SUPER, SPACE, exec, ${cfg.package}/bin/launcher"
     ];
 
+    # No window rules for the locker: ext-session-lock surfaces are not
+    # windows, so float/pin/noanim for class `locker` are obsolete. Overlay,
+    # panel, launcher and modal rules below are unaffected. (The Freya
+    # fallback locker re-floats/pins itself at runtime when it has to show.)
     wayland.windowManager.hyprland.settings.windowrulev2 = [
-      "float, class:^(locker)$"
-      "pin, class:^(locker)$"
-      "noanim, class:^(locker)$"
-      "noshadow, class:^(locker)$"
-      "noborder, class:^(locker)$"
       "float, class:^(launcher)$"
       "pin, class:^(launcher)$"
       "noanim, class:^(launcher)$"
       "noshadow, class:^(launcher)$"
+      "noblur, class:^(launcher)$"
       "noborder, class:^(launcher)$"
+      "rounding 20, class:^(launcher)$"
       "float, class:^(overlay)$"
       "pin, class:^(overlay)$"
       "noanim, class:^(overlay)$"
@@ -172,5 +183,15 @@ in
       "noshadow, class:^(overlay-notifications)$"
       "noborder, class:^(overlay-notifications)$"
     ];
-  };
+    })
+    # /etc/pam.d/finick-lock packaging. `security` only exists in the NixOS
+    # module context, not in standalone home-manager, so this branch is a
+    # no-op there (optionalAttrs is lazy in the false case). Non-NixOS:
+    # sudo install -m 644 nix/finick-lock.pam /etc/pam.d/finick-lock
+    (lib.optionalAttrs (config ? security) {
+      security.pam.services.finick-lock = lib.mkIf cfg.enable {
+        text = builtins.readFile ./finick-lock.pam;
+      };
+    })
+  ];
 }

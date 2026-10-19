@@ -110,6 +110,42 @@
           '';
         };
 
+        # Session-lock client wrapper. Runs services/session-lock when it
+        # exists in tree, falling back to the Freya `locker` sibling on
+        # exit 42 (denied/superseded/manager missing) so SUPER+L works everywhere.
+        finickLockCompat = pkgs.writeShellScriptBin "finick-lock" ''
+          set -e
+          REPO="$HOME/Documents/Projects/finick"
+          if [ ! -f "$REPO/Cargo.toml" ]; then
+            REPO="$HOME/Projects/finick"
+          fi
+          if [ ! -f "$REPO/Cargo.toml" ]; then
+            REPO="/home/flora.hill@rmhedge.com/Documents/Projects/finick"
+          fi
+          if [ ! -f "$REPO/Cargo.toml" ]; then
+            REPO="/home/519374d0-07bf-447b-8c84-f74f817bdc12/Documents/Projects/finick"
+          fi
+          if [ -f "$REPO/services/session-lock/Cargo.toml" ]; then
+            export CARGO_TARGET_DIR="''${CARGO_TARGET_DIR:-$HOME/.cache/finick/target}"
+            export CARGO_HOME="''${CARGO_HOME:-$HOME/.cargo}"
+            ORIG_DIR="$PWD"
+            cd "$REPO"
+            DEVENV_BIN="${pkgs.devenv}/bin/devenv"
+            if command -v devenv >/dev/null 2>&1; then
+              DEVENV_BIN="devenv"
+            fi
+            # Exit 42 = lock denied/superseded (or manager missing):
+            # fall through to the Freya `locker` fallback below.
+            FINICK_LOCK_CODE=0
+            "$DEVENV_BIN" --quiet shell -- bash -c 'cd "$1"; shift; exec cargo run -p session-lock --manifest-path "'"$REPO"'/Cargo.toml" -- "$@"' bash "$ORIG_DIR" "$@" || FINICK_LOCK_CODE=$?
+            if [ "$FINICK_LOCK_CODE" -ne 42 ]; then
+              exit "$FINICK_LOCK_CODE"
+            fi
+          fi
+          SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+          exec "$SELF_DIR/locker" "$@"
+        '';
+
         finick = pkgs.symlinkJoin {
           name = "finick";
           paths = (map (bin:
@@ -142,7 +178,7 @@
               fi
               exec "$DEVENV_BIN" --quiet shell -- bash -c 'cd "$1"; shift; exec cargo run ${cargoArgs} --manifest-path "'"$REPO"'/Cargo.toml" -- "$@"' bash "$ORIG_DIR" "$@"
             '')
-            [ "overlay" "topbar" "launcher" "settings" "files" "finickd" "index" "finickctl" "locker" "store" ]) ++ [ desktopEntries ];
+            [ "overlay" "topbar" "launcher" "settings" "files" "finickd" "index" "finickctl" "locker" "store" ]) ++ [ desktopEntries finickLockCompat ];
           meta.mainProgram = "overlay";
         };
       in
@@ -163,6 +199,7 @@
           index = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/index"; };
           finickctl = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/finickctl"; };
           locker = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/locker"; };
+          finick-lock = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/finick-lock"; };
           store = flake-utils.lib.mkApp { drv = finick; exePath = "/bin/store"; };
         };
 

@@ -131,11 +131,17 @@ impl Component for OverviewPage {
                                     let new_t = theme.read().with_accent(acc);
                                     theme.set(new_t);
                                     set_theme(&new_t);
-                                    store.set(SettingKey::AccentColor, acc.name.to_string());
+                                    store.set(SettingKey::AccentColor, acc.hex.to_string());
                                     let clean_hex = acc.hex.trim_start_matches('#');
-                                    let _ = std::process::Command::new("hyprctl")
-                                        .args(["keyword", "general:col.active_border", &format!("0xff{clean_hex}")])
-                                        .status();
+                                    let hypr_color = format!("0xff{clean_hex}");
+                                    let lua = format!(
+                                        "hl.config({{ general = {{ col = {{ active_border = {{ colors = {{ \"{hypr_color}\" }} }} }} }} }})"
+                                    );
+                                    let _ = HyprlandBackend::hyprctl_set_config(
+                                        &lua,
+                                        "general:col.active_border",
+                                        &hypr_color,
+                                    );
                                 }
                             })
                         }),

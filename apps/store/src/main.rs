@@ -549,6 +549,54 @@ fn refresh_installed(mut installed: State<Vec<StoreEntry>>) {
     });
 }
 
+fn refresh_firmware(mut devices: State<Vec<system::store_meta::FwDevice>>) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(system::store_meta::list_firmware());
+    });
+    spawn(async move {
+        if let Some(items) = rx.recv().await {
+            devices.set(items);
+        }
+    });
+}
+
+fn load_auto_updates_blocking() -> bool {
+    ipsea::settings::get_all_settings(ipsea::settings::SETTINGS_SOCKET_NAME)
+        .unwrap_or_default()
+        .iter()
+        .find(|e| e.key == ipsea::settings::SettingKey::SystemAutoUpdates)
+        .and_then(|e| e.value.as_bool())
+        .unwrap_or(true)
+}
+
+fn set_auto_updates_blocking(enabled: bool) -> Result<(), String> {
+    ipsea::settings::set_and_apply(
+        ipsea::settings::SETTINGS_SOCKET_NAME,
+        ipsea::settings::SettingKey::SystemAutoUpdates,
+        enabled,
+    )
+    .map_err(|e| format!("Could not reach settings daemon: {e}"))?
+    .map_err(|d| d.to_string())
+}
+
+fn refresh_screenshots(app_id: String, mut shots: State<Vec<String>>, mut shots_done: State<bool>) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(system::store_meta::screenshot_urls(&app_id));
+    });
+    spawn(async move {
+        if let Some(urls) = rx.recv().await {
+            shots.set(urls);
+            shots_done.set(true);
+        }
+    });
+}
+
+fn open_url(url: &str) -> bool {
+    std::process::Command::new("xdg-open").arg(url).spawn().is_ok()
+}
+
 fn refresh_updates(mut updates: State<Vec<system::store_flatpak::FlatpakApp>>) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     std::thread::spawn(move || {
@@ -669,6 +717,9 @@ fn select_entry(
     mut opt_fields: State<Vec<OptField>>,
     mut opt_values: State<HashMap<String, Value>>,
     mut opt_loading: State<bool>,
+    mut shots: State<Vec<String>>,
+    mut shots_done: State<bool>,
+    mut last_shot_app: State<String>,
 ) {
     selected.set(Some(entry.clone()));
     nix_detail.set(None);
@@ -677,6 +728,15 @@ fn select_entry(
     opt_fields.set(Vec::new());
     opt_values.set(HashMap::new());
     opt_loading.set(false);
+    shots.set(Vec::new());
+    shots_done.set(false);
+    if entry.source == StoreSource::Flathub {
+        last_shot_app.set(entry.id.clone());
+        refresh_screenshots(entry.id.clone(), shots, shots_done);
+    } else {
+        last_shot_app.set(String::new());
+        shots_done.set(true);
+    }
     let is_nix = entry.source == StoreSource::Nixpkgs;
     let attr = entry.id.trim_start_matches("nixpkgs#").to_string();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -915,11 +975,37 @@ fn app_header_row(entry: &StoreEntry) -> Element {
         .into_element()
 }
 
-fn store_app() -> impl IntoElement {
+impl Tab {
+    /// Map a CLI page slug to a store tab.
+    pub fn from_slug(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().replace('_', "-").as_str() {
+            "discover" | "search" | "browse" => Some(Self::Discover),
+            "installed" | "install" | "manage" => Some(Self::Installed),
+            "updates" | "update" | "upgrade" => Some(Self::Updates),
+            _ => None,
+        }
+    }
+}
+
+/// Page slugs accepted on the command line / via URI handlers.
+pub const STORE_PAGE_SLUGS: &[&str] = &["discover", "installed", "updates"];
+
+struct StoreApp {
+    initial_tab: Tab,
+    initial_query: String,
+}
+
+impl freya::prelude::App for StoreApp {
+    fn render(&self) -> impl IntoElement {
+        store_root(self.initial_tab, self.initial_query.clone())
+    }
+}
+
+fn store_root(initial_tab: Tab, initial_query: String) -> impl IntoElement {
     let _theme = use_init_app_theme(get_theme());
     let t = use_app_theme();
-    let tab = use_state(|| Tab::Discover);
-    let query = use_state(String::new);
+    let tab = use_state(move || initial_tab);
+    let query = use_state(move || initial_query.clone());
     let results = use_state(Vec::<StoreEntry>::new);
     let installed = use_state(Vec::<StoreEntry>::new);
     let updates = use_state(Vec::<system::store_flatpak::FlatpakApp>::new);
@@ -940,15 +1026,49 @@ fn store_app() -> impl IntoElement {
     let opt_edit_path = use_state(|| None::<String>);
     let opt_draft = use_state(String::new);
     let pending_remove = use_state(|| None::<StoreEntry>);
+    let category = use_state(|| "All".to_string());
+    let firmware = use_state(Vec::<system::store_meta::FwDevice>::new);
+    let auto_updates = use_state(|| true);
+    let shots = use_state(Vec::<String>::new);
+    let shots_done = use_state(|| false);
+    let last_shot_app = use_state(String::new);
 
     {
         let mut hm_imported = hm_imported;
+        let firmware = firmware;
+        let mut auto_updates = auto_updates;
         use_hook(move || {
             refresh_installed(installed);
             refresh_updates(updates);
+            refresh_firmware(firmware);
             let f = hm_file.read().clone();
             if !f.is_empty() {
                 hm_imported.set(system::store_hm::is_imported(&f));
+            }
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<bool>();
+            std::thread::spawn(move || {
+                let _ = tx.send(load_auto_updates_blocking());
+            });
+            spawn(async move {
+                if let Some(v) = rx.recv().await {
+                    auto_updates.set(v);
+                }
+            });
+        });
+    }
+
+    // Deep-link: when launched with a search query (URI `?search=` or
+    // `--search`), run it once on mount so handlers land on results.
+    {
+        let query = query;
+        let results = results;
+        let search_busy = search_busy;
+        let notice = notice;
+        let notice_detail = notice_detail;
+        use_hook(move || {
+            let q = query.read().clone();
+            if !q.trim().is_empty() {
+                run_search(q, results, search_busy, notice, notice_detail);
             }
         });
     }
@@ -1008,6 +1128,7 @@ fn store_app() -> impl IntoElement {
                     .child({
                         let mut tab = tab;
                         let mut selected = selected;
+                        let firmware = firmware;
                         let updates = updates;
                         nav_item(
                             GENERAL,
@@ -1020,8 +1141,32 @@ fn store_app() -> impl IntoElement {
                                 selected.set(None);
                                 tab.set(Tab::Updates);
                                 refresh_updates(updates);
+                                refresh_firmware(firmware);
                             },
                         )
+                    })
+                    .child(nav_group_label("Categories"))
+                    .child({
+                        let cats: Vec<String> =
+                            system::store_meta::STORE_CATEGORIES.iter().map(|s| s.to_string()).collect();
+                        rect()
+                            .width(Size::fill())
+                            .vertical()
+                            .spacing(2.)
+                            .children(cats.into_iter().map(|c| {
+                                let mut tab = tab;
+                                let mut selected = selected;
+                                let mut category = category;
+                                let label_c = c.clone();
+                                let active = *category.read() == c && tab_val == Tab::Discover;
+                                let label_n = c.clone();
+                                nav_item(APPS, label_n, active, move || {
+                                    selected.set(None);
+                                    tab.set(Tab::Discover);
+                                    category.set(label_c.clone());
+                                })
+                            }))
+                            .into_element()
                     })
                     .child(
                         ScrollView::new().width(Size::fill()).height(Size::fill()).child(
@@ -1212,10 +1357,73 @@ fn store_app() -> impl IntoElement {
                                                     }
                                                 )))
                                                 .child(tile_sub(action_timing_note(&entry.source)))
+                                                .child(setting_row(
+                                                    format!("Category · {}", system::store_meta::category_of(&entry)),
+                                                    Some("Browse matching apps from Categories"),
+                                                    false,
+                                                    status_chip(
+                                                        system::store_meta::category_of(&entry),
+                                                        false,
+                                                        None,
+                                                    ),
+                                                ))
                                                 .maybe(dirty_val, |el| {
                                                     el.child(tile_sub("Unapplied changes — Requires Apply to rebuild"))
                                                 }),
                                         )
+                                        .maybe(entry.source == StoreSource::Flathub, |el| {
+                                            let urls = shots.read().clone();
+                                            let done = *shots_done.read();
+                                            let mut card = tile().child(tile_head(
+                                                None,
+                                                "Screenshots",
+                                                Some(status_chip(
+                                                    if urls.is_empty() { "None" } else { "AppStream" },
+                                                    !urls.is_empty(),
+                                                    None,
+                                                )),
+                                            ));
+                                            if !system::store_meta::appstream_available() {
+                                                card = card.child(tile_sub(
+                                                    "Unavailable: appstreamcli not installed, cannot fetch screenshots",
+                                                ));
+                                            } else if !done {
+                                                card = card.child(tile_sub("Loading screenshots…"));
+                                            } else if urls.is_empty() {
+                                                card = card.child(tile_sub(
+                                                    "No screenshots published for this app",
+                                                ));
+                                            } else {
+                                                let mut col = rect()
+                                                    .width(Size::fill())
+                                                    .vertical()
+                                                    .spacing(8.)
+                                                    .content(Content::Flex);
+                                                for u in urls.iter().take(4) {
+                                                    let link = u.clone();
+                                                    let link_c = u.clone();
+                                                    let mut notice_open = notice_c;
+                                                    col = col.child(setting_row(
+                                                        link_c
+                                                            .chars()
+                                                            .take(52)
+                                                            .collect::<String>(),
+                                                        Some("AppStream screenshot"),
+                                                        false,
+                                                        secondary_button("Open", move || {
+                                                            if !open_url(&link) {
+                                                                notice_open.set(
+                                                                    "Could not open browser".to_string(),
+                                                                );
+                                                            }
+                                                        }),
+                                                    ));
+                                                    let _ = link;
+                                                }
+                                                card = card.child(col);
+                                            }
+                                            el.child(card)
+                                        })
                                         .maybe_child(nix_meta.map(|m| {
                                             tile()
                                                 .child(tile_head(None, "Package info", None::<String>))
@@ -1396,7 +1604,33 @@ fn store_app() -> impl IntoElement {
                                                 )
                                             })
                                             .child({
+                                                let cat = category.read().clone();
+                                                let items_cats: Vec<(String, String)> = system::store_meta::STORE_CATEGORIES
+                                                    .iter()
+                                                    .map(|c| (c.to_string(), c.to_string()))
+                                                    .collect();
+                                                let mut category = category;
+                                                let cur = cat.clone();
+                                                tile().child(setting_row(
+                                                    format!("Category · {cat}"),
+                                                    Some("Filter Discover results"),
+                                                    false,
+                                                    segmented_control_dynamic(items_cats, cur, move |v: String| {
+                                                        category.set(v);
+                                                    }),
+                                                ))
+                                            })
+                                            .child({
+                                                let cat = category.read().clone();
                                                 let items = results.read().clone();
+                                                let items: Vec<StoreEntry> = if cat == "All" {
+                                                    items
+                                                } else {
+                                                    items
+                                                        .into_iter()
+                                                        .filter(|e| system::store_meta::category_of(e) == cat.as_str())
+                                                        .collect()
+                                                };
                                                 if items.is_empty() {
                                                     empty_state(
                                                         APPS,
@@ -1437,40 +1671,55 @@ fn store_app() -> impl IntoElement {
                                                                                 },
                                                                             ),
                                                                         ))
-                                                                        .child(
-                                                                            rect()
-                                                                                .horizontal()
-                                                                                .spacing(8.)
-                                                                                .cross_align(Alignment::Center)
-                                                                                .content(Content::Flex)
-                                                                                .child({
-                                                                                    secondary_button("Details", move || {
-                                                                                        select_entry(
-                                                                                            entry_d.clone(),
-                                                                                            selected,
-                                                                                            nix_detail,
-                                                                                            perms,
-                                                                                            opt_module,
-                                                                                            opt_fields,
-                                                                                            opt_values,
-                                                                                            opt_loading,
-                                                                                        );
-                                                                                    })
-                                                                                })
-                                                                                .child(primary_button(
-                                                                                    label_text,
-                                                                                    move || {
-                                                                                        do_install(
-                                                                                            entry_c.clone(),
-                                                                                            notice_c,
-                                                                                            notice_detail_c,
-                                                                                            job_busy_c,
-                                                                                            dirty_c,
-                                                                                            installed_c,
-                                                                                        );
-                                                                                    },
-                                                                                )),
-                                                                        ),
+                                                                        .child(status_chip(
+                                                                            system::store_meta::category_of(&entry),
+                                                                            false,
+                                                                            None,
+                                                                        )),
+                                                                )
+                                                                .child(
+                                                                    rect()
+                                                                        .width(Size::fill())
+                                                                        .horizontal()
+                                                                        .main_align(Alignment::End)
+                                                                        .content(Content::Flex)
+                                                                        .cross_align(Alignment::Center)
+                                                                        .spacing(8.)
+                                                                        .child({
+                                                                            let selected = selected;
+                                                                            let nix_detail = nix_detail;
+                                                                            let perms = perms;
+                                                                            let opt_module = opt_module;
+                                                                            let opt_fields = opt_fields;
+                                                                            let opt_values = opt_values;
+                                                                            let shots = shots;
+                                                                            let last_shot_app = last_shot_app;
+                                                                            secondary_button("Details", move || {
+                                                                                select_entry(
+                                                                                    entry_d.clone(),
+                                                                                    selected,
+                                                                                    nix_detail,
+                                                                                    perms,
+                                                                                    opt_module,
+                                                                                    opt_fields,
+                                                                                    opt_values,
+                                                                                    opt_loading,
+                                                                                    shots,
+                                                                                    shots_done,
+                                                                                    last_shot_app,
+                                                                                );
+                                                                            })
+                                                                        })
+                                                                        .child(primary_button(label_text, move || {
+                                                                            do_install(
+                                                                                entry_c.clone(),
+                                                                                notice_c,
+                                                                                notice_detail_c,
+                                                                                job_busy_c,
+                                                                                dirty_c,
+                                                                                installed_c,
+                                                                            );
+                                                                        })),
                                                                 )
                                                                 .into_element()
                                                         }))
@@ -1534,6 +1783,14 @@ fn store_app() -> impl IntoElement {
                                                                                     .cross_align(Alignment::Center)
                                                                                     .content(Content::Flex)
                                                                                     .child({
+                                                                                        let selected = selected;
+                                                                                        let nix_detail = nix_detail;
+                                                                                        let perms = perms;
+                                                                                        let opt_module = opt_module;
+                                                                                        let opt_fields = opt_fields;
+                                                                                        let opt_values = opt_values;
+                                                                                        let shots = shots;
+                                                                                        let last_shot_app = last_shot_app;
                                                                                         secondary_button(
                                                                                             "Details",
                                                                                             move || {
@@ -1546,6 +1803,9 @@ fn store_app() -> impl IntoElement {
                                                                                                     opt_fields,
                                                                                                     opt_values,
                                                                                                     opt_loading,
+                                                                                                    shots,
+                                                                                                    shots_done,
+                                                                                                    last_shot_app,
                                                                                                 );
                                                                                             },
                                                                                         )
@@ -1578,11 +1838,47 @@ fn store_app() -> impl IntoElement {
                                         }
                                         Tab::Updates => {
                                             let items = updates.read().clone();
+                                            let fw_devices = firmware.read().clone();
+                                            let fw_count = fw_devices.iter().filter(|d| d.has_update).count();
+                                            let auto_on = *auto_updates.read();
                                             rect()
                                                 .width(Size::fill())
                                                 .vertical()
                                                 .spacing(GAP)
                                                 .child(page_head(GENERAL, "Updates", "Keep sandboxed apps current"))
+                                                .child(tile().child(setting_row(
+                                                    "Automatic updates".to_string(),
+                                                    Some("Finick daemon setting"),
+                                                    false,
+                                                    {
+                                                        let mut auto_updates = auto_updates;
+                                                        let mut notice = notice;
+                                                        pill_switch(auto_on, move |v| {
+                                                            auto_updates.set(v);
+                                                            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<
+                                                                Result<(), String>,
+                                                            >(
+                                                            );
+                                                            std::thread::spawn(move || {
+                                                                let _ = tx.send(set_auto_updates_blocking(v));
+                                                            });
+                                                            spawn(async move {
+                                                                if let Some(r) = rx.recv().await {
+                                                                    if let Err(e) = r {
+                                                                        notice.set(e);
+                                                                        auto_updates.set(!v);
+                                                                    } else {
+                                                                        notice.set(if v {
+                                                                            "Automatic updates on".to_string()
+                                                                        } else {
+                                                                            "Automatic updates off".to_string()
+                                                                        });
+                                                                    }
+                                                                }
+                                                            });
+                                                        })
+                                                    },
+                                                )))
                                                 .child(tile().child(setting_row(
                                                     format!("{updates_count} Flatpak updates"),
                                                     Some("Applies to user remotes only"),
@@ -1653,6 +1949,82 @@ fn store_app() -> impl IntoElement {
                                                             .into_element()
                                                     }
                                                 })
+                                                .child({
+                                                    if !system::store_meta::fwupd_present() {
+                                                        tile()
+                                                            .child(tile_head(None, "Firmware", None::<String>))
+                                                            .child(tile_sub(
+                                                                "Unavailable: fwupdmgr not installed, no firmware offered",
+                                                            ))
+                                                            .into_element()
+                                                    } else if fw_devices.is_empty() {
+                                                        tile()
+                                                            .child(tile_head(None, "Firmware", None::<String>))
+                                                            .child(tile_sub("No firmware devices found"))
+                                                            .into_element()
+                                                    } else {
+                                                        let mut fw_card = tile().child(tile_head(
+                                                            None,
+                                                            format!(
+                                                                "Firmware{}",
+                                                                if fw_count > 0 {
+                                                                    format!(" · {fw_count} updates")
+                                                                } else {
+                                                                    String::new()
+                                                                }
+                                                            ),
+                                                            None::<String>,
+                                                        ));
+                                                        for d in fw_devices.iter().take(8) {
+                                                            let guid = d.guid.clone();
+                                                            let name = d.name.clone();
+                                                            let mut notice_fw = notice;
+                                                            fw_card = fw_card.child(setting_row(
+                                                                name.clone(),
+                                                                Some(format!(
+                                                                    "{} → {}{}",
+                                                                    if d.current.is_empty() {
+                                                                        "?"
+                                                                    } else {
+                                                                        d.current.as_str()
+                                                                    },
+                                                                    if d.latest.is_empty() { "?" } else { d.latest.as_str() },
+                                                                    if d.has_update { " · update available" } else { "" },
+                                                                )),
+                                                                false,
+                                                                if d.has_update {
+                                                                    secondary_button("Update", move || {
+                                                                        let g = guid.clone();
+                                                                        let n = name.clone();
+                                                                        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<
+                                                                            Result<String, String>,
+                                                                        >(
+                                                                        );
+                                                                        std::thread::spawn(move || {
+                                                                            let _ = tx.send(
+                                                                                system::store_meta::update_firmware(&g),
+                                                                            );
+                                                                        });
+                                                                        spawn(async move {
+                                                                            if let Some(r) = rx.recv().await {
+                                                                                match r {
+                                                                                    Ok(_) => notice_fw.set(format!(
+                                                                                        "Firmware updated: {n}"
+                                                                                    )),
+                                                                                    Err(e) => notice_fw.set(clean_result(&e)),
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                    })
+                                                                    .into_element()
+                                                                } else {
+                                                                    status_chip("Current", false, None).into_element()
+                                                                },
+                                                            ));
+                                                        }
+                                                        fw_card.into_element()
+                                                    }
+                                                })
                                                 .into_element()
                                         }
                                     }
@@ -1704,9 +2076,26 @@ fn store_app() -> impl IntoElement {
 }
 
 pub fn main() {
+    let args = config::LaunchArgs::parse();
+    if args.wants_help() {
+        args.print_help("store", STORE_PAGE_SLUGS);
+        return;
+    }
+    let initial_tab =
+        args.page.as_deref().and_then(Tab::from_slug).unwrap_or(Tab::Discover);
+    if args.page.is_some() && args.page.as_deref().and_then(Tab::from_slug).is_none() {
+        eprintln!("[store] unknown page {:?}, opening Discover", args.page);
+    }
+    // `--search foo`, `?search=foo`, or a trailing positional query.
+    let initial_query = args.extra.clone().filter(|q| q != "__help__").unwrap_or_default();
+    args.maybe_arm_screenshot("store");
+
     let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
     let _guard = _rt.as_ref().map(|rt| rt.enter());
     launch(LaunchConfig::new().with_window(
-        WindowConfig::new(store_app).with_title("Finick Apps").with_size(1080., 740.).with_min_size(640., 480.),
+        WindowConfig::new_app(StoreApp { initial_tab, initial_query })
+            .with_title("Finick Apps")
+            .with_size(1080., 740.)
+            .with_min_size(640., 480.),
     ))
 }

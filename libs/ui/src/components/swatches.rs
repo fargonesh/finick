@@ -1,5 +1,6 @@
 use freya::prelude::*;
 use crate::theme::{use_app_theme, Accent, ACCENTS, RADIUS_PILL};
+use crate::components::color_picker::accent_add_circle;
 
 pub fn hex_to_color(hex: &str) -> Option<Color> {
     let h = hex.trim().trim_start_matches('#');
@@ -83,19 +84,37 @@ pub fn extract_wallpaper_colors(wp_path: &str) -> Vec<Accent> {
             }
         }
     }
-    // Fallback: extract distinct tones from image bytes
-    if let Ok(bytes) = std::fs::read(clean)
-        && bytes.len() > 1024 {
+    // Fallback: sample distinct tones from image bytes when pywal has no cache.
+    // Skips near-grays so derived accents stay colourful, dedupes near-duplicates.
+    if let Ok(bytes) = std::fs::read(clean) {
+        if bytes.len() > 4096 {
             let mut list = Vec::new();
-            let step = bytes.len() / 5;
-            for i in 1..4 {
-                let pos = i * step;
+            let mut seen: Vec<(u8, u8, u8)> = Vec::new();
+            let step = bytes.len() / 16;
+            let mut i = 1usize;
+            while list.len() < 4 && i < 15 {
+                let pos = (i * step).min(bytes.len().saturating_sub(3));
                 let r = bytes[pos].clamp(70, 210);
                 let g = bytes[pos + 1].clamp(70, 210);
                 let b = bytes[pos + 2].clamp(70, 210);
+                i += 1;
+                let mx = r.max(g).max(b);
+                let mn = r.min(g).min(b);
+                if mx - mn < 24 {
+                    continue;
+                }
+                if seen.iter().any(|(sr, sg, sb)| {
+                    (*sr as i16 - r as i16).abs() < 24
+                        && (*sg as i16 - g as i16).abs() < 24
+                        && (*sb as i16 - b as i16).abs() < 24
+                }) {
+                    continue;
+                }
+                seen.push((r, g, b));
                 let hex = format!("#{r:02X}{g:02X}{b:02X}");
+                let n = list.len() + 1;
                 list.push(Accent {
-                    name: Box::leak(format!("Wallpaper {i}").into_boxed_str()),
+                    name: Box::leak(format!("Wallpaper {n}").into_boxed_str()),
                     hex: Box::leak(hex.into_boxed_str()),
                     color: Color::from_rgb(r, g, b),
                 });
@@ -130,8 +149,6 @@ pub fn swatch_picker_merged(
         }
     }
 
-    let on_select_plus = on_select.clone();
-
     rect()
         .horizontal()
         .cross_align(Alignment::Center)
@@ -152,32 +169,7 @@ pub fn swatch_picker_merged(
                 .a11y_focusable(true)
                 .on_press(move |_| on_select.call(acc))
         }))
-        .child({
-            // '+' button at the end to initiate custom colour picker
-            rect()
-                .width(Size::px(size))
-                .height(Size::px(size))
-                .corner_radius(RADIUS_PILL)
-                .background(t.panel_raised)
-                .border(Border::new().width(1.).fill(t.border))
-                .margin((0., 9., 0., 0.))
-                .cursor(CursorIcon::Pointer)
-                .center()
-                .on_press(move |_| {
-                    let custom_palette = ["#FF6B6B", "#4ECDC4", "#FFE66D", "#A8E6CF", "#DED2F9", "#FF8B94", "#70A1FF"];
-                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-                    let hex = custom_palette[(now as usize) % custom_palette.len()];
-                    if let Some(c) = hex_to_color(hex) {
-                        let acc = Accent {
-                            name: Box::leak(format!("Custom {hex}").into_boxed_str()),
-                            hex: Box::leak(hex.to_string().into_boxed_str()),
-                            color: c,
-                        };
-                        on_select_plus.call(acc);
-                    }
-                })
-                .child(label().font_size(13.).font_weight(FontWeight::BOLD).color(t.text).text("+"))
-        })
+        .child(accent_add_circle(size))
 }
 
 pub fn accent_picker_with_material(

@@ -41,17 +41,58 @@ impl Component for SwitchThumb {
     }
 }
 
+#[derive(Clone, PartialEq)]
+struct PillSwitchInner {
+    checked: bool,
+    on_toggle: EventHandler<bool>,
+}
+
+impl Component for PillSwitchInner {
+    fn render(&self) -> impl IntoElement {
+        let t = use_app_theme();
+        let hovered = use_state(|| false);
+        let a11y_id = use_a11y();
+        let focus = use_focus(a11y_id);
+        let is_hovered = *hovered.read();
+        let is_kb = focus() == Focus::Keyboard;
+        let mut h1 = hovered;
+        let mut h2 = hovered;
+        let on_toggle = self.on_toggle.clone();
+        let checked = self.checked;
+
+        let track_bg = if checked {
+            if is_hovered { t.accent_blue_hover } else { t.accent }
+        } else if is_hovered {
+            t.border
+        } else {
+            t.track
+        };
+
+        rect()
+            .width(Size::px(36.))
+            .height(Size::px(21.))
+            .corner_radius(RADIUS_PILL)
+            .background(track_bg)
+            .border(
+                Border::new()
+                    .width(if is_kb { 2. } else { 0. })
+                    .fill(t.accent),
+            )
+            .cursor(CursorIcon::Pointer)
+            .a11y_id(a11y_id)
+            .a11y_focusable(true)
+            .a11y_role(AccessibilityRole::Switch)
+            .on_pointer_enter(move |_| h1.set(true))
+            .on_pointer_leave(move |_| h2.set(false))
+            .on_press(move |_| on_toggle.call(!checked))
+            .child(SwitchThumb { checked })
+    }
+}
+
 /// A custom switch toggle matching .switch in ui_demo.html
 pub fn pill_switch(checked: bool, mut on_toggle: impl FnMut(bool) + 'static) -> impl IntoElement {
-    let t = use_app_theme();
-    let track_bg = if checked { t.accent } else { t.track };
-
-    rect()
-        .width(Size::px(36.))
-        .height(Size::px(21.))
-        .corner_radius(RADIUS_PILL)
-        .background(track_bg)
-        .cursor(CursorIcon::Pointer)
-        .on_press(move |_| on_toggle(!checked))
-        .child(SwitchThumb { checked })
+    PillSwitchInner {
+        checked,
+        on_toggle: EventHandler::new(move |v: bool| on_toggle(v)),
+    }
 }

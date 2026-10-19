@@ -2,6 +2,7 @@
 
 use {
     freya::prelude::*,
+    ipsea::settings::SettingKey,
     system::{HyprlandBackend, SystemBackend},
     ui::*,
 };
@@ -9,6 +10,7 @@ use {
 mod detail_pages;
 mod overview;
 mod pages;
+mod screentime;
 mod state;
 
 use {detail_pages::*, overview::overview_page, state::*};
@@ -27,6 +29,7 @@ pub enum Route {
     General,
     Storage,
     Battery,
+    Mouse,
     Accessibility,
     About,
     Desktop,
@@ -38,6 +41,14 @@ pub enum Route {
     Accounts,
     Shortcuts,
     DefaultApps,
+    OnlineAccounts,
+    Sharing,
+    Search,
+    Apps,
+    Keyboard,
+    Multitasking,
+    System,
+    Peripherals,
 }
 
 #[derive(Clone, Copy)]
@@ -145,6 +156,13 @@ pub const ALL_NAV_ROUTES: &[RouteInfo] = &[
         keywords: "battery power charge low power balanced high performance",
     },
     RouteInfo {
+        route: Route::Mouse,
+        title: "Mouse & Touchpad",
+        icon_svg: MOUSE,
+        group: Some("System"),
+        keywords: "mouse touchpad pointer speed accel natural scroll tap click trackpad sensitivity",
+    },
+    RouteInfo {
         route: Route::Accessibility,
         title: "Accessibility",
         icon_svg: ACCESSIBILITY,
@@ -189,10 +207,66 @@ pub const ALL_NAV_ROUTES: &[RouteInfo] = &[
     // Bottom
     RouteInfo {
         route: Route::Shortcuts,
-        title: "Keyboard",
+        title: "Shortcuts",
         icon_svg: KEYBOARD,
         group: Some("System"),
         keywords: "keyboard shortcuts keybindings hotkeys hyprland",
+    },
+    RouteInfo {
+        route: Route::Keyboard,
+        title: "Keyboard",
+        icon_svg: KEYBOARD,
+        group: Some("System"),
+        keywords: "keyboard layouts input sources typing repeat rate compose",
+    },
+    RouteInfo {
+        route: Route::OnlineAccounts,
+        title: "Online Accounts",
+        icon_svg: GLOBE,
+        group: Some("System"),
+        keywords: "online accounts goa google nextcloud exchange",
+    },
+    RouteInfo {
+        route: Route::Sharing,
+        title: "Sharing",
+        icon_svg: WIRED,
+        group: Some("System"),
+        keywords: "sharing rdp vnc ssh media screen share remote",
+    },
+    RouteInfo {
+        route: Route::Search,
+        title: "Search",
+        icon_svg: SEARCH,
+        group: Some("System"),
+        keywords: "search providers index locations launcher files",
+    },
+    RouteInfo {
+        route: Route::Apps,
+        title: "Apps",
+        icon_svg: APPS,
+        group: Some("System"),
+        keywords: "apps permissions flatpak defaults handlers",
+    },
+    RouteInfo {
+        route: Route::Multitasking,
+        title: "Multitasking",
+        icon_svg: LAYOUT_GRID,
+        group: Some("System"),
+        keywords: "multitasking hot corner workspaces edge tiling snap",
+    },
+    RouteInfo {
+        route: Route::System,
+        title: "System",
+        icon_svg: GENERAL,
+        group: Some("System"),
+        keywords: "system users updates region timezone remote desktop",
+    },
+    RouteInfo {
+        route: Route::Peripherals,
+        title: "Color & Tablets",
+        icon_svg: MOUSE,
+        group: Some("System"),
+        keywords: "color tablet wacom removable media autorun profiles",
     },
     RouteInfo {
         route: Route::DefaultApps,
@@ -210,26 +284,133 @@ pub const ALL_NAV_ROUTES: &[RouteInfo] = &[
     },
 ];
 
+impl Route {
+    /// Map a CLI page slug / URI tail to a settings route.
+    /// Accepts `wifi`, `wi-fi`, `bluetooth`, `appearance`, ... and falls back
+    /// to `None` so callers can default to `Overview`.
+    pub fn from_slug(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().replace('_', "-").as_str() {
+            "overview" | "home" | "" => Some(Self::Overview),
+            "wifi" | "wi-fi" | "network" | "wireless" => Some(Self::Wifi),
+            "bluetooth" | "bt" => Some(Self::Bluetooth),
+            "appearance" | "theme" | "wallpaper" => Some(Self::Appearance),
+            "display" | "displays" | "screen" | "monitor" => Some(Self::Display),
+            "sound" | "audio" | "volume" => Some(Self::Sound),
+            "focus" | "dnd" | "do-not-disturb" => Some(Self::Focus),
+            "notifications" | "notification" => Some(Self::Notifications),
+            "screen-time" | "screentime" => Some(Self::ScreenTime),
+            "general" => Some(Self::General),
+            "storage" | "disk" => Some(Self::Storage),
+            "battery" | "power" => Some(Self::Battery),
+            "mouse" | "touchpad" | "mouse-touchpad" | "trackpad" => Some(Self::Mouse),
+            "accessibility" | "a11y" => Some(Self::Accessibility),
+            "about" | "info" | "specs" => Some(Self::About),
+            "desktop" | "dock" | "workspaces" => Some(Self::Desktop),
+            "datetime" | "date-time" | "time" | "clock" | "timezone" => Some(Self::DateTime),
+            "privacy" | "privacy-security" | "security" | "firewall" => Some(Self::Privacy),
+            "language" | "language-region" | "locale" | "region" => Some(Self::Language),
+            "printers" | "printers-scanners" | "scanners" | "printing" => Some(Self::Printers),
+            "accounts" | "users" | "account" | "user" => Some(Self::Accounts),
+            "shortcuts" | "keyboard-shortcuts" | "keybindings" | "hotkeys" => Some(Self::Shortcuts),
+            "keyboard" | "keyboard-typing" | "input-sources" | "typing" | "layouts" => Some(Self::Keyboard),
+            "online-accounts" | "onlineaccounts" | "accounts-online" => Some(Self::OnlineAccounts),
+            "sharing" | "share" | "rdp" | "vnc" | "ssh-sharing" => Some(Self::Sharing),
+            "search" | "search-providers" | "index" => Some(Self::Search),
+            "apps" | "applications" | "permissions" => Some(Self::Apps),
+            "multitasking" | "hot-corner" | "tiling" => Some(Self::Multitasking),
+            "system" | "system-updates" => Some(Self::System),
+            "peripherals" | "color-tablets" | "tablets" | "color" | "removable-media" => Some(Self::Peripherals),
+            "default-apps" | "defaultapps" | "defaults" | "mime" => Some(Self::DefaultApps),
+            _ => None,
+        }
+    }
+}
+
+/// Page slugs accepted on the command line / via URI handlers.
+pub const SETTINGS_PAGE_SLUGS: &[&str] = &[
+    "overview",
+    "wifi",
+    "bluetooth",
+    "appearance",
+    "display",
+    "sound",
+    "focus",
+    "notifications",
+    "screen-time",
+    "desktop",
+    "general",
+    "storage",
+    "battery",
+    "mouse",
+    "accessibility",
+    "datetime",
+    "privacy",
+    "language",
+    "printers",
+    "accounts",
+    "shortcuts",
+    "keyboard",
+    "online-accounts",
+    "sharing",
+    "search",
+    "apps",
+    "multitasking",
+    "system",
+    "peripherals",
+    "default-apps",
+    "about",
+];
+
+struct SettingsApp {
+    initial_route: Route,
+}
+
+impl freya::prelude::App for SettingsApp {
+    fn render(&self) -> impl IntoElement {
+        settings_root(self.initial_route)
+    }
+}
+
 pub fn main() {
+    let args = config::LaunchArgs::parse();
+    if args.wants_help() {
+        args.print_help("settings", SETTINGS_PAGE_SLUGS);
+        return;
+    }
+    let initial_route = args
+        .page
+        .as_deref()
+        .and_then(Route::from_slug)
+        .unwrap_or(Route::Overview);
+    if args.page.is_some() && args.page.as_deref().and_then(Route::from_slug).is_none() {
+        eprintln!("[settings] unknown page {:?}, opening Overview", args.page);
+    }
+    args.maybe_arm_screenshot("settings");
+
     let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
     let _guard = _rt.as_ref().map(|rt| rt.enter());
 
     launch(
         LaunchConfig::new()
-            .with_window(WindowConfig::new(app).with_title("Settings").with_size(1080., 740.).with_min_size(640., 480.))
+            .with_window(
+                WindowConfig::new_app(SettingsApp { initial_route })
+                    .with_title("Settings")
+                    .with_size(1080., 740.)
+                    .with_min_size(640., 480.),
+            )
             .with_plugin(freya_devtools::DevtoolsPlugin::default())
             .with_plugin(freya_performance_plugin::PerformanceOverlayPlugin::default()),
     )
 }
 
-fn app() -> impl IntoElement {
+fn settings_root(initial_route: Route) -> impl IntoElement {
     let initial_theme = get_theme();
     let theme_state = use_init_app_theme(initial_theme);
     let t = use_app_theme();
     let wired_info = use_state(|| HyprlandBackend.get_wired_info());
     let displays = use_state(|| HyprlandBackend.get_displays());
-    let about_info = use_state(crate::pages::about::fetch_about_info);
-    let current_route = use_state(|| Route::Overview);
+    let about_info = use_state(|| crate::pages::about::fetch_about_info());
+    let current_route = use_state(move || initial_route);
     let search_query = use_state(String::new);
     let focused_nav_idx = use_state(|| 0usize);
 
@@ -238,6 +419,9 @@ fn app() -> impl IntoElement {
 
     // Centralized SettingsStore initialized and connected to daemon via IPC
     let store = use_init_settings_store();
+
+    // Window-wide custom colour picker (accent + background), opened from swatch rows.
+    let picker_req = use_init_color_picker();
 
     // Local schedule preferences
     let work_sched = use_state(|| true);
@@ -271,7 +455,56 @@ fn app() -> impl IntoElement {
     let active_focus_idx =
         if visible_routes.is_empty() { 0 } else { (*focused_nav_idx.read()).min(visible_routes.len() - 1) };
 
-    responsive_view(780.0, move |compact| {
+    let picker_req_key = picker_req;
+    let mut picker_apply_theme = theme_state;
+    let picker_apply_store = store;
+    let picker_modal = ColorPickerModal {
+        on_apply: (move |(target, hex): (ColorPickerTarget, String)| {
+            match target {
+                ColorPickerTarget::Accent => {
+                    if picker_apply_store.is_locked(&SettingKey::AccentColor) {
+                        return;
+                    }
+                    if let Some(c) = hex_to_color(&hex) {
+                        let acc = Accent {
+                            name: Box::leak(format!("Custom {hex}").into_boxed_str()),
+                            hex: Box::leak(hex.clone().into_boxed_str()),
+                            color: c,
+                        };
+                        let new_t = picker_apply_theme.read().with_accent(acc);
+                        picker_apply_theme.set(new_t);
+                        set_theme(&new_t);
+                        picker_apply_store.set(SettingKey::AccentColor, hex.clone());
+                        let clean_hex = hex.trim_start_matches('#');
+                        let hypr_color = format!("0xff{clean_hex}");
+                        let lua = format!(
+                            "hl.config({{ general = {{ col = {{ active_border = {{ colors = {{ \"{hypr_color}\" }} }} }} }} }})"
+                        );
+                        let _ = HyprlandBackend::hyprctl_set_config(
+                            &lua,
+                            "general:col.active_border",
+                            &hypr_color,
+                        );
+                    }
+                    let mut r = picker_req_key;
+                    r.set(None);
+                }
+                ColorPickerTarget::Wallpaper => {
+                    if !picker_apply_store.is_locked(&SettingKey::Wallpaper) {
+                        picker_apply_store.set(SettingKey::Wallpaper, hex);
+                    }
+                    let mut r = picker_req_key;
+                    r.set(None);
+                }
+            }
+        })
+        .into(),
+    };
+
+    rect()
+        .width(Size::fill())
+        .height(Size::fill())
+        .child(responsive_view(780.0, move |compact| {
         let sidebar_w = if compact { 180. } else { 232. };
         let content_pad = if compact { (18., 16., 32., 16.) } else { (30., 34., 64., 34.) };
         let top_pad = if compact { (0., 14.) } else { (0., 24.) };
@@ -287,6 +520,7 @@ fn app() -> impl IntoElement {
                 let mut current_route = current_route;
                 let mut search_query = search_query;
                 let mut focused_nav_idx = focused_nav_idx;
+                let mut picker_req = picker_req;
                 let search_focus = search_focus;
                 let search_a11y_id = search_a11y_id;
                 // Keyboard order follows visual sidebar order (About last).
@@ -302,6 +536,10 @@ fn app() -> impl IntoElement {
                             search_a11y_id.request_focus();
                         }
                         Key::Named(NamedKey::Escape) => {
+                            if picker_req.read().is_some() {
+                                picker_req.set(None);
+                                return;
+                            }
                             search_a11y_id.request_unfocus();
                             if !search_query.read().is_empty() {
                                 search_query.set(String::new());
@@ -514,12 +752,21 @@ fn app() -> impl IntoElement {
                                     Route::General => general_detail_page(store).into_element(),
                                     Route::Storage => pages::Storage.into_element(),
                                     Route::Battery => battery_detail_page(store).into_element(),
+                                    Route::Mouse => pages::Mouse.into_element(),
                                     Route::Accessibility => accessibility_detail_page(store).into_element(),
                                     Route::About => pages::About.into_element(),
                                     Route::DateTime => pages::DateTime.into_element(),
                                     Route::Privacy => pages::Privacy.into_element(),
                                     Route::Language => pages::Language.into_element(),
                                     Route::Shortcuts => pages::Shortcuts.into_element(),
+                                    Route::Keyboard => pages::Keyboard { store }.into_element(),
+                                    Route::OnlineAccounts => pages::OnlineAccounts.into_element(),
+                                    Route::Sharing => pages::Sharing { store }.into_element(),
+                                    Route::Search => pages::Search { store }.into_element(),
+                                    Route::Apps => pages::Apps.into_element(),
+                                    Route::Multitasking => pages::Multitasking { store }.into_element(),
+                                    Route::System => pages::System { store }.into_element(),
+                                    Route::Peripherals => pages::Peripherals { store }.into_element(),
                                     Route::DefaultApps => pages::DefaultApps.into_element(),
                                     Route::Printers => pages::Printers.into_element(),
                                     Route::Accounts => {
@@ -604,4 +851,6 @@ fn app() -> impl IntoElement {
                     )),
             )
     })
+    )
+    .child(picker_modal)
 }

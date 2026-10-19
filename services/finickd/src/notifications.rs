@@ -68,7 +68,16 @@ impl NotificationServer {
             timeout: expire_timeout,
         };
 
-        self.broadcaster.broadcast(NotificationEvent::Show(notif));
+        self.broadcaster.broadcast(NotificationEvent::Show(notif.clone()));
+        let broadcaster = self.broadcaster.clone();
+        tokio::spawn(async move {
+            if let Some(delay) = expiry_delay_ms(notif.timeout) {
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                if broadcaster.get_active().into_iter().any(|n| n == notif) {
+                    broadcaster.broadcast(NotificationEvent::Close(notif.id));
+                }
+            }
+        });
         id
     }
 
@@ -118,6 +127,21 @@ impl NotificationServer {
         id: u32,
         action_key: &str,
     ) -> zbus::Result<()>;
+}
+
+/// Delay after which the daemon auto-closes a notification, or None when it
+/// never expires. Mirrors the toast default (5s) plus a grace period so the
+/// client-side exit animation finishes before the Close event lands.
+pub fn expiry_delay_ms(expire_timeout: i32) -> Option<u64> {
+    const DEFAULT_MS: u64 = 5000;
+    const GRACE_MS: u64 = 750;
+    if expire_timeout > 0 {
+        Some(expire_timeout as u64 + GRACE_MS)
+    } else if expire_timeout == 0 {
+        None
+    } else {
+        Some(DEFAULT_MS + GRACE_MS)
+    }
 }
 
 /// Helper function to emit the `NotificationClosed` signal from an active connection.
@@ -244,5 +268,12 @@ mod tests {
         let caps = server.get_capabilities().await;
         assert!(caps.contains(&"body".to_string()));
         assert!(caps.contains(&"actions".to_string()));
+    }
+
+    #[test]
+    fn test_expiry_delay_ms() {
+        assert_eq!(super::expiry_delay_ms(4000), Some(4750));
+        assert_eq!(super::expiry_delay_ms(-1), Some(5750));
+        assert_eq!(super::expiry_delay_ms(0), None);
     }
 }

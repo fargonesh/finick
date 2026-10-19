@@ -155,9 +155,12 @@ pub fn ensure_writable_mimeapps_list() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn read_default_from_mimeapps(mime: &str) -> Option<String> {
+fn read_mimeapps_defaults() -> HashMap<String, String> {
+    let mut map = HashMap::new();
     let path = get_mimeapps_list_path();
-    let content = fs::read_to_string(path).ok()?;
+    let Ok(content) = fs::read_to_string(path) else {
+        return map;
+    };
     let mut in_defaults = false;
 
     for line in content.lines() {
@@ -166,22 +169,20 @@ fn read_default_from_mimeapps(mime: &str) -> Option<String> {
             in_defaults = trimmed == "[Default Applications]";
             continue;
         }
-        if in_defaults && !trimmed.starts_with('#')
-            && let Some((k, v)) = trimmed.split_once('=')
-                && k.trim() == mime {
-                    let first = v.split(';').next().unwrap_or(v).trim();
-                    if !first.is_empty() {
-                        return Some(first.to_string());
-                    }
+        if in_defaults && !trimmed.starts_with('#') {
+            if let Some((k, v)) = trimmed.split_once('=') {
+                let first = v.split(';').next().unwrap_or(v).trim();
+                if !first.is_empty() {
+                    map.entry(k.trim().to_string()).or_insert_with(|| first.to_string());
                 }
     }
-    None
+    map
 }
 
-fn query_xdg_mime(mime: &str) -> Option<String> {
-    if let Some(desktop) = read_default_from_mimeapps(mime)
-        && !desktop.is_empty() {
-            return Some(desktop);
+fn query_xdg_mime_with_cache(mime: &str, cache: &HashMap<String, String>) -> Option<String> {
+    if let Some(desktop) = cache.get(mime) {
+        if !desktop.is_empty() {
+            return Some(desktop.clone());
         }
     if let Ok(output) = Command::new("xdg-mime").args(["query", "default", mime]).output() {
         let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -192,15 +193,23 @@ fn query_xdg_mime(mime: &str) -> Option<String> {
     None
 }
 
-fn query_xdg_browser() -> Option<String> {
+fn query_xdg_browser_with_cache(cache: &HashMap<String, String>) -> Option<String> {
+    if let Some(desktop) = cache
+        .get("x-scheme-handler/https")
+        .or_else(|| cache.get("text/html"))
+    {
+        if !desktop.is_empty() {
+            return Some(desktop.clone());
+        }
+    }
     if let Ok(output) = Command::new("xdg-settings").args(["get", "default-web-browser"]).output() {
         let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !out.is_empty() {
             return Some(out);
         }
     }
-    query_xdg_mime("x-scheme-handler/https")
-        .or_else(|| query_xdg_mime("text/html"))
+    query_xdg_mime_with_cache("x-scheme-handler/https", cache)
+        .or_else(|| query_xdg_mime_with_cache("text/html", cache))
 }
 
 fn query_finick_defaults() -> HashMap<String, String> {
@@ -227,6 +236,57 @@ fn save_finick_default(key: &str, val: &str) {
 pub fn get_default_apps() -> Vec<DefaultAppCategoryInfo> {
     let all_apps = scan_installed_apps();
     let finick_defaults = query_finick_defaults();
+    let mime_cache = read_mimeapps_defaults();
+
+    // xdg-mime / xdg-settings each spawn a subprocess (~100-500ms on NixOS).
+    // Run them in parallel so total time is the slowest query, not the sum.
+    let (browser_current, files_current, editor_current, mail_current, img_current, vid_current, music_current) =
+        std::thread::scope(|s| {
+            let h_browser = s.spawn(|| {
+                query_xdg_browser_with_cache(&mime_cache)
+                    .or_else(|| finick_defaults.get("browser").cloned())
+                    .unwrap_or_default()
+            });
+            let h_files = s.spawn(|| {
+                query_xdg_mime_with_cache("inode/directory", &mime_cache)
+                    .or_else(|| finick_defaults.get("file_manager").cloned())
+                    .unwrap_or_default()
+            });
+            let h_editor = s.spawn(|| {
+                query_xdg_mime_with_cache("text/plain", &mime_cache)
+                    .or_else(|| finick_defaults.get("editor").cloned())
+                    .unwrap_or_default()
+            });
+            let h_mail = s.spawn(|| {
+                query_xdg_mime_with_cache("x-scheme-handler/mailto", &mime_cache)
+                    .or_else(|| finick_defaults.get("mail").cloned())
+                    .unwrap_or_default()
+            });
+            let h_img = s.spawn(|| {
+                query_xdg_mime_with_cache("image/png", &mime_cache)
+                    .or_else(|| finick_defaults.get("image").cloned())
+                    .unwrap_or_default()
+            });
+            let h_vid = s.spawn(|| {
+                query_xdg_mime_with_cache("video/mp4", &mime_cache)
+                    .or_else(|| finick_defaults.get("video").cloned())
+                    .unwrap_or_default()
+            });
+            let h_music = s.spawn(|| {
+                query_xdg_mime_with_cache("audio/mpeg", &mime_cache)
+                    .or_else(|| finick_defaults.get("music").cloned())
+                    .unwrap_or_default()
+            });
+            (
+                h_browser.join().unwrap_or_default(),
+                h_files.join().unwrap_or_default(),
+                h_editor.join().unwrap_or_default(),
+                h_mail.join().unwrap_or_default(),
+                h_img.join().unwrap_or_default(),
+                h_vid.join().unwrap_or_default(),
+                h_music.join().unwrap_or_default(),
+            )
+        });
 
     let find_app_name = |desktop_id: &str| -> String {
         all_apps
@@ -246,9 +306,6 @@ pub fn get_default_apps() -> Vec<DefaultAppCategoryInfo> {
     let mut categories = Vec::new();
 
     // 1. Web Browser
-    let browser_current = query_xdg_browser()
-        .or_else(|| finick_defaults.get("browser").cloned())
-        .unwrap_or_default();
     let mut browser_apps: Vec<InstalledApp> = all_apps
         .iter()
         .filter(|a| {
@@ -303,9 +360,6 @@ pub fn get_default_apps() -> Vec<DefaultAppCategoryInfo> {
     });
 
     // 3. File Manager
-    let files_current = query_xdg_mime("inode/directory")
-        .or_else(|| finick_defaults.get("file_manager").cloned())
-        .unwrap_or_default();
     let mut file_apps: Vec<InstalledApp> = all_apps
         .iter()
         .filter(|a| {
@@ -330,9 +384,6 @@ pub fn get_default_apps() -> Vec<DefaultAppCategoryInfo> {
     });
 
     // 4. Text / Code Editor
-    let editor_current = query_xdg_mime("text/plain")
-        .or_else(|| finick_defaults.get("editor").cloned())
-        .unwrap_or_default();
     let mut editor_apps: Vec<InstalledApp> = all_apps
         .iter()
         .filter(|a| {
@@ -358,9 +409,6 @@ pub fn get_default_apps() -> Vec<DefaultAppCategoryInfo> {
     });
 
     // 5. Email Client
-    let mail_current = query_xdg_mime("x-scheme-handler/mailto")
-        .or_else(|| finick_defaults.get("mail").cloned())
-        .unwrap_or_default();
     let mut mail_apps: Vec<InstalledApp> = all_apps
         .iter()
         .filter(|a| {
@@ -383,9 +431,6 @@ pub fn get_default_apps() -> Vec<DefaultAppCategoryInfo> {
     });
 
     // 6. Image Viewer
-    let img_current = query_xdg_mime("image/png")
-        .or_else(|| finick_defaults.get("image").cloned())
-        .unwrap_or_default();
     let mut img_apps: Vec<InstalledApp> = all_apps
         .iter()
         .filter(|a| {
@@ -409,9 +454,6 @@ pub fn get_default_apps() -> Vec<DefaultAppCategoryInfo> {
     });
 
     // 7. Video Player
-    let vid_current = query_xdg_mime("video/mp4")
-        .or_else(|| finick_defaults.get("video").cloned())
-        .unwrap_or_default();
     let mut vid_apps: Vec<InstalledApp> = all_apps
         .iter()
         .filter(|a| {
@@ -435,9 +477,6 @@ pub fn get_default_apps() -> Vec<DefaultAppCategoryInfo> {
     });
 
     // 8. Music Player
-    let music_current = query_xdg_mime("audio/mpeg")
-        .or_else(|| finick_defaults.get("music").cloned())
-        .unwrap_or_default();
     let mut music_apps: Vec<InstalledApp> = all_apps
         .iter()
         .filter(|a| {

@@ -87,11 +87,15 @@ impl Component for PanelShell {
         });
         let mut fired = use_state(|| false);
         let dismiss_a = dismiss.clone();
+        let on_dismiss_skip = on_dismiss.clone();
 
         use_side_effect(move || {
             if *dismiss_a.read() && !*fired.read() {
                 if skip {
                     fired.set(true);
+                    if let Some(cb) = on_dismiss_skip.clone() {
+                        cb.call(());
+                    }
                 } else {
                     anim.reverse();
                 }

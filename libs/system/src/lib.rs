@@ -9,8 +9,12 @@ pub mod clipboard;
 pub use clipboard::*;
 pub mod capture;
 pub use capture::*;
+pub mod privacy;
+pub use privacy::*;
 pub mod shortcuts;
 pub use shortcuts::*;
+pub mod hypr;
+pub use hypr::{hypr_bind, hypr_bring_to_top, hypr_close_window, hypr_exec, hypr_focus_window, hypr_workspace, lua_escape};
 pub mod desktop_apps;
 pub use desktop_apps::*;
 pub mod auth;
@@ -23,6 +27,7 @@ pub use lock::{locker_binary, locker_locked, locker_lockfile, locker_process_ali
 pub mod store;
 pub mod store_flatpak;
 pub mod store_hm;
+pub mod store_meta;
 pub mod store_nix;
 pub mod store_opts;
 
@@ -360,6 +365,922 @@ pub struct CurrentWifiInfo {
     pub interface: Option<String>,
 }
 
+// --- Issue #6: Mouse & Touchpad ---
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointerSettings {
+    pub speed: f64,
+    pub accel_profile: String,
+    pub natural_scroll: bool,
+    pub tap_to_click: bool,
+    pub disable_while_typing: bool,
+    pub left_handed: bool,
+}
+
+impl Default for PointerSettings {
+    fn default() -> Self {
+        Self {
+            speed: 0.0,
+            accel_profile: "adaptive".to_string(),
+            natural_scroll: false,
+            tap_to_click: true,
+            disable_while_typing: true,
+            left_handed: false,
+        }
+    }
+}
+
+fn finick_data_file(name: &str) -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+        .map(|c| c.join("finick").join(name))
+}
+
+fn hyprctl_get_keyword_lines() -> String {
+    Command::new("hyprctl").args(["getoption", "input:sensitivity", "-j"]).output().map(|o| {
+        String::from_utf8_lossy(&o.stdout).to_string()
+    }).unwrap_or_default()
+}
+
+pub fn load_pointer_settings() -> PointerSettings {
+    let mut s = PointerSettings::default();
+    if let Some(f) = finick_data_file("pointer.json") {
+        if let Ok(raw) = std::fs::read_to_string(f) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(x) = v.get("speed").and_then(|x| x.as_f64()) { s.speed = x.clamp(-1.0, 1.0); }
+                if let Some(p) = v.get("accel_profile").and_then(|x| x.as_str()) { s.accel_profile = p.to_string(); }
+                if let Some(b) = v.get("natural_scroll").and_then(|x| x.as_bool()) { s.natural_scroll = b; }
+                if let Some(b) = v.get("tap_to_click").and_then(|x| x.as_bool()) { s.tap_to_click = b; }
+                if let Some(b) = v.get("disable_while_typing").and_then(|x| x.as_bool()) { s.disable_while_typing = b; }
+                if let Some(b) = v.get("left_handed").and_then(|x| x.as_bool()) { s.left_handed = b; }
+                return s;
+            }
+        }
+    }
+    let out = hyprctl_get_keyword_lines();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out) {
+        if let Some(x) = v.get("float").and_then(|x| x.as_f64()) { s.speed = x.clamp(-1.0, 1.0); }
+    }
+    s
+}
+
+fn persist_pointer_settings(s: &PointerSettings) {
+    if let Some(f) = finick_data_file("pointer.json") {
+        if let Some(parent) = f.parent() { let _ = std::fs::create_dir_all(parent); }
+        let v = serde_json::json!({
+            "speed": s.speed, "accel_profile": s.accel_profile,
+            "natural_scroll": s.natural_scroll, "tap_to_click": s.tap_to_click,
+            "disable_while_typing": s.disable_while_typing, "left_handed": s.left_handed,
+        });
+        let _ = std::fs::write(f, serde_json::to_string_pretty(&v).unwrap_or_default());
+    }
+}
+
+fn hypr_input_keyword(key: &str, val: &str) -> Result<(), String> {
+    // Lua-first (Hyprland >=0.55 rejects `keyword` on Lua configs), legacy fallback.
+    let lua_val = if val == "true" || val == "false" {
+        val.to_string()
+    } else if val.parse::<f64>().is_ok() {
+        val.to_string()
+    } else {
+        format!("\"{}\"", val.replace('\\', "\\\\").replace('"', "\\\""))
+    };
+    let lua = format!("hl.config({{ input = {{ {key} = {lua_val} }} }})");
+    HyprlandBackend::hyprctl_set_config(&lua, &format!("input:{key}"), val)
+}
+
+pub fn apply_pointer_speed(speed: f64) -> Result<(), String> {
+    let clamped = speed.clamp(-1.0, 1.0);
+    hypr_input_keyword("sensitivity", &format!("{clamped:.2}"))?;
+    let mut s = load_pointer_settings();
+    s.speed = clamped;
+    persist_pointer_settings(&s);
+    Ok(())
+}
+
+pub fn apply_pointer_accel(profile: &str) -> Result<(), String> {
+    let v = match profile {
+        "flat" => "flat",
+        _ => "adaptive",
+    };
+    hypr_input_keyword("accel_profile", v)?;
+    let mut s = load_pointer_settings();
+    s.accel_profile = v.to_string();
+    persist_pointer_settings(&s);
+    Ok(())
+}
+
+pub fn apply_input_bool(key: &str, enabled: bool) -> Result<(), String> {
+    hypr_input_keyword(key, if enabled { "true" } else { "false" })?;
+    let mut s = load_pointer_settings();
+    match key {
+        "natural_scroll" => s.natural_scroll = enabled,
+        "tap_to_click" => s.tap_to_click = enabled,
+        "disable_while_typing" => s.disable_while_typing = enabled,
+        "left_handed" => s.left_handed = enabled,
+        _ => {}
+    }
+    persist_pointer_settings(&s);
+    Ok(())
+}
+
+// --- Issue #8: Sound streams ---
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct AudioStream {
+    pub id: u32,
+    pub app_name: String,
+    pub volume: i32,
+    pub muted: bool,
+}
+
+pub fn parse_pactl_sink_inputs(output: &str) -> Vec<AudioStream> {
+    let mut streams = Vec::new();
+    let mut cur_id: Option<u32> = None;
+    let mut cur_app = String::new();
+    let mut cur_vol: i32 = 100;
+    let mut cur_mute = false;
+    let mut in_block = false;
+    for line in output.lines() {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix("Sink Input #") {
+            if in_block && cur_id.is_some() {
+                streams.push(AudioStream { id: cur_id.unwrap_or(0), app_name: if cur_app.is_empty() { "Unknown app".to_string() } else { cur_app.clone() }, volume: cur_vol, muted: cur_mute });
+            }
+            cur_id = rest.split_whitespace().next().and_then(|s| s.parse().ok());
+            cur_app = String::new();
+            cur_vol = 100;
+            cur_mute = false;
+            in_block = true;
+        } else if in_block {
+            if let Some(rest) = t.strip_prefix("application.name =") {
+                cur_app = rest.trim().trim_matches('"').to_string();
+            } else if t.starts_with("Mute:") {
+                cur_mute = t.contains("yes");
+            } else if t.starts_with("Volume:") {
+                if let Some(pct) = t.split('/').nth(1) {
+                    if let Some(num) = pct.trim().split('%').next() {
+                        if let Ok(v) = num.trim().parse::<i32>() { cur_vol = v.clamp(0, 150); }
+                    }
+                }
+            }
+        }
+    }
+    if in_block && cur_id.is_some() {
+        streams.push(AudioStream { id: cur_id.unwrap_or(0), app_name: if cur_app.is_empty() { "Unknown app".to_string() } else { cur_app }, volume: cur_vol, muted: cur_mute });
+    }
+    streams
+}
+
+pub fn list_sink_inputs() -> Vec<AudioStream> {
+    if let Ok(o) = Command::new("pactl").args(["list", "sink-inputs"]).output() {
+        let parsed = parse_pactl_sink_inputs(&String::from_utf8_lossy(&o.stdout));
+        if !parsed.is_empty() { return parsed; }
+    }
+    Vec::new()
+}
+
+pub fn set_sink_input_volume(stream_id: u32, percent: i32) -> Result<(), String> {
+    let p = percent.clamp(0, 150);
+    let out = Command::new("pactl").args(["set-sink-input-volume", &stream_id.to_string(), &format!("{p}%")]).output()
+        .map_err(|e| format!("failed to run pactl: {e}"))?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+}
+
+pub fn query_source_volume() -> i32 {
+    if let Ok(o) = Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SOURCE@"]).output() {
+        let out = String::from_utf8_lossy(&o.stdout);
+        if let Some(v) = out.split_whitespace().nth(1) {
+            if let Ok(f) = v.parse::<f64>() { return (f * 100.0).round() as i32; }
+        }
+    }
+    70
+}
+
+pub fn apply_source_volume(percent: i32) -> Result<(), String> {
+    let p = percent.clamp(0, 150);
+    let frac = p as f64 / 100.0;
+    let out = Command::new("wpctl").args(["set-volume", "@DEFAULT_AUDIO_SOURCE@", &format!("{frac:.2}")]).output()
+        .map_err(|e| format!("failed to run wpctl: {e}"))?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+}
+
+pub fn query_sink_balance() -> f64 {
+    if let Some(f) = finick_data_file("audio_balance") {
+        if let Ok(raw) = std::fs::read_to_string(f) {
+            if let Ok(v) = raw.trim().parse::<f64>() { return v.clamp(-1.0, 1.0); }
+        }
+    }
+    0.0
+}
+
+pub fn apply_sink_balance(balance: f64) -> Result<(), String> {
+    let b = balance.clamp(-1.0, 1.0);
+    let (l, r) = if b < 0.0 { (1.0, 1.0 + b) } else { (1.0 - b, 1.0) };
+    let li = (l * 100.0).round() as i32;
+    let ri = (r * 100.0).round() as i32;
+    let out = Command::new("pactl").args(["set-sink-volume", "@DEFAULT_SINK@", &format!("{li}%"), &format!("{ri}%")]).output();
+    if let Ok(o) = out {
+        if !o.status.success() {
+            let _ = Command::new("wpctl").args(["set-volume", "@DEFAULT_AUDIO_SINK@", &format!("{:.2}", (li.max(ri) as f64)/100.0)]).output();
+        }
+    }
+    if let Some(f) = finick_data_file("audio_balance") {
+        if let Some(parent) = f.parent() { let _ = std::fs::create_dir_all(parent); }
+        let _ = std::fs::write(f, format!("{b:.2}"));
+    }
+    Ok(())
+}
+
+pub fn query_input_peak() -> f64 {
+    if let Ok(o) = Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SOURCE@"]).output() {
+        let out = String::from_utf8_lossy(&o.stdout);
+        if out.contains("[MUTED]") { return 0.0; }
+        if let Some(v) = out.split_whitespace().nth(1) {
+            if let Ok(f) = v.parse::<f64>() { return (f * 100.0).clamp(0.0, 100.0); }
+        }
+    }
+    0.0
+}
+
+// --- Issue #9: Power ---
+#[derive(Clone, Debug, PartialEq)]
+pub struct IdleSettings {
+    pub dim_seconds: u32,
+    pub blank_seconds: u32,
+    pub suspend_seconds: u32,
+}
+
+impl Default for IdleSettings {
+    fn default() -> Self { Self { dim_seconds: 120, blank_seconds: 300, suspend_seconds: 900 } }
+}
+
+pub fn parse_gsettings_u32(output: &str) -> Option<u32> {
+    output.trim().parse::<u32>().ok()
+}
+
+pub fn load_idle_settings() -> IdleSettings {
+    let mut s = IdleSettings::default();
+    if let Some(f) = finick_data_file("idle.json") {
+        if let Ok(raw) = std::fs::read_to_string(f) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(x) = v.get("dim_seconds").and_then(|x| x.as_u64()) { s.dim_seconds = x as u32; }
+                if let Some(x) = v.get("blank_seconds").and_then(|x| x.as_u64()) { s.blank_seconds = x as u32; }
+                if let Some(x) = v.get("suspend_seconds").and_then(|x| x.as_u64()) { s.suspend_seconds = x as u32; }
+                return s;
+            }
+        }
+    }
+    if let Ok(o) = Command::new("gsettings").args(["get", "org.gnome.desktop.session", "idle-delay"]).output() {
+        if let Some(v) = parse_gsettings_u32(&String::from_utf8_lossy(&o.stdout).replace("uint32", "").trim()) {
+            if v > 0 { s.blank_seconds = v; }
+        }
+    }
+    s
+}
+
+pub fn apply_idle_delay(kind: &str, seconds: u32) -> Result<(), String> {
+    let mut s = load_idle_settings();
+    match kind {
+        "dim" => s.dim_seconds = seconds,
+        "blank" => {
+            s.blank_seconds = seconds;
+            let _ = Command::new("gsettings").args(["set", "org.gnome.desktop.session", "idle-delay", &format!("uint32 {seconds}")]).output();
+        }
+        "suspend" => {
+            s.suspend_seconds = seconds;
+            let _ = Command::new("gsettings").args(["set", "org.gnome.settings-daemon.plugins.power", "sleep-inactive-ac-timeout", &seconds.to_string()]).output();
+        }
+        _ => return Err(format!("unknown idle kind: {kind}")),
+    }
+    if let Some(f) = finick_data_file("idle.json") {
+        if let Some(parent) = f.parent() { let _ = std::fs::create_dir_all(parent); }
+        let v = serde_json::json!({ "dim_seconds": s.dim_seconds, "blank_seconds": s.blank_seconds, "suspend_seconds": s.suspend_seconds });
+        let _ = std::fs::write(f, serde_json::to_string_pretty(&v).unwrap_or_default());
+    }
+    Ok(())
+}
+
+pub fn load_lid_action() -> String {
+    for path in [lid_dropin_path(), std::path::PathBuf::from("/etc/systemd/logind.conf")] {
+        if let Ok(raw) = std::fs::read_to_string(&path) {
+            for line in raw.lines() {
+                let t = line.trim();
+                if t.starts_with("HandleLidSwitch") && !t.starts_with('#') {
+                    if let Some(v) = t.split('=').nth(1) {
+                        let v = v.trim().to_string();
+                        if !v.is_empty() {
+                            return v;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(f) = finick_data_file("lid_action") {
+        if let Ok(raw) = std::fs::read_to_string(f) {
+            let v = raw.trim().to_string();
+            if !v.is_empty() {
+                return v;
+            }
+        }
+    }
+    "suspend".to_string()
+}
+
+pub fn lid_dropin_path() -> std::path::PathBuf {
+    std::path::PathBuf::from("/etc/systemd/logind.conf.d/10-finick-lid.conf")
+}
+
+pub fn lid_dropin_body(action: &str) -> String {
+    format!("[Login]\nHandleLidSwitch={action}\nHandleLidSwitchExternalPower={action}\nHandleLidSwitchDocked={action}\n")
+}
+
+/// Why the lid switch is system-managed (NixOS / admin policy), if it is.
+pub fn lid_managed_reason() -> Option<String> {
+    if lid_dropin_path().exists() {
+        return Some("Managed by /etc/systemd/logind.conf.d/10-finick-lid.conf".to_string());
+    }
+    if let Ok(raw) = std::fs::read_to_string("/etc/systemd/logind.conf") {
+        let pinned = raw.lines().any(|l| {
+            let t = l.trim();
+            !t.starts_with('#') && t.starts_with("HandleLidSwitch")
+        });
+        if pinned {
+            return Some("Managed by system logind.conf — needs admin to change".to_string());
+        }
+    }
+    None
+}
+
+/// Why lid-close control is unavailable on this machine, if it is.
+pub fn lid_unavailable_reason() -> Option<String> {
+    if std::process::Command::new("systemctl").arg("--version").output().is_err() {
+        return Some("Unavailable: systemd-logind not found".to_string());
+    }
+    None
+}
+
+pub fn apply_lid_action(action: &str) -> Result<(), String> {
+    let allowed = ["suspend", "hibernate", "ignore", "poweroff", "lock"];
+    if !allowed.contains(&action) { return Err(format!("unsupported lid action: {action}")); }
+    if let Some(f) = finick_data_file("lid_action") {
+        if let Some(parent) = f.parent() { let _ = std::fs::create_dir_all(parent); }
+        let _ = std::fs::write(f, action);
+    }
+    let body = lid_dropin_body(action);
+    if let Some(parent) = lid_dropin_path().parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::write(lid_dropin_path(), body) {
+        Ok(()) => {
+            let _ = Command::new("systemctl").args(["restart", "systemd-logind"]).output();
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            Ok(())
+        }
+        Err(e) => Err(format!("failed to write logind drop-in (need admin): {e}")),
+    }
+}
+
+/// Parse `upower --dump` charge history into 7 recent samples (0-100).
+/// Returns None when no usable history exists so callers show an honest empty state.
+pub fn parse_upower_dump_history(output: &str) -> Option<[f32; 7]> {
+    let mut in_charge_history = false;
+    let mut samples: Vec<f32> = Vec::new();
+    for line in output.lines() {
+        let t = line.trim();
+        let lower = t.to_lowercase();
+        if lower.starts_with("history (charge)") {
+            in_charge_history = true;
+            continue;
+        }
+        if lower.starts_with("history (rate)") || lower.starts_with("history (time") {
+            if in_charge_history {
+                break;
+            }
+            in_charge_history = false;
+            continue;
+        }
+        if !in_charge_history {
+            continue;
+        }
+        if t.is_empty() {
+            if !samples.is_empty() {
+                break;
+            }
+            continue;
+        }
+        let parts: Vec<&str> = t.split_whitespace().collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        if let Ok(pct) = parts[1].trim_end_matches('%').parse::<f32>() {
+            if (0.0..=100.0).contains(&pct) {
+                samples.push(pct);
+            }
+        }
+    }
+    if samples.len() < 2 {
+        let mut fallback: Vec<f32> = Vec::new();
+        for line in output.lines() {
+            let t = line.trim().to_lowercase();
+            if let Some(rest) = t.strip_prefix("percentage:") {
+                if let Ok(pct) = rest.trim().trim_end_matches('%').parse::<f32>() {
+                    if (0.0..=100.0).contains(&pct) {
+                        fallback.push(pct);
+                    }
+                }
+            }
+        }
+        if fallback.len() >= 7 {
+            let tail = &fallback[fallback.len() - 7..];
+            let mut arr = [0.0f32; 7];
+            arr.copy_from_slice(tail);
+            return Some(arr);
+        }
+        return None;
+    }
+    let n = samples.len().min(7);
+    let tail = &samples[samples.len() - n..];
+    let mut arr = [0.0f32; 7];
+    if n == 7 {
+        arr.copy_from_slice(tail);
+    } else {
+        let first = tail[0];
+        for v in arr.iter_mut().take(7 - n) {
+            *v = first;
+        }
+        arr[7 - n..].copy_from_slice(tail);
+    }
+    Some(arr)
+}
+
+pub fn query_battery_history() -> Option<[f32; 7]> {
+    let out = Command::new("upower").arg("--dump").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_upower_dump_history(&String::from_utf8_lossy(&out.stdout))
+}
+
+pub fn query_power_profile() -> String {
+    if let Ok(o) = Command::new("powerprofilesctl").arg("get").output() {
+        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if !s.is_empty() { return s; }
+    }
+    "balanced".to_string()
+}
+
+pub fn list_power_profiles() -> Vec<String> {
+    if let Ok(o) = Command::new("powerprofilesctl").arg("list").output() {
+        if o.status.success() {
+            let out = String::from_utf8_lossy(&o.stdout);
+            let mut profiles = Vec::new();
+            for line in out.lines() {
+                let t = line.trim();
+                if let Some(rest) = t.strip_prefix('*') {
+                    let name = rest.trim().split_whitespace().next().unwrap_or("").trim_end_matches(':').to_string();
+                    if !name.is_empty() { profiles.push(name); }
+                } else if let Some(rest) = t.strip_prefix('-').or_else(|| t.strip_prefix('+')) {
+                    let name = rest.trim().split_whitespace().next().unwrap_or("").trim_end_matches(':').to_string();
+                    if !name.is_empty() { profiles.push(name); }
+                } else if t.ends_with(':') && !t.contains(' ') {
+                    let name = t.trim_end_matches(':').to_string();
+                    if !name.is_empty() && name != "Profiles" { profiles.push(name); }
+                }
+            }
+            profiles.retain(|p| !p.is_empty());
+            if !profiles.is_empty() { return profiles; }
+        }
+    }
+    // Fallback to the well-known set; availability is gated by supports_power_profiles.
+    vec!["performance".to_string(), "balanced".to_string(), "power-saver".to_string()]
+}
+
+pub fn supports_power_profiles() -> bool {
+    if let Ok(o) = Command::new("powerprofilesctl").arg("list").output() {
+        if o.status.success() { return true; }
+    }
+    if let Ok(o) = Command::new("powerprofilesctl").arg("get").output() {
+        if o.status.success() && !String::from_utf8_lossy(&o.stdout).trim().is_empty() { return true; }
+    }
+    false
+}
+
+pub fn apply_power_profile(profile: &str) -> Result<(), String> {
+    let out = Command::new("powerprofilesctl").args(["set", profile]).output()
+        .map_err(|e| format!("failed to run powerprofilesctl: {e}"))?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+}
+
+pub fn charge_limit_path() -> Option<std::path::PathBuf> {
+    std::fs::read_dir("/sys/class/power_supply").ok()?.flatten().find_map(|e| {
+        let p = e.path().join("charge_control_end_threshold");
+        if p.exists() { Some(p) } else { None }
+    })
+}
+
+pub fn query_charge_limit() -> Option<u8> {
+    let p = charge_limit_path()?;
+    std::fs::read_to_string(p).ok()?.trim().parse::<u8>().ok()
+}
+
+pub fn apply_charge_limit(percent: u8) -> Result<(), String> {
+    let p = charge_limit_path().ok_or_else(|| "Charge limit not supported on this hardware".to_string())?;
+    let v = percent.clamp(40, 100);
+    std::fs::write(p, format!("{v}\n")).map_err(|e| format!("failed to write charge limit (need permissions?): {e}"))?;
+    if let Some(f) = finick_data_file("charge_limit") {
+        if let Some(parent) = f.parent() { let _ = std::fs::create_dir_all(parent); }
+        let _ = std::fs::write(f, format!("{v}"));
+    }
+    Ok(())
+}
+
+// --- Issue #19: Quick settings parity (airplane, kbd backlight, background apps) ---
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RfkillDevice {
+    pub id: String,
+    pub kind: String,
+    pub soft_blocked: bool,
+    pub hard_blocked: bool,
+}
+
+pub fn parse_rfkill_list(output: &str) -> Vec<RfkillDevice> {
+    let mut devices = Vec::new();
+    let mut cur_id = String::new();
+    let mut cur_kind = String::new();
+    let mut cur_soft = false;
+    let mut cur_hard = false;
+    let mut in_block = false;
+    for line in output.lines() {
+        let t = line.trim();
+        if t.contains(':') && !t.starts_with("Soft blocked") && !t.starts_with("Hard blocked") {
+            if in_block && !cur_kind.is_empty() {
+                devices.push(RfkillDevice {
+                    id: cur_id.clone(),
+                    kind: cur_kind.clone(),
+                    soft_blocked: cur_soft,
+                    hard_blocked: cur_hard,
+                });
+            }
+            if let Some((id_part, kind_part)) = t.split_once(':') {
+                cur_id = id_part.trim().to_string();
+                cur_kind = kind_part.trim().to_lowercase();
+                if cur_kind.contains("wireless") || cur_kind.contains("wlan") || cur_kind.contains("wifi") {
+                    cur_kind = "wlan".to_string();
+                } else if cur_kind.contains("bluetooth") || cur_kind.contains("bluetooth".to_uppercase().as_str()) {
+                    cur_kind = "bluetooth".to_string();
+                }
+                cur_soft = false;
+                cur_hard = false;
+                in_block = !cur_id.is_empty() && cur_id.chars().next().is_some_and(|c| c.is_ascii_digit());
+            } else {
+                in_block = false;
+            }
+            continue;
+        }
+        if let Some(v) = t.strip_prefix("Soft blocked:") {
+            cur_soft = v.trim().eq_ignore_ascii_case("yes");
+        } else if let Some(v) = t.strip_prefix("Hard blocked:") {
+            cur_hard = v.trim().eq_ignore_ascii_case("yes");
+        }
+    }
+    if in_block && !cur_kind.is_empty() {
+        devices.push(RfkillDevice { id: cur_id, kind: cur_kind, soft_blocked: cur_soft, hard_blocked: cur_hard });
+    }
+    devices.retain(|d| !d.id.is_empty() && (d.kind == "wlan" || d.kind == "bluetooth"));
+    devices
+}
+
+pub fn airplane_from_states(wifi_enabled: bool, bt_soft_blocked: bool) -> bool {
+    !wifi_enabled && bt_soft_blocked
+}
+
+pub fn query_airplane_mode() -> bool {
+    let wifi_enabled = Command::new("nmcli")
+        .args(["radio", "wifi"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().eq_ignore_ascii_case("enabled"))
+        .unwrap_or(false);
+    let bt_blocked = Command::new("rfkill")
+        .args(["list", "bluetooth"])
+        .output()
+        .ok()
+        .map(|o| parse_rfkill_list(&String::from_utf8_lossy(&o.stdout)).iter().any(|d| d.soft_blocked))
+        .unwrap_or(false);
+    airplane_from_states(wifi_enabled, bt_blocked)
+}
+
+pub fn apply_airplane_mode(enabled: bool) -> Result<(), String> {
+    if enabled {
+        let _ = Command::new("nmcli").args(["radio", "all", "off"]).output();
+        let out = Command::new("rfkill").args(["block", "all"]).output()
+            .map_err(|e| format!("failed to run rfkill: {e}"))?;
+        if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+    } else {
+        let _ = Command::new("rfkill").args(["unblock", "all"]).output();
+        let _ = Command::new("nmcli").args(["radio", "all", "on"]).output();
+        Ok(())
+    }
+}
+
+pub fn keyboard_backlight_candidates() -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/sys/class/leds") {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let lower = name.to_lowercase();
+            if lower.contains("kbd") || lower.contains("keyboard") {
+                out.push(name);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+pub fn keyboard_backlight_device() -> Option<String> {
+    keyboard_backlight_candidates().into_iter().next()
+}
+
+pub fn kbd_pct_from_values(current: u64, max: u64) -> Option<u32> {
+    if max == 0 { return None; }
+    Some(((current * 100) / max).min(100) as u32)
+}
+
+pub fn kbd_value_from_pct(percent: u32, max: u64) -> u64 {
+    ((percent.clamp(0, 100) as u64) * max) / 100
+}
+
+pub fn query_keyboard_backlight() -> Option<u32> {
+    let dev = keyboard_backlight_device()?;
+    let base = std::path::Path::new("/sys/class/leds").join(&dev);
+    let cur: u64 = std::fs::read_to_string(base.join("brightness")).ok()?.trim().parse().ok()?;
+    let max: u64 = std::fs::read_to_string(base.join("max_brightness")).ok()?.trim().parse().ok()?;
+    kbd_pct_from_values(cur, max)
+}
+
+pub fn apply_keyboard_backlight(percent: u32) -> Result<(), String> {
+    let dev = keyboard_backlight_device().ok_or_else(|| "No keyboard backlight found".to_string())?;
+    let base = std::path::Path::new("/sys/class/leds").join(&dev);
+    let max: u64 = std::fs::read_to_string(base.join("max_brightness"))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(3);
+    let target = kbd_value_from_pct(percent, max);
+    if std::fs::write(base.join("brightness"), format!("{target}\n")).is_ok() {
+        return Ok(());
+    }
+    let out = Command::new("brightnessctl").args(["-d", &dev, "set", &format!("{}%", percent.clamp(0, 100))]).output()
+        .map_err(|e| format!("failed to run brightnessctl: {e}"))?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+}
+
+pub fn parse_hypr_clients_classes(output: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(output)
+        .ok()
+        .and_then(|v| v.as_array().cloned())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|c| c.get("class").and_then(|k| k.as_str()).map(|s| s.to_string()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn query_background_app_count() -> usize {
+    Command::new("hyprctl")
+        .args(["clients", "-j"])
+        .output()
+        .ok()
+        .map(|o| parse_hypr_clients_classes(&String::from_utf8_lossy(&o.stdout)).len())
+        .unwrap_or(0)
+}
+
+// --- Issue #10: Displays (modes / scale / primary / night schedule) ---
+#[derive(Clone, Debug, PartialEq)]
+pub struct NightSchedule {
+    pub mode: usize,
+    pub from: String,
+    pub to: String,
+}
+
+impl Default for NightSchedule {
+    fn default() -> Self { Self { mode: 0, from: "22:00".to_string(), to: "06:00".to_string() } }
+}
+
+pub fn parse_display_mode_refresh(mode: &str) -> Option<(String, f64)> {
+    let (res, hz_part) = mode.split_once('@')?;
+    let hz_str = hz_part.trim().trim_end_matches("Hz");
+    let hz = hz_str.parse::<f64>().ok()?;
+    Some((res.trim().to_string(), hz))
+}
+
+pub fn apply_display_scale(name: &str, scale: f64) -> Result<(), String> {
+    let clamped = match scale {
+        s if s < 0.5 => 0.5,
+        s if s > 3.0 => 3.0,
+        s => (s * 4.0).round() / 4.0,
+    };
+    HyprlandBackend::hyprctl_set_config(
+        &format!("hl.monitor({{ output = \"{name}\", scale = {clamped} }})"),
+        "monitor",
+        &format!("{name},preferred,auto,{clamped}"),
+    )
+}
+
+pub fn load_primary_display() -> Option<String> {
+    finick_data_file("primary_display").and_then(|f| std::fs::read_to_string(f).ok()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+pub fn apply_primary_display(name: &str) -> Result<(), String> {
+    if let Some(f) = finick_data_file("primary_display") {
+        if let Some(parent) = f.parent() { let _ = std::fs::create_dir_all(parent); }
+        std::fs::write(f, name).map_err(|e| format!("failed to save primary display: {e}"))?;
+        Ok(())
+    } else {
+        Err("no config dir".to_string())
+    }
+}
+
+pub fn load_night_schedule() -> NightSchedule {
+    let mut s = NightSchedule::default();
+    if let Some(f) = finick_data_file("night_schedule.json") {
+        if let Ok(raw) = std::fs::read_to_string(f) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(m) = v.get("mode").and_then(|x| x.as_u64()) { s.mode = m as usize; }
+                if let Some(x) = v.get("from").and_then(|x| x.as_str()) { s.from = x.to_string(); }
+                if let Some(x) = v.get("to").and_then(|x| x.as_str()) { s.to = x.to_string(); }
+            }
+        }
+    }
+    s
+}
+
+pub fn apply_night_schedule(sched: &NightSchedule) -> Result<(), String> {
+    if let Some(f) = finick_data_file("night_schedule.json") {
+        if let Some(parent) = f.parent() { let _ = std::fs::create_dir_all(parent); }
+        let v = serde_json::json!({ "mode": sched.mode, "from": sched.from, "to": sched.to });
+        std::fs::write(f, serde_json::to_string_pretty(&v).unwrap_or_default())
+            .map_err(|e| format!("failed to save night schedule: {e}"))?;
+    }
+    Ok(())
+}
+
+pub fn night_schedule_active(sched: &NightSchedule, now_hm: &str) -> bool {
+    if sched.mode == 0 { return false; }
+    if sched.mode == 1 { return true; }
+    fn mins(s: &str) -> Option<i32> {
+        let (h, m) = s.split_once(':')?;
+        Some(h.parse::<i32>().ok()? * 60 + m.parse::<i32>().ok()?)
+    }
+    match (mins(&sched.from), mins(&sched.to), mins(now_hm)) {
+        (Some(f), Some(t), Some(n)) => {
+            if f <= t { n >= f && n < t } else { n >= f || n < t }
+        }
+        _ => false,
+    }
+}
+
+// --- Issue #1: Network extras ---
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct WiredDeviceInfo {
+    pub interface: String,
+    pub state: String,
+    pub ip: String,
+    pub dhcp: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct VpnInfo {
+    pub name: String,
+    pub vpn_type: String,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ProxySettings {
+    pub mode: String,
+    pub http_host: String,
+    pub http_port: u16,
+    pub https_host: String,
+    pub https_port: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct MobileDeviceInfo {
+    pub interface: String,
+    pub state: String,
+    pub operator: String,
+}
+
+pub fn list_wired_devices() -> Vec<WiredDeviceInfo> {
+    let mut out = Vec::new();
+    let devs = Command::new("nmcli").args(["-t", "-f", "DEVICE,TYPE,STATE", "dev"]).output();
+    let Ok(devs) = devs else { return out; };
+    for line in String::from_utf8_lossy(&devs.stdout).lines() {
+        let Some((device, ty, state)) = parse_nmcli_dev_line(line) else { continue; };
+        if ty != "ethernet" && ty != "802-3-ethernet" { continue; }
+        let mut ip = String::new();
+        if let Ok(o) = Command::new("nmcli").args(["-t", "-f", "IP4.ADDRESS", "dev", "show", &device]).output() {
+            for l in String::from_utf8_lossy(&o.stdout).lines() {
+                let v = l.trim().strip_prefix("IP4.ADDRESS").map(|s| s.trim().trim_start_matches(':').trim().to_string()).unwrap_or_else(|| l.trim().to_string());
+                if !v.is_empty() { ip = v.split('/').next().unwrap_or(&v).to_string(); break; }
+            }
+        }
+        out.push(WiredDeviceInfo { interface: device, state, ip, dhcp: true });
+    }
+    out
+}
+
+pub fn apply_wired_dhcp(iface: &str, auto: bool) -> Result<(), String> {
+    let method = if auto { "auto" } else { "manual" };
+    let out = Command::new("nmcli").args(["con", "mod", iface, "ipv4.method", method]).output()
+        .map_err(|e| format!("failed to run nmcli: {e}"))?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+}
+
+pub fn list_vpn_connections() -> Vec<VpnInfo> {
+    let mut out = Vec::new();
+    let Ok(o) = Command::new("nmcli").args(["-t", "-f", "NAME,TYPE", "connection", "show"]).output() else { return out; };
+    let active = Command::new("nmcli").args(["-t", "-f", "NAME,TYPE", "connection", "show", "--active"]).output()
+        .map(|a| String::from_utf8_lossy(&a.stdout).to_string()).unwrap_or_default();
+    for line in String::from_utf8_lossy(&o.stdout).lines() {
+        let parts: Vec<&str> = line.splitn(2, ':').collect();
+        if parts.len() != 2 { continue; }
+        if parts[1].contains("vpn") || parts[1].contains("wireguard") {
+            out.push(VpnInfo { name: parts[0].to_string(), vpn_type: parts[1].to_string(), active: active.contains(parts[0]) });
+        }
+    }
+    out
+}
+
+pub fn create_vpn_connection(name: &str, vpn_type: &str, gateway: &str) -> Result<(), String> {
+    if name.trim().is_empty() { return Err("VPN name is required".to_string()); }
+    if gateway.trim().is_empty() { return Err("Gateway is required".to_string()); }
+    let vpn_data = format!("gateway={gateway}");
+    let out = Command::new("nmcli").args(["connection", "add", "type", vpn_type, "con-name", name, "ifname", "--", "vpn.data", &vpn_data]).output()
+        .map_err(|e| format!("failed to run nmcli: {e}"))?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+}
+
+pub fn apply_vpn_state(name: &str, up: bool) -> Result<(), String> {
+    let verb = if up { "up" } else { "down" };
+    let out = Command::new("nmcli").args(["connection", verb, name]).output()
+        .map_err(|e| format!("failed to run nmcli: {e}"))?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+}
+
+pub fn load_proxy_settings() -> ProxySettings {
+    let get = |schema: &str, key: &str| -> String {
+        Command::new("gsettings").args(["get", schema, key]).output().map(|o| {
+            String::from_utf8_lossy(&o.stdout).trim().trim_matches('\'').to_string()
+        }).unwrap_or_default()
+    };
+    let mode = get("org.gnome.system.proxy", "mode");
+    ProxySettings {
+        mode: if mode.is_empty() { "none".to_string() } else { mode },
+        http_host: get("org.gnome.system.proxy.http", "host"),
+        http_port: get("org.gnome.system.proxy.http", "port").parse().unwrap_or(0),
+        https_host: get("org.gnome.system.proxy.https", "host"),
+        https_port: get("org.gnome.system.proxy.https", "port").parse().unwrap_or(0),
+    }
+}
+
+pub fn apply_proxy_settings(proxy: &ProxySettings) -> Result<(), String> {
+    let run = |schema: &str, key: &str, val: &str| -> Result<(), String> {
+        let out = Command::new("gsettings").args(["set", schema, key, val]).output()
+            .map_err(|e| format!("failed to run gsettings: {e}"))?;
+        if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+    };
+    run("org.gnome.system.proxy", "mode", &proxy.mode)?;
+    if !proxy.http_host.is_empty() {
+        run("org.gnome.system.proxy.http", "host", &proxy.http_host)?;
+        run("org.gnome.system.proxy.http", "port", &proxy.http_port.to_string())?;
+    }
+    if !proxy.https_host.is_empty() {
+        run("org.gnome.system.proxy.https", "host", &proxy.https_host)?;
+        run("org.gnome.system.proxy.https", "port", &proxy.https_port.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn list_mobile_devices() -> Vec<MobileDeviceInfo> {
+    let mut out = Vec::new();
+    let Ok(o) = Command::new("nmcli").args(["-t", "-f", "DEVICE,TYPE,STATE", "dev"]).output() else { return out; };
+    for line in String::from_utf8_lossy(&o.stdout).lines() {
+        let Some((device, ty, state)) = parse_nmcli_dev_line(line) else { continue; };
+        if ty.contains("gsm") || ty.contains("cdma") || ty.contains("wwan") || ty.contains("mobile") {
+            out.push(MobileDeviceInfo { interface: device, state, operator: String::new() });
+        }
+    }
+    out
+}
+
 pub trait SystemBackend {
     fn get_displays(&self) -> Vec<DisplayInfo>;
     fn get_input_devices(&self) -> InputDevices;
@@ -427,6 +1348,83 @@ pub trait SystemBackend {
     fn set_default_application(&self, category_id: &str, desktop_id: &str) -> Result<(), String> {
         desktop_apps::set_default_app(category_id, desktop_id)
     }
+    // --- Mouse & Touchpad (#6) ---
+    fn get_pointer_settings(&self) -> PointerSettings { load_pointer_settings() }
+    fn set_pointer_speed(&self, speed: f64) -> Result<(), String> { apply_pointer_speed(speed) }
+    fn set_pointer_accel_profile(&self, profile: &str) -> Result<(), String> { apply_pointer_accel(profile) }
+    fn set_natural_scroll(&self, enabled: bool) -> Result<(), String> { apply_input_bool("natural_scroll", enabled) }
+    fn set_tap_to_click(&self, enabled: bool) -> Result<(), String> { apply_input_bool("tap_to_click", enabled) }
+    fn set_disable_while_typing(&self, enabled: bool) -> Result<(), String> {
+        apply_input_bool("disable_while_typing", enabled)
+    }
+    fn set_left_handed(&self, enabled: bool) -> Result<(), String> { apply_input_bool("left_handed", enabled) }
+    // --- Sound per-app / input (#8) ---
+    fn get_sink_inputs(&self) -> Vec<AudioStream> { list_sink_inputs() }
+    fn set_stream_volume(&self, stream_id: u32, percent: i32) -> Result<(), String> {
+        set_sink_input_volume(stream_id, percent)
+    }
+    fn get_source_volume(&self) -> i32 { query_source_volume() }
+    fn set_source_volume(&self, percent: i32) -> Result<(), String> { apply_source_volume(percent) }
+    fn get_sink_balance(&self) -> f64 { query_sink_balance() }
+    fn set_sink_balance(&self, balance: f64) -> Result<(), String> { apply_sink_balance(balance) }
+    fn get_input_peak(&self) -> f64 { query_input_peak() }
+    // --- Power (#9) ---
+    fn get_idle_settings(&self) -> IdleSettings { load_idle_settings() }
+    fn set_idle_delay(&self, kind: &str, seconds: u32) -> Result<(), String> { apply_idle_delay(kind, seconds) }
+    fn get_lid_action(&self) -> String { load_lid_action() }
+    fn set_lid_action(&self, action: &str) -> Result<(), String> { apply_lid_action(action) }
+    fn get_power_profile(&self) -> String { query_power_profile() }
+    fn set_power_profile(&self, profile: &str) -> Result<(), String> { apply_power_profile(profile) }
+    fn supports_power_profiles(&self) -> bool { supports_power_profiles() }
+    fn list_power_profiles(&self) -> Vec<String> { list_power_profiles() }
+    fn get_charge_limit(&self) -> Option<u8> { query_charge_limit() }
+    fn set_charge_limit(&self, percent: u8) -> Result<(), String> { apply_charge_limit(percent) }
+    // --- Displays (#10) ---
+    fn get_display_modes(&self, name: &str) -> Vec<String> {
+        self.get_displays().into_iter().find(|d| d.name == name).map(|d| d.available_modes).unwrap_or_default()
+    }
+    fn set_display_mode(&self, name: &str, mode: &str) -> Result<(), String> {
+        self.set_display_config(name, Some(mode), None)
+    }
+    fn set_display_scale(&self, name: &str, scale: f64) -> Result<(), String> { apply_display_scale(name, scale) }
+    fn get_primary_display(&self) -> Option<String> { load_primary_display() }
+    fn set_primary_display(&self, name: &str) -> Result<(), String> { apply_primary_display(name) }
+    fn get_night_schedule(&self) -> NightSchedule { load_night_schedule() }
+    fn set_night_schedule(&self, sched: &NightSchedule) -> Result<(), String> { apply_night_schedule(sched) }
+    // --- Network (#1) ---
+    fn get_wired_devices(&self) -> Vec<WiredDeviceInfo> { list_wired_devices() }
+    fn set_wired_dhcp(&self, iface: &str, auto: bool) -> Result<(), String> { apply_wired_dhcp(iface, auto) }
+    fn get_vpn_connections(&self) -> Vec<VpnInfo> { list_vpn_connections() }
+    fn add_vpn_connection(&self, name: &str, vpn_type: &str, gateway: &str) -> Result<(), String> {
+        create_vpn_connection(name, vpn_type, gateway)
+    }
+    fn set_vpn_state(&self, name: &str, up: bool) -> Result<(), String> { apply_vpn_state(name, up) }
+    fn get_proxy_settings(&self) -> ProxySettings { load_proxy_settings() }
+    fn set_proxy_settings(&self, proxy: &ProxySettings) -> Result<(), String> { apply_proxy_settings(proxy) }
+    fn get_mobile_devices(&self) -> Vec<MobileDeviceInfo> { list_mobile_devices() }
+    // --- Quick settings parity (#19) ---
+    fn get_airplane_mode(&self) -> bool { query_airplane_mode() }
+    fn set_airplane_mode(&self, enabled: bool) -> Result<(), String> { apply_airplane_mode(enabled) }
+    fn supports_keyboard_backlight(&self) -> bool { keyboard_backlight_device().is_some() }
+    fn get_keyboard_backlight(&self) -> Option<u32> { query_keyboard_backlight() }
+    fn set_keyboard_backlight(&self, percent: u32) -> Result<(), String> { apply_keyboard_backlight(percent) }
+    fn get_background_app_count(&self) -> usize { query_background_app_count() }
+    // --- Privacy & Security (#12) ---
+    fn get_firewall(&self) -> FirewallStatus { query_firewall() }
+    fn set_firewall_enabled(&self, enabled: bool) -> Result<(), String> { set_firewall_enabled(enabled) }
+    fn get_location_status(&self) -> LocationStatus { query_location() }
+    fn set_location_enabled(&self, enabled: bool) -> Result<(), String> { set_location_enabled(enabled) }
+    fn get_camera_status(&self) -> CameraStatus { query_camera() }
+    fn set_camera_enabled(&self, enabled: bool) -> Result<(), String> { set_camera_enabled(enabled) }
+    fn get_mic_status(&self) -> MicStatus { query_mic() }
+    fn set_mic_enabled(&self, enabled: bool) -> Result<(), String> { set_mic_enabled(enabled) }
+    fn get_usb_status(&self) -> UsbStatus { query_usb_protection() }
+    fn set_usb_protection(&self, enabled: bool) -> Result<(), String> { set_usb_protection(enabled) }
+    fn get_lock_delay(&self) -> u32 { query_lock_delay() }
+    fn set_lock_delay(&self, seconds: u32) -> Result<(), String> { set_lock_delay(seconds) }
+    fn clear_history(&self) -> Result<HistoryClearReport, String> { clear_file_history() }
+    fn get_diagnostics(&self) -> bool { query_diagnostics() }
+    fn set_diagnostics(&self, enabled: bool) -> Result<(), String> { set_diagnostics(enabled) }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -828,7 +1826,10 @@ impl SystemBackend for HyprlandBackend {
     }
 
     fn set_volume(&self, percent: i32) {
-        let v_str = format!("{}%", percent);
+        // wpctl `VOL%` steps volume relatively (`65%` would add ~65% on top
+        // of the current level). Absolute sets use a bare float (1.0 = 100%).
+        let clamped = percent.clamp(0, 150);
+        let v_str = format!("{:.2}", clamped as f64 / 100.0);
         let _ = Command::new("wpctl").args(["set-volume", "@DEFAULT_AUDIO_SINK@", &v_str]).output();
     }
 
@@ -1691,6 +2692,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_upower_dump_history() {
+        let sample = "Device: /org/freedesktop/UPower/devices/battery_BAT0\n  History (charge):\n    1760000000  82.000  discharging\n    1760000600  81.000  discharging\n    1760001200  80.000  discharging\n    1760001800  79.000  discharging\n    1760002400  78.000  discharging\n    1760003000  77.000  discharging\n    1760003600  76.000  discharging\n  History (rate):\n    1760000000  12.000  discharging\n";
+        let parsed = parse_upower_dump_history(sample).unwrap();
+        assert_eq!(parsed, [82.0, 81.0, 80.0, 79.0, 78.0, 77.0, 76.0]);
+        assert!(parse_upower_dump_history("Device: x\n  percentage: 55%\n").is_none());
+        assert!(parse_upower_dump_history("").is_none());
+    }
+
+    #[test]
     fn test_parse_nmcli_dev_line() {
         assert_eq!(
             parse_nmcli_dev_line("enp5s0:ethernet:connected"),
@@ -1987,5 +2997,85 @@ mod tests {
         assert!(content.contains("layout(location = 0) out vec4 fragColor;"));
         assert!(content.contains("texture(tex, v_texcoord)"));
         apply_night_shift(false, 50.0);
+    }
+
+    #[test]
+    fn test_parse_pactl_sink_inputs() {
+        let sample = "Sink Input #42\n\tDriver: protocol-native.c\n\tMute: no\n\tVolume: front-left: 32768 /  50% / -18.06 dB, front-right: 32768 /  50%\n\tapplication.name = \"Firefox\"\nSink Input #43\n\tMute: yes\n\tVolume: mono: 65536 / 100%\n\tapplication.name = \"mpv\"\n";
+        let streams = parse_pactl_sink_inputs(sample);
+        assert_eq!(streams.len(), 2);
+        assert_eq!(streams[0].id, 42);
+        assert_eq!(streams[0].app_name, "Firefox");
+        assert_eq!(streams[0].volume, 50);
+        assert!(!streams[0].muted);
+        assert!(streams[1].muted);
+        assert!(parse_pactl_sink_inputs("").is_empty());
+    }
+
+    #[test]
+    fn test_parse_display_mode_refresh() {
+        assert_eq!(
+            parse_display_mode_refresh("1920x1080@60.00Hz"),
+            Some(("1920x1080".to_string(), 60.0))
+        );
+        assert_eq!(parse_display_mode_refresh("preferred"), None);
+        assert_eq!(parse_display_mode_refresh(""), None);
+    }
+
+    #[test]
+    fn test_night_schedule_active() {
+        let sched = NightSchedule { mode: 2, from: "22:00".to_string(), to: "06:00".to_string() };
+        assert!(night_schedule_active(&sched, "23:00"));
+        assert!(night_schedule_active(&sched, "05:00"));
+        assert!(!night_schedule_active(&sched, "12:00"));
+        let off = NightSchedule { mode: 0, from: "22:00".to_string(), to: "06:00".to_string() };
+        assert!(!night_schedule_active(&off, "23:00"));
+        let sunset = NightSchedule { mode: 1, from: "22:00".to_string(), to: "06:00".to_string() };
+        assert!(night_schedule_active(&sunset, "12:00"));
+    }
+
+    #[test]
+    fn test_parse_gsettings_u32() {
+        assert_eq!(parse_gsettings_u32("300"), Some(300));
+        assert_eq!(parse_gsettings_u32("uint32 300"), None);
+        assert_eq!(parse_gsettings_u32(""), None);
+    }
+
+    #[test]
+    fn test_parse_rfkill_list() {
+        let sample = "0: phy0: Wireless LAN\n\tSoft blocked: no\n\tHard blocked: no\n1: hci0: Bluetooth\n\tSoft blocked: yes\n\tHard blocked: no\n";
+        let devs = parse_rfkill_list(sample);
+        assert_eq!(devs.len(), 2);
+        assert_eq!(devs[0].kind, "wlan");
+        assert!(!devs[0].soft_blocked);
+        assert_eq!(devs[1].kind, "bluetooth");
+        assert!(devs[1].soft_blocked);
+        assert!(parse_rfkill_list("").is_empty());
+    }
+
+    #[test]
+    fn test_airplane_from_states() {
+        assert!(airplane_from_states(false, true));
+        assert!(!airplane_from_states(true, true));
+        assert!(!airplane_from_states(false, false));
+        assert!(!airplane_from_states(true, false));
+    }
+
+    #[test]
+    fn test_kbd_pct_roundtrip() {
+        assert_eq!(kbd_pct_from_values(2, 3), Some(66));
+        assert_eq!(kbd_pct_from_values(0, 0), None);
+        assert_eq!(kbd_value_from_pct(50, 3), 1);
+        assert_eq!(kbd_value_from_pct(100, 3), 3);
+        assert_eq!(kbd_value_from_pct(200, 3), 3);
+    }
+
+    #[test]
+    fn test_parse_hypr_clients_classes() {
+        let sample = r#"[{"class":"kitty"},{"class":"firefox"},{"class":""}]"#;
+        let classes = parse_hypr_clients_classes(sample);
+        assert_eq!(classes, vec!["kitty".to_string(), "firefox".to_string()]);
+        assert!(parse_hypr_clients_classes("not json").is_empty());
+        assert!(parse_hypr_clients_classes("[]").is_empty());
     }
 }

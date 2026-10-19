@@ -5,6 +5,7 @@ use {
 
 pub use super::store_flatpak as flatpak;
 pub use super::store_hm as hm;
+pub use super::store_meta as meta;
 pub use super::store_nix as nix;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
