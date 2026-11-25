@@ -17,6 +17,7 @@ pub enum CaptureTarget {
     FullScreen,
     Monitor(String),
     Region,
+    Window,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +53,7 @@ pub struct CaptureResult {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RecordingStatus {
     pub pid: u32,
     pub start_timestamp: u64,
@@ -236,6 +237,24 @@ pub fn get_region_geometry(accent_hex: Option<&str>) -> Result<Option<String>, S
     }
 }
 
+pub fn active_window_geometry() -> Option<String> {
+    let out = Command::new("hyprctl").args(["activewindow", "-j"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let at = v.get("at")?.as_array()?;
+    let size = v.get("size")?.as_array()?;
+    let x = at.first()?.as_i64()?;
+    let y = at.get(1)?.as_i64()?;
+    let w = size.first()?.as_i64()?;
+    let h = size.get(1)?.as_i64()?;
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+    Some(format!("{x},{y} {w}x{h}"))
+}
+
 pub fn take_screenshot(target: &CaptureTarget, options: &CaptureOptions) -> Result<CaptureResult, String> {
     if options.delay_seconds > 0 {
         std::thread::sleep(std::time::Duration::from_secs(options.delay_seconds as u64));
@@ -252,6 +271,18 @@ pub fn take_screenshot(target: &CaptureTarget, options: &CaptureOptions) -> Resu
                     file_path: None,
                     copied_to_clipboard: false,
                     message: "Region selection cancelled".to_string(),
+                });
+            }
+        }
+    } else if *target == CaptureTarget::Window {
+        match active_window_geometry() {
+            Some(g) => Some(g),
+            None => {
+                return Ok(CaptureResult {
+                    success: false,
+                    file_path: None,
+                    copied_to_clipboard: false,
+                    message: "No active window found".to_string(),
                 });
             }
         }
@@ -275,7 +306,7 @@ pub fn take_screenshot(target: &CaptureTarget, options: &CaptureOptions) -> Resu
         CaptureTarget::Monitor(name) => {
             cmd.args(["-o", name]);
         }
-        CaptureTarget::Region => {
+        CaptureTarget::Region | CaptureTarget::Window => {
             if let Some(geom) = &region_geom {
                 cmd.args(["-g", geom]);
             }
@@ -370,6 +401,11 @@ pub fn start_screencast(target: &CaptureTarget, options: &CaptureOptions) -> Res
             Some(g) => Some(g),
             None => return Err("Region selection cancelled".to_string()),
         }
+    } else if *target == CaptureTarget::Window {
+        match active_window_geometry() {
+            Some(g) => Some(g),
+            None => return Err("No active window found".to_string()),
+        }
     } else {
         None
     };
@@ -385,6 +421,7 @@ pub fn start_screencast(target: &CaptureTarget, options: &CaptureOptions) -> Res
         CaptureTarget::FullScreen => "Full Screen".to_string(),
         CaptureTarget::Monitor(name) => format!("Monitor: {name}"),
         CaptureTarget::Region => "Selected Region".to_string(),
+        CaptureTarget::Window => "Active Window".to_string(),
     };
 
     if rec_tool.0 == "wl-screenrec" {
@@ -403,7 +440,7 @@ pub fn start_screencast(target: &CaptureTarget, options: &CaptureOptions) -> Res
             CaptureTarget::Monitor(mon) => {
                 cmd.args(["-o", mon]);
             }
-            CaptureTarget::Region => {
+            CaptureTarget::Region | CaptureTarget::Window => {
                 if let Some(geom) = &region_geom {
                     cmd.args(["-g", geom]);
                 }
@@ -419,7 +456,7 @@ pub fn start_screencast(target: &CaptureTarget, options: &CaptureOptions) -> Res
             CaptureTarget::Monitor(mon) => {
                 cmd.args(["-o", mon]);
             }
-            CaptureTarget::Region => {
+            CaptureTarget::Region | CaptureTarget::Window => {
                 if let Some(geom) = &region_geom {
                     cmd.args(["-g", geom]);
                 }

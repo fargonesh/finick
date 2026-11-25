@@ -12,6 +12,8 @@ pub struct PanelShell {
     on_dismiss: Option<EventHandler<()>>,
     duration: u64,
     offset_y: f32,
+    offset_x: f32,
+    blur_from: f32,
     scale_from: f32,
     reduced: bool,
 }
@@ -25,6 +27,8 @@ impl PanelShell {
             on_dismiss: None,
             duration: DUR_STANDARD,
             offset_y: -8.0,
+            offset_x: 0.0,
+            blur_from: 0.0,
             scale_from: SCALE_PANEL_FROM,
             reduced: false,
         }
@@ -42,6 +46,16 @@ impl PanelShell {
 
     pub fn offset_y(mut self, offset_y: f32) -> Self {
         self.offset_y = offset_y;
+        self
+    }
+
+    pub fn offset_x(mut self, offset_x: f32) -> Self {
+        self.offset_x = offset_x;
+        self
+    }
+
+    pub fn blur_from(mut self, blur: f32) -> Self {
+        self.blur_from = blur;
         self
     }
 
@@ -72,6 +86,8 @@ impl Component for PanelShell {
     fn render(&self) -> impl IntoElement {
         let duration = motion_duration(self.duration, self.reduced);
         let offset_y = self.offset_y;
+        let offset_x = self.offset_x;
+        let blur_from = self.blur_from;
         let scale_from = self.scale_from;
         let skip = should_skip(self.reduced, self.duration);
         let dismiss = self.dismiss.clone();
@@ -87,11 +103,15 @@ impl Component for PanelShell {
         });
         let mut fired = use_state(|| false);
         let dismiss_a = dismiss.clone();
+        let on_dismiss_skip = on_dismiss.clone();
 
         use_side_effect(move || {
             if *dismiss_a.read() && !*fired.read() {
                 if skip {
                     fired.set(true);
+                    if let Some(cb) = on_dismiss_skip.clone() {
+                        cb.call(());
+                    }
                 } else {
                     anim.reverse();
                 }
@@ -112,6 +132,8 @@ impl Component for PanelShell {
         rect()
             .opacity(t)
             .offset_y(offset_y * (1. - t))
+            .offset_x(offset_x * (1. - t))
+            .blur(blur_from * (1. - t))
             .scale(scale_from + (1. - scale_from) * t)
             .children(self.elements.clone())
     }

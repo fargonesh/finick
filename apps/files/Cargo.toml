@@ -11,6 +11,7 @@ index = { path = "../../services/index" }
 serde_json = "1.0.139"
 freya = { workspace = true }
 chrono = "0.4.45"
+notify = "8"
 image = "0.25.10"
 bytes = "1.12.1"
 tokio = { version = "1.53.1", features = ["full"] }

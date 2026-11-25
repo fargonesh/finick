@@ -64,6 +64,11 @@ impl NotificationBroadcaster {
         subs.push(sender);
     }
 
+    /// Maximum retained active notifications. Banners auto-dismiss client
+    /// side, but anything missed (or with timeout 0) would otherwise pile
+    /// up here forever and inflate the topbar badge.
+    pub const MAX_ACTIVE: usize = 50;
+
     /// Broadcast an event to all connected subscribers, automatically pruning disconnected channels.
     pub fn broadcast(&self, event: NotificationEvent) {
         if let Ok(mut active) = self.active.lock() {
@@ -72,6 +77,9 @@ impl NotificationBroadcaster {
                     if let Some(pos) = active.iter().position(|n| n.id == notif.id) {
                         active[pos] = notif.clone();
                     } else {
+                        if active.len() >= Self::MAX_ACTIVE {
+                            active.remove(0);
+                        }
                         active.push(notif.clone());
                     }
                 }
@@ -226,6 +234,24 @@ mod tests {
         broadcaster.broadcast(NotificationEvent::Close(2));
         assert_eq!(rx1.recv().unwrap(), NotificationEvent::Close(2));
         assert_eq!(broadcaster.subscriber_count(), 1);
+    }
+
+    #[test]
+    fn test_active_list_caps_oldest_first() {
+        let broadcaster = NotificationBroadcaster::new();
+        for id in 0..(NotificationBroadcaster::MAX_ACTIVE as u32 + 5) {
+            broadcaster.broadcast(NotificationEvent::Show(Notification {
+                id,
+                app_name: "test".into(),
+                summary: "s".into(),
+                body: "b".into(),
+                icon: "info".into(),
+                timeout: 5000,
+            }));
+        }
+        let active = broadcaster.get_active();
+        assert_eq!(active.len(), NotificationBroadcaster::MAX_ACTIVE);
+        assert_eq!(active.first().map(|n| n.id), Some(5));
     }
 
     #[tokio::test]

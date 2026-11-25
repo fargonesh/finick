@@ -7,7 +7,7 @@ use {
     regex::Regex,
     rusqlite::params,
     std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         env::{self, var},
         fs::{self, read_dir},
         os::unix::fs::PermissionsExt,
@@ -32,22 +32,26 @@ struct ChannelData {
 }
 
 pub mod ty;
-const MAX_DEPTH: usize = 5;
 /// If a file was indexed less than this many seconds ago, skip re-indexing.
 const REINDEX_THRESHOLD: i64 = 60;
 
-fn folders() -> Vec<PathBuf> {
-    let mut folders = vec![
-        Path::new("/usr/share/applications/").to_path_buf(),
-        Path::new("/usr/local/share/applications/").to_path_buf(),
-        Path::new(&var("HOME").unwrap()).to_path_buf(),
+fn roots() -> Vec<(PathBuf, usize)> {
+    let mut roots = vec![
+        (Path::new("/usr/share/applications/").to_path_buf(), 1),
+        (Path::new("/usr/local/share/applications/").to_path_buf(), 1),
     ];
+    let home = PathBuf::from(var("HOME").unwrap_or_default());
+    for (name, depth) in [("Desktop", 3), ("Documents", 4), ("Downloads", 3), (".local/share/applications", 2)] {
+        roots.push((home.join(name), depth));
+    }
     if let Ok(path) = var("PATH") {
         for folder in env::split_paths(&path) {
-            folders.push(folder);
+            roots.push((folder, 0));
         }
     }
-    folders
+    let mut seen = HashSet::new();
+    roots.retain(|(path, _)| seen.insert(path.clone()));
+    roots
 }
 
 fn ignore() -> Vec<Regex> {
@@ -62,64 +66,93 @@ fn is_binary_file(path: &Path) -> bool {
     false
 }
 
+const FLUSH_BATCH: usize = 500;
+
+fn flush(pool: &Pool<SqliteConnectionManager>, batch: &mut Vec<ChannelData>) {
+    if batch.is_empty() {
+        return;
+    }
+    let Ok(mut conn) = pool.get() else {
+        return;
+    };
+    let Ok(tx) = conn.transaction() else {
+        return;
+    };
+    let mut stmt = tx
+        .prepare(
+            "REPLACE INTO files (name, path, parent_path, depth, last_accessed, executable, desktop, icon, is_dir, size) \
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        )
+        .unwrap();
+    for data in batch.drain(..) {
+        stmt.execute(params![
+            data.name,
+            data.path_str,
+            data.parent_path,
+            data.depth,
+            data.timestamp,
+            data.executable,
+            data.is_desktop,
+            data.icon,
+            data.is_dir,
+            data.size.map(|s| s as i64),
+        ])
+        .unwrap();
+    }
+    drop(stmt);
+    tx.commit().unwrap();
+}
+
 pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
-    let folders = dirs.unwrap_or(folders());
+    let targeted = dirs.is_some();
+    let targets: Vec<(PathBuf, usize)> = match dirs {
+        Some(paths) => paths.into_iter().map(|p| (p, 0)).collect(),
+        None => roots(),
+    };
     let ignore = Arc::new(ignore());
-    // Use a sync_channel with a fixed capacity to prevent unbounded memory usage.
     let (tx, rx) = mpsc::sync_channel::<ChannelData>(1000);
 
-    // Spawn a thread to process file entries.
-    std::thread::spawn(move || {
-        let pool = pool.clone();
-        while let Ok(data) = rx.recv() {
-            let conn = pool.get().unwrap();
-            println!("{:?}", data.icon);
-            // Check if the file already exists and if it was indexed recently.
-            let should_index =
-                match conn.query_row("SELECT last_accessed FROM files WHERE path = ?1", params![&data.path_str], |row| {
-                    row.get::<_, i64>(0)
-                }) {
-                    Ok(last_accessed) => {
-                        // Only re-index if the stored timestamp is older than our threshold.
-                        data.timestamp >= last_accessed + REINDEX_THRESHOLD
-                    }
-                    Err(_) => true, // File not indexed yet.
-                };
-
-            if should_index {
-                // Using REPLACE here so that we update if it already exists.
-                conn.execute(
-                    "REPLACE INTO files (name, path, parent_path, depth, last_accessed, executable, desktop, icon, is_dir, \
-                     size) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                    params![
-                        data.name,
-                        data.path_str,
-                        data.parent_path,
-                        data.depth,
-                        data.timestamp,
-                        data.executable,
-                        data.is_desktop,
-                        data.icon,
-                        data.is_dir,
-                        data.size.map(|s| s as i64),
-                    ],
-                )
-                .unwrap();
+    let known: Arc<HashMap<String, i64>> = if targeted {
+        Arc::new(HashMap::new())
+    } else {
+        let conn = pool.get().unwrap();
+        let mut map = HashMap::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT path, last_accessed FROM files") {
+            if let Ok(rows) = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))) {
+                for row in rows.flatten() {
+                    map.insert(row.0, row.1);
+                }
             }
+        }
+        Arc::new(map)
+    };
+
+    std::thread::spawn({
+        let pool = pool.clone();
+        move || {
+            let mut batch = Vec::with_capacity(FLUSH_BATCH);
+            while let Ok(data) = rx.recv() {
+                let fresh = known.get(&data.path_str).map_or(true, |&last| data.timestamp >= last + REINDEX_THRESHOLD);
+                if fresh {
+                    batch.push(data);
+                }
+                if batch.len() >= FLUSH_BATCH {
+                    flush(&pool, &mut batch);
+                }
+            }
+            flush(&pool, &mut batch);
         }
     });
 
-    folders.into_iter().for_each(|f| {
-        std::thread::spawn({
-            let ignore = ignore.clone();
-            let tx = tx.clone();
-            move || task(f, ignore.clone(), tx.clone(), 0)
-        });
+    std::thread::spawn(move || {
+        for (folder, max_depth) in targets {
+            task(folder, ignore.clone(), tx.clone(), 0, max_depth);
+        }
     });
 }
 
-fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>, depth: usize) {
-    if depth > MAX_DEPTH {
+fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>, depth: usize, max_depth: usize) {
+    if depth > max_depth {
         return;
     }
 
@@ -150,7 +183,7 @@ fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>
                     size: None,
                 });
 
-                task(path, ignore.clone(), tx.clone(), depth + 1);
+                task(path, ignore.clone(), tx.clone(), depth + 1, max_depth);
             } else if ft.is_file() && !is_binary_file(&path) {
                 let timestamp = entry
                     .metadata()
@@ -303,6 +336,68 @@ pub fn fuzzy_score(query: &str, name: &str, path: &str, is_desktop: bool, is_exe
     Some(score)
 }
 
+pub fn escape_like(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Builds a subsequence LIKE pattern (`%c1%c2%...%`) so the SQL prefilter
+/// does not drop subsequence-only matches before [`fuzzy_score`] runs.
+/// Queries longer than 12 chars fall back to `None` to bound pattern cost.
+pub fn fuzzy_like_pattern(query: &str) -> Option<String> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() || q.chars().count() > 12 {
+        return None;
+    }
+    let mut pat = String::from("%");
+    for c in q.chars() {
+        if c == '%' || c == '_' || c == '\\' {
+            pat.push('\\');
+        }
+        pat.push(c);
+        pat.push('%');
+    }
+    Some(pat)
+}
+
+pub const USAGE_TABLE_SQL: &str = "CREATE TABLE IF NOT EXISTS usage (
+        path TEXT PRIMARY KEY,
+        count INTEGER NOT NULL DEFAULT 1,
+        last_used INTEGER NOT NULL
+    )";
+
+pub fn ensure_usage_table(conn: &rusqlite::Connection) {
+    let _ = conn.execute(USAGE_TABLE_SQL, []);
+}
+
+pub fn record_usage(pool: &Pool<SqliteConnectionManager>, path: &str) {
+    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    let Ok(conn) = pool.get() else { return };
+    ensure_usage_table(&conn);
+    let _ = conn.execute(
+        "INSERT INTO usage (path, count, last_used) VALUES (?1, 1, ?2)
+         ON CONFLICT(path) DO UPDATE SET count = count + 1, last_used = excluded.last_used",
+        params![path, now],
+    );
+}
+
+pub fn load_usage_counts(pool: &Pool<SqliteConnectionManager>) -> HashMap<String, u64> {
+    let Ok(conn) = pool.get() else { return HashMap::new() };
+    ensure_usage_table(&conn);
+    let mut map = HashMap::new();
+    let Ok(mut stmt) = conn.prepare("SELECT path, count FROM usage") else { return map };
+    let Ok(rows) = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))) else { return map };
+    for row in rows.filter_map(Result::ok) {
+        map.insert(row.0, row.1.max(0) as u64);
+    }
+    map
+}
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
 pub struct RecentEntry {
     pub name: String,
@@ -385,7 +480,8 @@ fn read_desktop(path: &PathBuf) -> Result<(String, Option<String>), ()> {
     let icon = icon.map(|i| i.split('=').next_back().unwrap_or_default().to_string());
 
     if let Some(icon) = icon.and_then(|icon| resolve_icon(&icon)) {
-        if let Ok(img) = ImageReader::open(Path::new(&icon)).unwrap().decode() {
+        let decoded = ImageReader::open(Path::new(&icon)).ok().and_then(|r| r.decode().ok());
+        if let Some(img) = decoded {
             let img = img.resize(64, 64, image::imageops::FilterType::Lanczos3);
 
             let path = config::finick_root().join("icons").join(format!("{name}.png"));
@@ -394,24 +490,57 @@ fn read_desktop(path: &PathBuf) -> Result<(String, Option<String>), ()> {
             img.save(&path).map_err(|_| ())?;
             return Ok((name, Some(path.to_string_lossy().to_string())));
         }
+        return Ok((name, Some(icon)));
     }
 
     Ok((name, None))
 }
 
 fn resolve_icon(name: &str) -> Option<String> {
-    let locations = vec![
-        env::var("HOME").map(|v| format!("{v}/.icons/")).ok(),
-        env::var("XDG_DATA_HOME").map(|v| format!("{v}/icons/")).ok(),
-        Some("/usr/share/pixmaps".to_string()),
-    ]
-    .into_iter()
-    .flatten();
-
-    for location in locations {
-        if let Ok(dir) = read_dir(location) {
-            if let Some(icon) = dir.filter_map(|f| f.ok()).find(|f| f.file_name().to_string_lossy().starts_with(name)) {
-                return Some(icon.path().to_string_lossy().to_string());
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    if name.contains('/') {
+        return Path::new(name).exists().then(|| name.to_string());
+    }
+    let stem = name.strip_suffix(".png").or_else(|| name.strip_suffix(".svg")).or_else(|| name.strip_suffix(".xpm")).unwrap_or(name);
+    let extensions = ["png", "svg", "xpm", ""];
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(home) = var("HOME") {
+        dirs.push(PathBuf::from(format!("{home}/.icons")));
+        dirs.push(PathBuf::from(format!("{home}/.local/share/icons")));
+    }
+    if let Ok(xdg) = var("XDG_DATA_HOME") {
+        dirs.push(PathBuf::from(format!("{xdg}/icons")));
+    }
+    for base in ["/usr/share/icons", "/usr/local/share/icons", "/usr/share/pixmaps", "/run/current-system/sw/share/icons"] {
+        dirs.push(PathBuf::from(base));
+    }
+    for dir in &dirs {
+        for ext in extensions {
+            let candidate = if ext.is_empty() { dir.join(stem) } else { dir.join(format!("{stem}.{ext}")) };
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+        if let Ok(entries) = read_dir(dir) {
+            for entry in entries.filter_map(|f| f.ok()) {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                let fstem = fname.rsplit('.').nth(1).unwrap_or(&fname);
+                if fstem.eq_ignore_ascii_case(stem) {
+                    return Some(entry.path().to_string_lossy().to_string());
+                }
+            }
+        }
+        for theme in ["hicolor", "Adwaita", "gnome", "breeze", "Papirus"] {
+            for size in ["48x48", "64x64", "scalable", "symbolic"] {
+                for ext in ["png", "svg", "xpm"] {
+                    let candidate = dir.join(theme).join(size).join("apps").join(format!("{stem}.{ext}"));
+                    if candidate.is_file() {
+                        return Some(candidate.to_string_lossy().to_string());
+                    }
+                }
             }
         }
     }
@@ -420,24 +549,30 @@ fn resolve_icon(name: &str) -> Option<String> {
 }
 
 pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(SearchResult)) {
-    let like_query = format!("%{query}%");
+    let like_query = format!("%{}%", escape_like(query));
+    let fuzzy_pat = fuzzy_like_pattern(query);
     let conn = pool.get().unwrap();
-    let counts = recent_counts();
+    let mut counts = load_usage_counts(&pool);
+    for (path, n) in recent_counts() {
+        counts.entry(path).or_insert(n);
+    }
 
     let mut res = conn
         .prepare(
             "SELECT name, path, icon, desktop, executable, is_dir, size, last_accessed
              FROM files
-             WHERE name LIKE ?1 OR path LIKE ?1
+             WHERE name LIKE ?1 ESCAPE '\\' OR path LIKE ?1 ESCAPE '\\'
+                OR (?2 IS NOT NULL AND (name LIKE ?2 ESCAPE '\\' OR path LIKE ?2 ESCAPE '\\'))
              ORDER BY last_accessed DESC, depth ASC
-             LIMIT 150",
+             LIMIT 300",
         )
         .unwrap();
 
     let mut found_paths = std::collections::HashSet::new();
     let mut scored: Vec<(i64, u64, SearchResult)> = Vec::new();
 
-    let mut rows = res.query(params![like_query]).unwrap();
+    let fuzzy_ref: Option<&str> = fuzzy_pat.as_deref();
+    let mut rows = res.query(params![like_query, fuzzy_ref]).unwrap();
     while let Some(row) = rows.next().unwrap() {
         let name: String = row.get(0).unwrap();
         let path: String = row.get(1).unwrap();
@@ -561,23 +696,39 @@ pub fn watch(pool: Pool<SqliteConnectionManager>) {
 
     let mut watcher: RecommendedWatcher = Watcher::new(tx, Config::default()).unwrap();
 
-    for folder in folders() {
-        let _ = watcher.watch(&folder, RecursiveMode::Recursive);
+    for (folder, _) in roots() {
+        if folder.is_dir() {
+            let _ = watcher.watch(&folder, RecursiveMode::NonRecursive);
+        }
     }
 
-    std::thread::spawn(move || loop {
-        if let Ok(Ok(event)) = rx.recv() {
-            match event.kind {
-                EventKind::Create(_) => {
-                    index(Some(event.paths), pool.clone());
+    std::thread::spawn(move || {
+        let mut pending: Vec<PathBuf> = Vec::new();
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_millis(150)) {
+                Ok(Ok(event)) => match event.kind {
+                    EventKind::Create(_) => pending.extend(event.paths),
+                    EventKind::Remove(_) => {
+                        for p in &event.paths {
+                            let param = format!("{}%", p.display());
+                            if let Ok(conn) = pool.get() {
+                                let _ = conn.execute("DELETE FROM files WHERE path LIKE ?1", params![param]);
+                            }
+                        }
+                    }
+                    _ => {}
+                },
+                Ok(Err(_)) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if !pending.is_empty() {
+                        index(Some(std::mem::take(&mut pending)), pool.clone());
+                    }
+                    continue;
                 }
-                EventKind::Remove(_) => {
-                    event.paths.iter().for_each(|p| {
-                        let param = format!("{}%", p.display());
-                        pool.get().unwrap().execute("DELETE FROM files WHERE path LIKE ?1", params![param]).unwrap();
-                    });
-                }
-                _ => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+            if pending.len() >= 500 {
+                index(Some(std::mem::take(&mut pending)), pool.clone());
             }
         }
     });
@@ -609,5 +760,31 @@ mod tests {
     #[test]
     fn empty_query_scores_zero() {
         assert_eq!(fuzzy_score("", "Anything", "/tmp/x", false, false), Some(0));
+    }
+
+    #[test]
+    fn subsequence_matches_despite_gap() {
+        assert!(fuzzy_score("fx", "Firefox", "/usr/bin/firefox", false, false).is_some());
+    }
+
+    #[test]
+    fn exact_beats_prefix_beats_contains() {
+        let exact = fuzzy_score("files", "Files", "/usr/bin/files", false, false).unwrap();
+        let prefix = fuzzy_score("fil", "Files", "/usr/bin/files", false, false).unwrap();
+        let contains = fuzzy_score("fil", "My Files App", "/usr/bin/myfiles", false, false).unwrap();
+        assert!(exact > prefix && prefix > contains);
+    }
+
+    #[test]
+    fn fuzzy_like_pattern_is_subsequence() {
+        assert_eq!(fuzzy_like_pattern("fr"), Some("%f%r%".to_string()));
+        assert_eq!(fuzzy_like_pattern(""), None);
+        assert!(fuzzy_like_pattern("averylongquerystring").is_none());
+    }
+
+    #[test]
+    fn fuzzy_like_pattern_escapes_wildcards() {
+        assert_eq!(fuzzy_like_pattern("a%b"), Some("%a%\\%%b%".to_string()));
+        assert_eq!(escape_like("100%_x\\y"), "100\\%\\_x\\\\y");
     }
 }

@@ -17,9 +17,50 @@ pub fn slider_row(
         .child(
             rect()
                 .width(Size::flex(1.))
+                .content(Content::Flex)
                 .child(Slider::new(on_change).value(value).theme(SliderThemePartial::new().background(t.track).thumb_inner_background(t.accent).thumb_background(Color::from_rgb(255,255,255)).border_fill(t.accent))),
         )
         .content(Content::Flex)
+}
+
+#[derive(Clone, PartialEq)]
+struct MuteButton {
+    muted: bool,
+    on_toggle: EventHandler<bool>,
+}
+
+impl Component for MuteButton {
+    fn render(&self) -> impl IntoElement {
+        let t = use_app_theme();
+        let hovered = use_state(|| false);
+        let is_hovered = *hovered.read();
+        let mut h1 = hovered;
+        let mut h2 = hovered;
+        let on_toggle = self.on_toggle.clone();
+        let is_muted = self.muted;
+        let bg = if is_muted {
+            if is_hovered { t.accent_blue_hover } else { t.accent }
+        } else if is_hovered {
+            t.track
+        } else {
+            t.panel_raised
+        };
+
+        rect()
+            .width(Size::px(32.))
+            .height(Size::px(32.))
+            .corner_radius(999.)
+            .background(bg)
+            .border(Border::new().width(1.).fill(if is_muted { t.accent } else { t.border }))
+            .center()
+            .cursor(CursorIcon::Pointer)
+            .a11y_role(AccessibilityRole::Button)
+            .a11y_focusable(true)
+            .on_pointer_enter(move |_| h1.set(true))
+            .on_pointer_leave(move |_| h2.set(false))
+            .on_press(move |_| on_toggle.call(!is_muted))
+            .child(icon(SOUND, 14., if is_muted { Color::WHITE } else { t.text_dim }))
+    }
 }
 
 pub fn slider_row_with_mute(
@@ -40,21 +81,14 @@ pub fn slider_row_with_mute(
         .child(
             rect()
                 .width(Size::flex(1.))
+                .content(Content::Flex)
                 .opacity(if is_muted { 0.45 } else { 1.0 })
                 .child(Slider::new(on_change).value(value).theme(SliderThemePartial::new().background(t.track).thumb_inner_background(t.accent).thumb_background(Color::from_rgb(255,255,255)).border_fill(t.accent))),
         )
-        .child(
-            rect()
-                .width(Size::px(32.))
-                .height(Size::px(32.))
-                .corner_radius(999.)
-                .background(if is_muted { t.accent } else { t.panel_raised })
-                .border(Border::new().width(1.).fill(if is_muted { t.accent } else { t.border }))
-                .center()
-                .cursor(CursorIcon::Pointer)
-                .on_press(move |_| on_toggle_mute(!is_muted))
-                .child(icon(SOUND, 14., if is_muted { Color::WHITE } else { t.text_dim })),
-        )
+        .child(MuteButton {
+            muted: is_muted,
+            on_toggle: EventHandler::new(move |v: bool| on_toggle_mute(v)),
+        })
         .content(Content::Flex)
 }
 

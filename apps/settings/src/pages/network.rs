@@ -254,6 +254,8 @@ impl Component for Network {
         let network_state = use_state(NetworkInfo::default);
         let is_loading = use_state(|| true);
         let mut loaded = use_state(|| false);
+        let wifi_armed: State<Option<String>> = use_state(|| None);
+        let vpn_armed: State<Option<String>> = use_state(|| None);
 
         if !*loaded.read() {
             loaded.set(true);
@@ -375,6 +377,58 @@ impl Component for Network {
                                             let sec = net.security.clone();
                                             let l = loaded;
                                             let ld = is_loading;
+                                            let armed_ssid = wifi_armed.read().clone();
+                                            let is_armed = armed_ssid.as_deref() == Some(ssid.as_str());
+
+                                            let action: freya::prelude::Element = if is_conn && !is_armed {
+                                                let ssid_c = ssid.clone();
+                                                let mut armed = wifi_armed;
+                                                secondary_button("Disconnect", move || {
+                                                    armed.set(Some(ssid_c.clone()));
+                                                    let id = ssid_c.clone();
+                                                    freya::prelude::spawn(async move {
+                                                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                                                        if armed.read().clone() == Some(id) {
+                                                            armed.set(None);
+                                                        }
+                                                    });
+                                                })
+                                                .into_element()
+                                            } else if is_conn && is_armed {
+                                                let ssid_c = ssid.clone();
+                                                let mut armed = wifi_armed;
+                                                let mut l_c = l;
+                                                let mut ld_c = ld;
+                                                rect()
+                                                    .horizontal()
+                                                    .spacing(8.)
+                                                    .child(danger_button("Sure? Disconnect", move || {
+                                                        let s = ssid_c.clone();
+                                                        armed.set(None);
+                                                        ld_c.set(true);
+                                                        std::thread::spawn(move || {
+                                                            disconnect_wifi(&s);
+                                                            std::thread::sleep(std::time::Duration::from_millis(800));
+                                                        });
+                                                        l_c.set(false);
+                                                    }))
+                                                    .child(ghost_button("Cancel", move || armed.set(None)))
+                                                    .into_element()
+                                            } else {
+                                                let ssid_c = ssid.clone();
+                                                let mut l_c = l;
+                                                let mut ld_c = ld;
+                                                secondary_button("Connect", move || {
+                                                    let s = ssid_c.clone();
+                                                    ld_c.set(true);
+                                                    std::thread::spawn(move || {
+                                                        connect_wifi(&s);
+                                                        std::thread::sleep(std::time::Duration::from_millis(800));
+                                                    });
+                                                    l_c.set(false);
+                                                })
+                                                .into_element()
+                                            };
 
                                             rect()
                                                 .key(net.ssid.clone())
@@ -450,27 +504,7 @@ impl Component for Network {
                                                                 ),
                                                         ),
                                                 )
-                                                .child(rect().horizontal().spacing(8.).child(secondary_button(
-                                                    if is_conn { "Disconnect" } else { "Connect" },
-                                                    {
-                                                        let ssid_c = ssid.clone();
-                                                        let mut l_c = l;
-                                                        let mut ld_c = ld;
-                                                        move || {
-                                                            let s = ssid_c.clone();
-                                                            ld_c.set(true);
-                                                            std::thread::spawn(move || {
-                                                                if is_conn {
-                                                                    disconnect_wifi(&s);
-                                                                } else {
-                                                                    connect_wifi(&s);
-                                                                }
-                                                                std::thread::sleep(std::time::Duration::from_millis(800));
-                                                            });
-                                                            l_c.set(false);
-                                                        }
-                                                    },
-                                                )))
+                                                .child(rect().horizontal().spacing(8.).child(action))
                                                 .into_element()
                                         }))
                                         .into_element()
@@ -496,6 +530,96 @@ impl Component for Network {
                                             let sec = net.security.clone();
                                             let l = loaded;
                                             let ld = is_loading;
+                                            let armed_ssid = wifi_armed.read().clone();
+                                            let disc_key = format!("disc:{ssid}");
+                                            let forget_key = format!("forget:{ssid}");
+                                            let is_disc_armed = armed_ssid.as_deref() == Some(disc_key.as_str());
+                                            let is_forget_armed = armed_ssid.as_deref() == Some(forget_key.as_str());
+
+                                            let main_action: freya::prelude::Element = if is_conn && !is_disc_armed {
+                                                let key = disc_key.clone();
+                                                let mut armed = wifi_armed;
+                                                secondary_button("Disconnect", move || {
+                                                    armed.set(Some(key.clone()));
+                                                    let id = key.clone();
+                                                    freya::prelude::spawn(async move {
+                                                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                                                        if armed.read().clone() == Some(id) {
+                                                            armed.set(None);
+                                                        }
+                                                    });
+                                                })
+                                                .into_element()
+                                            } else if is_conn && is_disc_armed {
+                                                let ssid_c = ssid.clone();
+                                                let mut armed = wifi_armed;
+                                                let mut l_c = l;
+                                                let mut ld_c = ld;
+                                                rect()
+                                                    .horizontal()
+                                                    .spacing(8.)
+                                                    .child(danger_button("Sure? Disconnect", move || {
+                                                        let s = ssid_c.clone();
+                                                        armed.set(None);
+                                                        ld_c.set(true);
+                                                        std::thread::spawn(move || {
+                                                            disconnect_wifi(&s);
+                                                            std::thread::sleep(std::time::Duration::from_millis(800));
+                                                        });
+                                                        l_c.set(false);
+                                                    }))
+                                                    .child(ghost_button("Cancel", move || armed.set(None)))
+                                                    .into_element()
+                                            } else {
+                                                let ssid_c = ssid.clone();
+                                                let mut l_c = l;
+                                                let mut ld_c = ld;
+                                                secondary_button("Connect", move || {
+                                                    let s = ssid_c.clone();
+                                                    ld_c.set(true);
+                                                    std::thread::spawn(move || {
+                                                        connect_wifi(&s);
+                                                        std::thread::sleep(std::time::Duration::from_millis(800));
+                                                    });
+                                                    l_c.set(false);
+                                                })
+                                                .into_element()
+                                            };
+                                            let forget_action: freya::prelude::Element = if !is_forget_armed {
+                                                let key = forget_key.clone();
+                                                let mut armed = wifi_armed;
+                                                secondary_button("Forget", move || {
+                                                    armed.set(Some(key.clone()));
+                                                    let id = key.clone();
+                                                    freya::prelude::spawn(async move {
+                                                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                                                        if armed.read().clone() == Some(id) {
+                                                            armed.set(None);
+                                                        }
+                                                    });
+                                                })
+                                                .into_element()
+                                            } else {
+                                                let ssid_c = ssid.clone();
+                                                let mut armed = wifi_armed;
+                                                let mut l_c = l;
+                                                let mut ld_c = ld;
+                                                rect()
+                                                    .horizontal()
+                                                    .spacing(8.)
+                                                    .child(danger_button("Sure? Forget", move || {
+                                                        let s = ssid_c.clone();
+                                                        armed.set(None);
+                                                        ld_c.set(true);
+                                                        std::thread::spawn(move || {
+                                                            forget_wifi(&s);
+                                                            std::thread::sleep(std::time::Duration::from_millis(500));
+                                                        });
+                                                        l_c.set(false);
+                                                    }))
+                                                    .child(ghost_button("Cancel", move || armed.set(None)))
+                                                    .into_element()
+                                            };
 
                                             rect()
                                                 .key(format!("known-{}", net.ssid))
@@ -558,45 +682,8 @@ impl Component for Network {
                                                     rect()
                                                         .horizontal()
                                                         .spacing(8.)
-                                                        .child(secondary_button(
-                                                            if is_conn { "Disconnect" } else { "Connect" },
-                                                            {
-                                                                let ssid_c = ssid.clone();
-                                                                let mut l_c = l;
-                                                                let mut ld_c = ld;
-                                                                move || {
-                                                                    let s = ssid_c.clone();
-                                                                    ld_c.set(true);
-                                                                    std::thread::spawn(move || {
-                                                                        if is_conn {
-                                                                            disconnect_wifi(&s);
-                                                                        } else {
-                                                                            connect_wifi(&s);
-                                                                        }
-                                                                        std::thread::sleep(
-                                                                            std::time::Duration::from_millis(800),
-                                                                        );
-                                                                    });
-                                                                    l_c.set(false);
-                                                                }
-                                                            },
-                                                        ))
-                                                        .child(secondary_button("Forget", {
-                                                            let ssid_c = ssid.clone();
-                                                            let mut l_c = l;
-                                                            let mut ld_c = ld;
-                                                            move || {
-                                                                let s = ssid_c.clone();
-                                                                ld_c.set(true);
-                                                                std::thread::spawn(move || {
-                                                                    forget_wifi(&s);
-                                                                    std::thread::sleep(std::time::Duration::from_millis(
-                                                                        500,
-                                                                    ));
-                                                                });
-                                                                l_c.set(false);
-                                                            }
-                                                        })),
+                                                        .child(main_action)
+                                                        .child(forget_action),
                                                 )
                                                 .into_element()
                                         }))
@@ -617,7 +704,47 @@ impl Component for Network {
                                         let ip_str = vpn.ip_address.clone().unwrap_or_else(|| "No IP assigned".to_string());
                                         let l = loaded;
                                         let ld = is_loading;
-
+                                        let armed_key = vpn_armed.read().clone();
+                                        let vpn_key = format!("vpn:{}", vpn.interface);
+                                        let is_armed = armed_key.as_deref() == Some(vpn_key.as_str());
+                                        let vpn_action: freya::prelude::Element = if !is_armed {
+                                            let key = vpn_key.clone();
+                                            let mut armed = vpn_armed;
+                                            secondary_button(if is_conn { "Disconnect" } else { "Connect" }, move || {
+                                                armed.set(Some(key.clone()));
+                                                let id = key.clone();
+                                                freya::prelude::spawn(async move {
+                                                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                                                    if armed.read().clone() == Some(id) {
+                                                        armed.set(None);
+                                                    }
+                                                });
+                                            })
+                                            .into_element()
+                                        } else {
+                                            let v = vpn_clone.clone();
+                                            let mut armed = vpn_armed;
+                                            let mut l_c = l;
+                                            let mut ld_c = ld;
+                                            rect()
+                                                .horizontal()
+                                                .spacing(8.)
+                                                .child(danger_button(
+                                                    if is_conn { "Sure? Disconnect" } else { "Sure? Connect" },
+                                                    move || {
+                                                        let v_act = v.clone();
+                                                        armed.set(None);
+                                                        ld_c.set(true);
+                                                        std::thread::spawn(move || {
+                                                            toggle_vpn(&v_act);
+                                                            std::thread::sleep(std::time::Duration::from_millis(800));
+                                                        });
+                                                        l_c.set(false);
+                                                    },
+                                                ))
+                                                .child(ghost_button("Cancel", move || armed.set(None)))
+                                                .into_element()
+                                        };
                                         rect()
                                             .key(format!("vpn-{}", vpn.interface))
                                             .width(Size::fill())
@@ -698,23 +825,7 @@ impl Component for Network {
                                                             ),
                                                     ),
                                             )
-                                            .child(rect().horizontal().spacing(8.).child(secondary_button(
-                                                if is_conn { "Disconnect" } else { "Connect" },
-                                                {
-                                                    let v = vpn_clone.clone();
-                                                    let mut l_c = l;
-                                                    let mut ld_c = ld;
-                                                    move || {
-                                                        let v_act = v.clone();
-                                                        ld_c.set(true);
-                                                        std::thread::spawn(move || {
-                                                            toggle_vpn(&v_act);
-                                                            std::thread::sleep(std::time::Duration::from_millis(800));
-                                                        });
-                                                        l_c.set(false);
-                                                    }
-                                                },
-                                            )))
+                                            .child(rect().horizontal().spacing(8.).child(vpn_action))
                                             .into_element()
                                     }))
                                     .into_element()

@@ -34,6 +34,7 @@ async fn main() {
         .unwrap();
 
     let _ = pool.get().unwrap().execute("CREATE INDEX IF NOT EXISTS idx_parent_path ON files (parent_path);", params![]);
+    pool.get().unwrap().execute(index::USAGE_TABLE_SQL, params![]).unwrap();
 
     thread::spawn({
         let pool = pool.clone();
@@ -57,6 +58,9 @@ async fn main() {
                 index::list_dir(&path, pool.clone(), |v| {
                     let _ = sender.send(v);
                 });
+            }
+            Request::RecordUsage { result } => {
+                index::record_usage(&pool, &result.path);
             }
         }
     })

@@ -130,6 +130,7 @@ pub struct NotificationPopup {
     pub width: Size,
     pub auto_dismiss: bool,
     pub stack_count: usize,
+    pub animated: bool,
     pub on_close: Option<EventHandler<u32>>,
 }
 
@@ -161,6 +162,7 @@ impl NotificationPopup {
             width: Size::px(360.),
             auto_dismiss: false,
             stack_count: 1,
+            animated: true,
             on_close: None,
         }
     }
@@ -176,6 +178,7 @@ impl NotificationPopup {
             width: Size::px(360.),
             auto_dismiss: false,
             stack_count: 1,
+            animated: true,
             on_close: None,
         }
     }
@@ -207,6 +210,11 @@ impl NotificationPopup {
 
     pub fn with_stack_count(mut self, count: usize) -> Self {
         self.stack_count = count;
+        self
+    }
+
+    pub fn with_animated(mut self, animated: bool) -> Self {
+        self.animated = animated;
         self
     }
 
@@ -269,9 +277,9 @@ impl Component for NotificationPopup {
         let icon_str = self.icon.clone();
         let on_close_handler = self.on_close.clone();
         let count = self.stack_count;
+        let animated = self.animated;
 
-        FadeSlideIn::new().child(
-            rect()
+        let card = rect()
                 .width(self.width.clone())
                 .vertical()
                 .spacing(8.)
@@ -367,8 +375,12 @@ impl Component for NotificationPopup {
                                     )
                                 }),
                         ),
-                ),
-        )
+                );
+        if animated {
+            FadeSlideIn::new().child(card).into_element()
+        } else {
+            card.into_element()
+        }
     }
 }
 

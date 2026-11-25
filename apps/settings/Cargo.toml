@@ -12,6 +12,7 @@ tokio = { version = "1.43", features = ["full"] }
 ui = { version = "0.1.0", path = "../../libs/ui" }
 system = { path = "../../libs/system" }
 rfd = "0.17"
+chrono = "0.4"
 
 freya = { workspace = true }
 freya-performance-plugin = { workspace = true }

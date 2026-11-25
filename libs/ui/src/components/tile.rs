@@ -16,6 +16,7 @@ pub fn tile() -> Rect {
         .corner_radius(RADIUS_LG)
         .padding(18.)
         .vertical()
+        .overflow(Overflow::Clip)
 }
 
 /// A tile header matching .tile-head in ui_demo.html
@@ -33,12 +34,25 @@ pub fn tile_head(
         .cross_align(Alignment::Center)
         .main_align(Alignment::SpaceBetween)
         .margin((0., 0., 14., 0.))
+        .overflow(Overflow::Clip)
+        .content(Content::Flex)
         .child(
             rect()
                 .horizontal()
+                .width(Size::flex(1.))
                 .cross_align(Alignment::Center)
+                .overflow(Overflow::Clip)
+                .content(Content::Flex)
                 .maybe_child(icon_svg.map(|svg| rect().margin((0., 9., 0., 0.)).child(icon(svg, 17., t.text_dim))))
-                .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title_str)),
+                .child(
+                    label()
+                        .font_size(14.)
+                        .font_weight(FontWeight::SEMI_BOLD)
+                        .color(t.text)
+                        .max_lines(Some(1))
+                        .text_overflow(TextOverflow::Ellipsis)
+                        .text(title_str),
+                ),
         )
         .maybe_child(right_action)
 }
@@ -91,11 +105,31 @@ pub fn action_tile_flex(
     icon_svg: &'static str,
     title: impl Into<String>,
     active: bool,
+    on_press: impl FnMut() + 'static,
+) -> impl IntoElement {
+    action_tile_flex_tone(icon_svg, title, if active { ActionTileTone::Active } else { ActionTileTone::Default }, on_press)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ActionTileTone {
+    #[default]
+    Default,
+    Active,
+    Danger,
+}
+
+pub fn action_tile_flex_tone(
+    icon_svg: &'static str,
+    title: impl Into<String>,
+    tone: ActionTileTone,
     mut on_press: impl FnMut() + 'static,
 ) -> impl IntoElement {
     let t = use_app_theme();
-    let bg = if active { t.accent } else { t.panel };
-    let border_color = if active { t.accent } else { t.border };
+    let (bg, border_color, fg) = match tone {
+        ActionTileTone::Default => (t.panel, t.border, t.text),
+        ActionTileTone::Active => (t.accent, t.accent, t.text),
+        ActionTileTone::Danger => (t.accent_red, t.accent_red, Color::WHITE),
+    };
 
     rect()
         .width(Size::flex(1.))
@@ -108,9 +142,52 @@ pub fn action_tile_flex(
         .main_align(Alignment::Center)
         .spacing(GAP)
         .cursor(CursorIcon::Pointer)
+        .content(Content::Flex)
         .on_press(move |_| on_press())
-        .child(icon(icon_svg, 18., t.text))
-        .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title.into()))
+        .child(icon(icon_svg, 18., fg))
+        .child(label().font_size(13.).font_weight(FontWeight::SEMI_BOLD).color(fg).max_lines(Some(1)).text(title.into()))
+}
+
+/// Vertical variant of `action_tile_flex`: icon above the label, for narrow
+/// tiles in a row (e.g. panel power actions) where a horizontal layout would squeeze.
+pub fn action_tile_flex_column(
+    icon_svg: &'static str,
+    title: impl Into<String>,
+    tone: ActionTileTone,
+    mut on_press: impl FnMut() + 'static,
+) -> impl IntoElement {
+    let t = use_app_theme();
+    let (bg, border_color, fg) = match tone {
+        ActionTileTone::Default => (t.panel_raised, t.border, t.text),
+        ActionTileTone::Active => (t.accent, t.accent, t.text),
+        ActionTileTone::Danger => (t.accent_red, t.accent_red, Color::WHITE),
+    };
+
+    rect()
+        .width(Size::flex(1.))
+        .height(Size::px(60.))
+        .corner_radius(RADIUS_MD)
+        .background(bg)
+        .border(Border::new().width(1.).fill(border_color))
+        .center()
+        .cursor(CursorIcon::Pointer)
+        .content(Content::Flex)
+        .on_press(move |_| on_press())
+        .child(
+            rect()
+                .vertical()
+                .center()
+                .spacing(5.)
+                .child(icon(icon_svg, 18., fg))
+                .child(
+                    label()
+                        .font_size(11.)
+                        .font_weight(FontWeight::SEMI_BOLD)
+                        .color(fg)
+                        .max_lines(Some(1))
+                        .text(title.into()),
+                ),
+        )
 }
 
 pub fn empty_state(icon_svg: &'static str, title: impl Into<String>, hint: impl Into<String>) -> impl IntoElement {

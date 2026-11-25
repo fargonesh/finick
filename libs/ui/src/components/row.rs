@@ -42,11 +42,14 @@ pub fn setting_row_locked(
         .horizontal()
         .cross_align(Alignment::Center)
         .spacing(8.)
+        .overflow(Overflow::Clip)
         .child(
             label()
                 .font_size(13.)
                 .font_weight(FontWeight::MEDIUM)
                 .color(if is_locked { t.text_dim } else { t.text })
+                .max_lines(Some(1))
+                .text_overflow(TextOverflow::Ellipsis)
                 .text(name_str),
         )
         .maybe_child(lock_str.map(lock_badge));
@@ -56,11 +59,26 @@ pub fn setting_row_locked(
         .horizontal()
         .cross_align(Alignment::Center)
         .main_align(Alignment::SpaceBetween)
+        .overflow(Overflow::Clip)
         .maybe(has_top_border, |el| el.padding((9., 0., 9., 0.)))
         .maybe(!has_top_border, |el| el.padding((0., 0., 9., 0.)))
-        .child(rect().vertical().child(title_row).maybe_child(
-            meta_str.map(|m| rect().margin((1., 0., 0., 0.)).child(label().font_size(12.).color(t.text_dim).text(m))),
-        ))
+        .child(
+            rect()
+                .vertical()
+                .width(Size::flex(1.))
+                .overflow(Overflow::Clip)
+                .child(title_row)
+                .maybe_child(meta_str.map(|m| {
+                    rect().margin((1., 0., 0., 0.)).overflow(Overflow::Clip).child(
+                        label()
+                            .font_size(12.)
+                            .color(t.text_dim)
+                            .max_lines(Some(1))
+                            .text_overflow(TextOverflow::Ellipsis)
+                            .text(m),
+                    )
+                })),
+        )
         .child(rect().opacity(if is_locked { 0.45 } else { 1.0 }).child(control))
         .content(Content::Flex)
 }
@@ -81,18 +99,38 @@ pub fn dot_status_row(
         .horizontal()
         .cross_align(Alignment::Center)
         .main_align(Alignment::SpaceBetween)
+        .overflow(Overflow::Clip)
         .child(
             rect()
                 .horizontal()
+                .width(Size::flex(1.))
                 .cross_align(Alignment::Center)
                 .spacing(10.)
+                .overflow(Overflow::Clip)
                 .child(rect().width(Size::px(8.)).height(Size::px(8.)).corner_radius(RADIUS_PILL).background(dot_color))
                 .child(
                     rect()
                         .vertical()
-                        .child(label().font_size(13.).font_weight(FontWeight::MEDIUM).color(t.text).text(name_str))
+                        .width(Size::flex(1.))
+                        .overflow(Overflow::Clip)
+                        .child(
+                            label()
+                                .font_size(13.)
+                                .font_weight(FontWeight::MEDIUM)
+                                .color(t.text)
+                                .max_lines(Some(1))
+                                .text_overflow(TextOverflow::Ellipsis)
+                                .text(name_str),
+                        )
                         .maybe_child(meta_str.map(|m| {
-                            rect().margin((1., 0., 0., 0.)).child(label().font_size(12.).color(t.text_dim).text(m))
+                            rect().margin((1., 0., 0., 0.)).overflow(Overflow::Clip).child(
+                                label()
+                                    .font_size(12.)
+                                    .color(t.text_dim)
+                                    .max_lines(Some(1))
+                                    .text_overflow(TextOverflow::Ellipsis)
+                                    .text(m),
+                            )
                         })),
                 ),
         )
@@ -116,17 +154,34 @@ pub fn setting_row(
         .horizontal()
         .cross_align(Alignment::Center)
         .main_align(Alignment::SpaceBetween)
+        .overflow(Overflow::Clip)
         // .maybe(has_top_border, |el| el.border(Border::new().width(1.).fill(t.border)).padding((9., 0., 9., 0.)))
         .maybe(has_top_border, |el| el.padding((9., 0., 9., 0.)))
         .maybe(!has_top_border, |el| el.padding((0., 0., 9., 0.)))
         .child(
             rect()
                 .vertical()
-                .child(label().font_size(13.).font_weight(FontWeight::MEDIUM).color(t.text).text(name_str))
-                .maybe_child(
-                    meta_str
-                        .map(|m| rect().margin((1., 0., 0., 0.)).child(label().font_size(12.).color(t.text_dim).text(m))),
-                ),
+                .width(Size::flex(1.))
+                .overflow(Overflow::Clip)
+                .child(
+                    label()
+                        .font_size(13.)
+                        .font_weight(FontWeight::MEDIUM)
+                        .color(t.text)
+                        .max_lines(Some(1))
+                        .text_overflow(TextOverflow::Ellipsis)
+                        .text(name_str),
+                )
+                .maybe_child(meta_str.map(|m| {
+                    rect().margin((1., 0., 0., 0.)).overflow(Overflow::Clip).child(
+                        label()
+                            .font_size(12.)
+                            .color(t.text_dim)
+                            .max_lines(Some(1))
+                            .text_overflow(TextOverflow::Ellipsis)
+                            .text(m),
+                    )
+                })),
         )
         .child(control)
         .content(Content::Flex)

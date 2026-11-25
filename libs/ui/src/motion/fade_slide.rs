@@ -90,6 +90,8 @@ pub struct FadeSlideIn {
     key: DiffKey,
     duration: u64,
     offset_y: f32,
+    offset_x: f32,
+    blur_from: f32,
     scale_from: Option<f32>,
     delay: u64,
     reduced: bool,
@@ -102,6 +104,8 @@ impl FadeSlideIn {
             key: DiffKey::None,
             duration: DUR_STANDARD,
             offset_y: -8.0,
+            offset_x: 0.0,
+            blur_from: 0.0,
             scale_from: None,
             delay: 0,
             reduced: false,
@@ -115,6 +119,16 @@ impl FadeSlideIn {
 
     pub fn offset_y(mut self, offset_y: f32) -> Self {
         self.offset_y = offset_y;
+        self
+    }
+
+    pub fn offset_x(mut self, offset_x: f32) -> Self {
+        self.offset_x = offset_x;
+        self
+    }
+
+    pub fn blur_from(mut self, blur: f32) -> Self {
+        self.blur_from = blur;
         self
     }
 
@@ -157,6 +171,8 @@ impl Component for FadeSlideIn {
         let duration = motion_duration(self.duration, self.reduced);
         let delay = if self.reduced { 0 } else { self.delay };
         let offset_y = self.offset_y;
+        let offset_x = self.offset_x;
+        let blur_from = self.blur_from;
         let scale_from = self.scale_from;
         let skip = should_skip(self.reduced, self.duration);
 
@@ -173,6 +189,8 @@ impl Component for FadeSlideIn {
         let mut el = rect()
             .opacity(t)
             .offset_y(offset_y * (1. - t))
+            .offset_x(offset_x * (1. - t))
+            .blur(blur_from * (1. - t))
             .children(self.elements.clone());
         if let Some(s) = scale_from {
             el = el.scale(s + (1. - s) * t);
@@ -242,6 +260,8 @@ impl Component for FadeIn {
             key: self.key.clone(),
             duration: self.duration,
             offset_y: 0.0,
+            offset_x: 0.0,
+            blur_from: 0.0,
             scale_from: None,
             delay: self.delay,
             reduced: self.reduced,

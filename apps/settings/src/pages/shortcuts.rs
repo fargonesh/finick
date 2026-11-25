@@ -5,6 +5,68 @@ use {
 };
 
 #[derive(PartialEq)]
+pub struct FinickDefaults;
+
+impl Component for FinickDefaults {
+    fn render(&self) -> impl IntoElement {
+        let t = use_app_theme();
+        let status = use_state(|| system::shortcuts::finick_defaults_status());
+        let error = use_state(|| Option::<String>::None);
+        let mut base = tile().child(tile_head(
+            None,
+            "Finick",
+            Some({
+                let mut st = status;
+                let mut er = error;
+                ghost_button("Refresh", move || {
+                    st.set(system::shortcuts::finick_defaults_status());
+                    er.set(None);
+                })
+            }),
+        ));
+        base = base.child(tile_sub("Launcher and lock screen. Managed by Finick, no manual Hyprland config needed."));
+        for (idx, item) in status.read().clone().iter().enumerate() {
+            let combo = format!("{} + {}", item.mods_display, item.key_display);
+            let meta = format!("{combo}  \u{00B7}  {}", item.exec_hint);
+            let control = {
+                let id = item.id.to_string();
+                let is_on = item.active;
+                let mut st = status;
+                let mut er = error;
+                rect()
+                    .horizontal()
+                    .cross_align(Alignment::Center)
+                    .spacing(8.)
+                    .content(Content::Flex)
+                    .child(status_chip(if is_on { "Active" } else { "Missing" }, is_on, None))
+                    .maybe(!is_on, |el| {
+                        el.child(secondary_button("Enable", move || {
+                            match system::shortcuts::ensure_finick_bind_now(&id) {
+                                Ok(_) => {
+                                    st.set(system::shortcuts::finick_defaults_status());
+                                    er.set(None);
+                                }
+                                Err(e) => er.set(Some(e)),
+                            }
+                        }))
+                    })
+            };
+            base = base.child(setting_row(item.name.to_string(), Some(meta), idx > 0, control));
+        }
+        base = base.maybe_child(error.read().clone().map(|msg| {
+            rect()
+                .width(Size::fill())
+                .corner_radius(8.)
+                .background(t.accent_red)
+                .padding((8., 12.))
+                .child(label().font_size(12.).font_weight(FontWeight::SEMI_BOLD).color(Color::WHITE).text(msg))
+                .into_element()
+        }));
+        base
+    }
+}
+
+#[derive(PartialEq)]
 pub struct Shortcuts;
 
 impl Component for Shortcuts {
@@ -45,6 +107,7 @@ impl Component for Shortcuts {
                         .width(Size::fill())
                         .vertical()
                         .spacing(GAP)
+                        .child(FinickDefaults {})
                         .child(
                             tile()
                                 .child(tile_head(

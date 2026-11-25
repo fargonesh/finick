@@ -1,5 +1,6 @@
 use freya::prelude::*;
 use crate::theme::{use_app_theme, RADIUS_SM};
+use crate::components::color_picker::{normalize_hex, wallpaper_add_rect};
 
 pub const WALLPAPER_COLOR_DEFAULTS: &[(&str, &str, Color)] = &[
     ("Indigo Haze", "#5B5FE9", Color::from_rgb(0x5B, 0x5F, 0xE9)),
@@ -20,6 +21,8 @@ pub fn wallpaper_color_picker(
     let t = use_app_theme();
     let on_select: EventHandler<String> = on_select.into();
 
+    let fallback = selected_val.to_string();
+    let initial = if normalize_hex(&fallback).is_empty() { "#1e1e2e".to_string() } else { fallback };
     rect()
         .width(Size::fill())
         .horizontal()
@@ -43,6 +46,7 @@ pub fn wallpaper_color_picker(
                 .a11y_focusable(true)
                 .on_press(move |_| on_select.call(hex_val.clone()))
         }))
+        .child(wallpaper_add_rect(initial))
 }
 
 /// Wallpaper thumbnail picker matching .wallpapers in ui_demo.html

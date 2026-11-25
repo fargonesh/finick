@@ -8,7 +8,9 @@ use {
     },
 };
 
+pub mod launch_args;
 pub mod ty;
+pub use launch_args::*;
 pub use ty::*;
 
 /// Resolves the Finick configuration directory root.

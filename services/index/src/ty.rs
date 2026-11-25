@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub enum Request {
     Search { query: String },
     ListDir { path: String },
+    RecordUsage { result: SearchResult },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

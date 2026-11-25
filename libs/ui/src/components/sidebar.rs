@@ -133,8 +133,41 @@ pub fn brand_row(initial: impl Into<String>, user_name: impl Into<String>, subti
         )
 }
 
+/// Pre-handler for search inputs: lets list-navigation keys bubble to
+/// `on_global_key_down` instead of being swallowed by `Input`.
+///
+/// Freya `Input`'s default pre-handler calls `prevent_default()` for every key
+/// except Enter/Escape/Shift/Tab, which suppresses the matching global event.
+/// That breaks launcher-style ArrowUp/ArrowDown (and Ctrl+J/K) navigation
+/// while the search field is focused. Single-line inputs do not need Up/Down
+/// for caret movement, so skip them (return `false`) without stopping
+/// propagation. All other keys keep the default behaviour.
+fn search_pre_key_down() -> Callback<Event<KeyboardEventData>, bool> {
+    Callback::new(move |e: Event<KeyboardEventData>| match &e.key {
+        Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::ArrowDown) => false,
+        Key::Named(NamedKey::Enter) => true,
+        Key::Named(NamedKey::Escape) | Key::Named(NamedKey::Shift) => true,
+        Key::Named(NamedKey::Tab) => false,
+        Key::Character(s) if e.modifiers.ctrl() && (s == "j" || s == "k") => false,
+        _ => {
+            e.stop_propagation();
+            e.prevent_default();
+            true
+        }
+    })
+}
+
 /// Search bar in the sidebar matching .sidebar .search in ui_demo.html
 pub fn sidebar_search(query: impl Into<Writable<String>>, placeholder: &'static str) -> impl IntoElement {
+    sidebar_search_with_focus(query, placeholder, false)
+}
+
+/// Same as [`sidebar_search`], with opt-in autofocus for overlays like the launcher.
+pub fn sidebar_search_with_focus(
+    query: impl Into<Writable<String>>,
+    placeholder: &'static str,
+    autofocus: bool,
+) -> impl IntoElement {
     let t = use_app_theme();
 
     rect()
@@ -154,6 +187,8 @@ pub fn sidebar_search(query: impl Into<Writable<String>>, placeholder: &'static 
                     .border_fill(Color::TRANSPARENT)
                     .focus_background(Color::TRANSPARENT)
                     .focus_border_fill(Color::TRANSPARENT)
+                    .auto_focus(autofocus)
+                    .on_pre_key_down(search_pre_key_down())
                     .placeholder(placeholder),
             ),
         )
@@ -185,6 +220,7 @@ pub fn search_field(
                     .border_fill(Color::TRANSPARENT)
                     .focus_background(Color::TRANSPARENT)
                     .focus_border_fill(Color::TRANSPARENT)
+                    .on_pre_key_down(search_pre_key_down())
                     .placeholder(placeholder),
             ),
         )

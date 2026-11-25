@@ -1,0 +1,13 @@
+#%PAM-1.0
+# finick-lock session-lock auth stack.
+#
+# Delegates to the system `login` stack so whatever the admin installed
+# (password, pam_fprintd, howdy, U2F/FIDO2, smartcard, systemd-homed)
+# works with no per-method code in the locker.
+#
+# Install (non-NixOS): sudo install -m 644 nix/finick-lock.pam /etc/pam.d/finick-lock
+# NixOS: programs.finick.enable wires this via security.pam.services.finick-lock.
+auth include login
+account include login
+password include login
+session include login

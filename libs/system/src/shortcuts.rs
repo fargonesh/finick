@@ -157,7 +157,7 @@ fn categorize_shortcut(command: &str) -> (&'static str, String) {
         }
     } else if cmd.contains("grimblast") {
         ("Applications & Tools", "Screenshot Selection".to_string())
-    } else if cmd.contains("hyprlock") || cmd.contains("locker") {
+    } else if cmd.contains("hyprlock") || cmd.contains("finick-lock") || cmd.contains("locker") {
         ("Applications & Tools", "Lock Screen".to_string())
     } else if cmd.contains("ghostty") || cmd.contains("terminal") || cmd.contains("kitty") {
         ("Applications & Tools", "Open Terminal".to_string())
@@ -291,19 +291,22 @@ pub fn add_shortcut(shortcut: &KeyboardShortcut) -> Result<(), String> {
     current.push(shortcut.clone());
     save_custom_shortcuts(&current)?;
 
-    // Dynamically bind in Hyprland
-    let hypr_mods = shortcut.mods.join(" ");
-    let hypr_key = &shortcut.key;
-    let hypr_cmd = if shortcut.command.starts_with("exec,") {
-        shortcut.command.clone()
+    // Dynamically bind in Hyprland (Lua-first, legacy fallback).
+    // Legacy `hyprctl keyword bind` is rejected on Lua configs
+    // ("keyword can't work with non-legacy parsers. Use eval."),
+    // so prefer `hl.bind` via the shared helper.
+    let exec_part = if let Some(rest) = shortcut.command.strip_prefix("exec,") {
+        rest.trim()
     } else {
-        format!("exec, {}", shortcut.command)
+        shortcut.command.trim()
     };
-
-    let bind_arg = format!("{hypr_mods}, {hypr_key}, {hypr_cmd}");
-    let _ = Command::new("hyprctl")
-        .args(["keyword", "bind", &bind_arg])
-        .output();
+    let mut combo_parts: Vec<String> = shortcut.mods.iter().map(|m| m.to_uppercase()).collect();
+    combo_parts.push(shortcut.key.to_uppercase());
+    let combo = combo_parts.join(" + ");
+    // Best effort: ignore errors here so saving the shortcut never fails
+    // just because Hyprland is unreachable (parity with previous behavior
+    // which ignored `hyprctl keyword bind` output).
+    let _ = crate::hypr::hypr_bind(&combo, exec_part);
 
     Ok(())
 }
@@ -314,12 +317,143 @@ pub fn remove_shortcut(id: &str) -> Result<(), String> {
         current.retain(|s| s.id != id);
         save_custom_shortcuts(&current)?;
 
-        // Unbind in Hyprland
-        let hypr_mods = target.mods.join(" ");
-        let hypr_key = &target.key;
-        let _ = Command::new("hyprctl")
-            .args(["keyword", "unbind", &format!("{hypr_mods}, {hypr_key}")])
-            .output();
+        // Unbind in Hyprland (Lua-first, legacy fallback).
+        let mut combo_parts: Vec<String> = target.mods.iter().map(|m| m.to_uppercase()).collect();
+        combo_parts.push(target.key.to_uppercase());
+        let combo = combo_parts.join(" + ");
+        let lua = format!(r#"hl.unbind("{combo}")"#);
+        let lua_ok = Command::new("hyprctl")
+            .args(["eval", &lua])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !lua_ok {
+            let hypr_mods = target.mods.join(" ");
+            let hypr_key = &target.key;
+            let _ = Command::new("hyprctl")
+                .args(["keyword", "unbind", &format!("{hypr_mods}, {hypr_key}")])
+                .output();
+        }
     }
     Ok(())
+}
+
+const LAUNCHER_BINARIES: [&str; 1] = ["launcher"];
+
+fn join_launcher_if_file(dir: &std::path::Path) -> Option<PathBuf> {
+    for name in LAUNCHER_BINARIES {
+        let cand = dir.join(name);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    None
+}
+
+pub fn launcher_binary() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("FINICK_LAUNCHER_BIN").map(PathBuf::from) {
+        if dir.is_file() {
+            return Some(dir);
+        }
+        if let Some(found) = join_launcher_if_file(&dir) {
+            return Some(found);
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            if let Some(found) = join_launcher_if_file(dir) {
+                return Some(found);
+            }
+        }
+    }
+    for base in ["/run/current-system/sw/bin/launcher", "/usr/local/bin/launcher", "/usr/bin/launcher"] {
+        let cand = PathBuf::from(base);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        for base in [".cargo/bin", ".local/bin"] {
+            if let Some(found) = join_launcher_if_file(&home.join(base)) {
+                return Some(found);
+            }
+        }
+    }
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).flat_map(|d| LAUNCHER_BINARIES.iter().map(move |n| d.join(*n))).find(|p| p.is_file())
+    })
+}
+
+pub fn launcher_exec_cmd() -> String {
+    launcher_binary().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "launcher".to_string())
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FinickBindStatus {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub mods_display: &'static str,
+    pub key_display: &'static str,
+    pub exec_hint: String,
+    pub active: bool,
+}
+
+fn hypr_binds_value() -> Option<Vec<serde_json::Value>> {
+    let out = Command::new("hyprctl").args(["binds", "-j"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout).ok()
+}
+
+fn bind_active_in(binds: &[serde_json::Value], key: &str, need_super: bool) -> bool {
+    binds.iter().any(|b| {
+        let k = b["key"].as_str().unwrap_or_default();
+        let modmask = b["modmask"].as_i64().unwrap_or(0);
+        k.eq_ignore_ascii_case(key) && (!need_super || (modmask & 64 != 0))
+    })
+}
+
+pub fn finick_defaults_status() -> Vec<FinickBindStatus> {
+    let binds = hypr_binds_value().unwrap_or_default();
+    vec![
+        FinickBindStatus {
+            id: "finick_launcher",
+            name: "Open Launcher",
+            mods_display: "Super",
+            key_display: "Space",
+            exec_hint: launcher_exec_cmd(),
+            active: bind_active_in(&binds, "space", true),
+        },
+        FinickBindStatus {
+            id: "finick_lock",
+            name: "Lock Screen",
+            mods_display: "Super",
+            key_display: "L",
+            exec_hint: crate::lock::locker_binary()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "finick-lock".to_string()),
+            active: bind_active_in(&binds, "l", true),
+        },
+    ]
+}
+
+pub fn ensure_finick_bind_now(id: &str) -> Result<bool, String> {
+    let (combo, exec_cmd) = match id {
+        "finick_launcher" => ("SUPER + SPACE", launcher_exec_cmd()),
+        "finick_lock" => (
+            "SUPER + L",
+            crate::lock::locker_binary()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "finick-lock".to_string()),
+        ),
+        _ => return Err(format!("unknown finick bind: {id}")),
+    };
+    // Always (re)install the Lua bind instead of skipping when *any* bind
+    // with the same modmask+key exists. A legacy hyprlang bind
+    // (`bind = SUPER, SPACE, exec, /run/.../launcher`) satisfies the old
+    // `bind_active_in` check but fails at press time on Lua configs with
+    // `return hl.dispatch(exec /run/...)` / "nil value (global 'exec')".
+    // Re-binding via `hl.bind` heals that broken state and is idempotent.
+    crate::hypr::hypr_bind(combo, &exec_cmd)
 }

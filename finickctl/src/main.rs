@@ -26,6 +26,52 @@ enum Program {
 
 fn accent_to_hex(s: &str) -> String { config::ty::accent_to_hex(s) }
 
+// Must stay in sync with overlay::launcher::launcher_lock_path(), which is
+// canonical for the Super+Space path. finickctl mirrors it here so `--toggle`
+// kills the same process the overlay binary would.
+fn launcher_lock_path() -> std::path::PathBuf { std::path::PathBuf::from("/tmp/finick-launcher.lock") }
+
+fn launcher_pid_alive(pid: u32) -> bool { std::path::PathBuf::from(format!("/proc/{pid}")).exists() }
+
+/// Kill the running launcher for `--toggle`. Returns true when a live
+/// launcher was toggled off (caller should exit); false means stale or
+/// missing lock (caller should start a fresh launcher).
+fn kill_old_launcher(lock: &std::path::Path) -> bool {
+    let Ok(pid_str) = std::fs::read_to_string(lock) else { return false };
+    match pid_str.trim().parse::<u32>() {
+        Ok(pid) if pid != std::process::id() && launcher_pid_alive(pid) => {
+            let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
+            for _ in 0..30 {
+                if !launcher_pid_alive(pid) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            let _ = std::fs::remove_file(lock);
+            true
+        }
+        _ => {
+            let _ = std::fs::remove_file(lock);
+            false
+        }
+    }
+}
+
+/// Wait-and-focus after spawning the launcher. Mirrors the overlay path
+/// (`overlay::launcher::focus_launcher_best_effort` plus the mount-time
+/// re-focus in `launcher_app`): dispatch immediately, let the window map,
+/// then bring to top and focus again. Best effort; failures are ignored so
+/// a missing Hyprland socket never fails the spawn itself.
+fn focus_launcher_after_spawn() {
+    let focus_once = || {
+        system::hypr_bring_to_top("class:^(launcher)$");
+        system::hypr_focus_window("class:^(launcher)$");
+    };
+    focus_once();
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    focus_once();
+}
+
 fn apps_run_job(job: system::store::StoreJob) -> Result<String, String> {
     let mut progress = |ev: system::store::StoreProgress| match ev {
         system::store::StoreProgress::Started(d) => eprintln!("{d}…"),
@@ -82,8 +128,10 @@ fn main() {
             });
             let hex = accent_to_hex(&color);
             let hypr_color = format!("0xff{hex}");
-            let _ =
-                std::process::Command::new("hyprctl").args(["keyword", "general:col.active_border", &hypr_color]).status();
+            let lua = format!(
+                "hl.config({{ general = {{ col = {{ active_border = {{ colors = {{ \"{hypr_color}\" }} }} }} }} }})"
+            );
+            let _ = system::HyprlandBackend::hyprctl_set_config(&lua, "general:col.active_border", &hypr_color);
             let _ = ipsea::settings::set_and_apply("finickd", ipsea::settings::SettingKey::AccentColor, &*color);
             if args.json {
                 println!("{}", serde_json::json!({ "accent": color, "hex": hex, "hypr_border": hypr_color }));
@@ -97,9 +145,8 @@ fn main() {
                 std::process::exit(1);
             });
             if let Ok(size) = val.parse::<u32>() {
-                let _ = std::process::Command::new("hyprctl")
-                    .args(["keyword", "general:border_size", &size.to_string()])
-                    .status();
+                let lua = format!("hl.config({{ general = {{ border_size = {size} }} }})");
+                let _ = system::HyprlandBackend::hyprctl_set_config(&lua, "general:border_size", &size.to_string());
                 let _ =
                     ipsea::settings::set_and_apply("finickd", ipsea::settings::SettingKey::WindowBorderSize, size as i64);
                 println!("Applied border size: {size}");
@@ -107,9 +154,11 @@ fn main() {
                 let hex = accent_to_hex(&val);
                 let hypr_color =
                     if val.starts_with("0x") || val.starts_with("rgb") { val.clone() } else { format!("0xff{hex}") };
-                let _ = std::process::Command::new("hyprctl")
-                    .args(["keyword", "general:col.active_border", &hypr_color])
-                    .status();
+                let lua = format!(
+                    "hl.config({{ general = {{ col = {{ active_border = {{ colors = {{ \"{hypr_color}\" }} }} }} }} }})"
+                );
+                let _ =
+                    system::HyprlandBackend::hyprctl_set_config(&lua, "general:col.active_border", &hypr_color);
                 println!("Applied active window border: {hypr_color}");
             }
         }
@@ -123,9 +172,15 @@ fn main() {
                 let _ = ipsea::settings::set_and_apply("finickd", key.clone(), v.trim());
                 if key == ipsea::settings::SettingKey::AccentColor {
                     let hex = accent_to_hex(v.trim());
-                    let _ = std::process::Command::new("hyprctl")
-                        .args(["keyword", "general:col.active_border", &format!("0xff{hex}")])
-                        .status();
+                    let hypr_color = format!("0xff{hex}");
+                    let lua = format!(
+                        "hl.config({{ general = {{ col = {{ active_border = {{ colors = {{ \"{hypr_color}\" }} }} }} }} }})"
+                    );
+                    let _ = system::HyprlandBackend::hyprctl_set_config(
+                        &lua,
+                        "general:col.active_border",
+                        &hypr_color,
+                    );
                 }
                 println!("Set {k} = {v}");
             } else {
@@ -212,18 +267,12 @@ fn main() {
         }
         Program::launcher => {
             let toggle = args.data.as_deref().is_some_and(|d| d == "--toggle" || d == "toggle" || d == "-t");
-            let lock = std::path::PathBuf::from("/tmp/finick-launcher.lock");
+            let lock = launcher_lock_path();
+            if toggle && kill_old_launcher(&lock) {
+                println!("Launcher toggled off");
+                return;
+            }
             if toggle {
-                if let Ok(pid_str) = std::fs::read_to_string(&lock) {
-                    if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                        if std::path::PathBuf::from(format!("/proc/{pid}")).exists() {
-                            let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
-                            let _ = std::fs::remove_file(&lock);
-                            println!("Launcher toggled off");
-                            return;
-                        }
-                    }
-                }
                 let _ = std::fs::remove_file(&lock);
             }
             if args.data.as_deref().is_some_and(|d| !d.starts_with('-') && d != "toggle") {
@@ -232,8 +281,10 @@ fn main() {
             }
             let try_direct = std::process::Command::new("launcher").spawn();
             if try_direct.is_ok() {
+                focus_launcher_after_spawn();
                 println!("Launcher started");
-            } else if std::process::Command::new("hyprctl").args(["dispatch", "exec", "--", "launcher"]).spawn().is_ok() {
+            } else if system::hypr_exec("launcher") {
+                focus_launcher_after_spawn();
                 println!("Launcher dispatched via hyprctl");
             } else {
                 eprintln!("Failed to start launcher. Ensure `launcher` is in PATH.");
