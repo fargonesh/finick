@@ -16,6 +16,7 @@ pub fn tile() -> Rect {
         .corner_radius(RADIUS_LG)
         .padding(18.)
         .vertical()
+        .overflow(Overflow::Clip)
 }
 
 /// A tile header matching .tile-head in ui_demo.html
@@ -33,12 +34,25 @@ pub fn tile_head(
         .cross_align(Alignment::Center)
         .main_align(Alignment::SpaceBetween)
         .margin((0., 0., 14., 0.))
+        .overflow(Overflow::Clip)
+        .content(Content::Flex)
         .child(
             rect()
                 .horizontal()
+                .width(Size::flex(1.))
                 .cross_align(Alignment::Center)
+                .overflow(Overflow::Clip)
+                .content(Content::Flex)
                 .maybe_child(icon_svg.map(|svg| rect().margin((0., 9., 0., 0.)).child(icon(svg, 17., t.text_dim))))
-                .child(label().font_size(14.).font_weight(FontWeight::SEMI_BOLD).color(t.text).text(title_str)),
+                .child(
+                    label()
+                        .font_size(14.)
+                        .font_weight(FontWeight::SEMI_BOLD)
+                        .color(t.text)
+                        .max_lines(Some(1))
+                        .text_overflow(TextOverflow::Ellipsis)
+                        .text(title_str),
+                ),
         )
         .maybe_child(right_action)
 }

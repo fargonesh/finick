@@ -392,12 +392,16 @@ pub fn main() {
 
     launch(
         LaunchConfig::new()
-            .with_window(
-                WindowConfig::new_app(SettingsApp { initial_route })
+            .with_window({
+                let mut window = WindowConfig::new_app(SettingsApp { initial_route })
                     .with_title("Settings")
                     .with_size(1080., 740.)
-                    .with_min_size(640., 480.),
-            )
+                    .with_min_size(640., 480.);
+                if let Some((w, h)) = args.window_size_override() {
+                    window = window.with_size(w, h);
+                }
+                window
+            })
             .with_plugin(freya_devtools::DevtoolsPlugin::default())
             .with_plugin(freya_performance_plugin::PerformanceOverlayPlugin::default()),
     )

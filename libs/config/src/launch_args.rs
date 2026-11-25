@@ -27,6 +27,21 @@ pub struct LaunchArgs {
     pub screenshot_path: Option<PathBuf>,
     /// Milliseconds to wait for first paint before capturing.
     pub screenshot_delay_ms: u64,
+    /// Run the screenshot inside an isolated Xvfb virtual display.
+    /// Implies `--screenshot`. The harness spawns Xvfb, re-executes this
+    /// binary under it (X11), captures, then tears everything down so
+    /// product shots never include the host desktop.
+    pub screenshot_virtual: bool,
+    /// Virtual display size in pixels (only used with `--screenshot-virtual`).
+    pub screenshot_width: u32,
+    /// Virtual display height in pixels (only used with `--screenshot-virtual`).
+    pub screenshot_height: u32,
+    /// Main-window width override in pixels (`--window-size`). `None` keeps
+    /// the app default. Orthogonal to `--screenshot`: combine both for
+    /// deterministic product-shot geometry.
+    pub window_width: Option<u32>,
+    /// Main-window height override in pixels (`--window-size`).
+    pub window_height: Option<u32>,
 }
 
 impl Default for LaunchArgs {
@@ -38,6 +53,11 @@ impl Default for LaunchArgs {
             screenshot: false,
             screenshot_path: None,
             screenshot_delay_ms: 1500,
+            screenshot_virtual: false,
+            screenshot_width: 1280,
+            screenshot_height: 800,
+            window_width: None,
+            window_height: None,
         }
     }
 }
@@ -83,6 +103,28 @@ impl LaunchArgs {
                         }
                     }
                 }
+                "--screenshot-virtual" | "--virtual-display" | "--screenshot-headless" => {
+                    out.screenshot = true;
+                    out.screenshot_virtual = true;
+                }
+                "--screenshot-size" | "--screenshot-geometry" | "--virtual-display-size" => {
+                    if let Some(val) = iter.next() {
+                        if let Some((w, h)) = parse_dimensions(&val) {
+                            out.screenshot_width = w;
+                            out.screenshot_height = h;
+                            out.screenshot = true;
+                            out.screenshot_virtual = true;
+                        }
+                    }
+                }
+                "--window-size" | "--window-geometry" => {
+                    if let Some(val) = iter.next() {
+                        if let Some((w, h)) = parse_dimensions(&val) {
+                            out.window_width = Some(w);
+                            out.window_height = Some(h);
+                        }
+                    }
+                }
                 "--help" | "-h" => {
                     out.extra = Some(String::from("__help__"));
                 }
@@ -104,6 +146,32 @@ impl LaunchArgs {
                         out.screenshot_delay_ms = ms;
                         out.screenshot = true;
                     }
+                }
+                s if s.starts_with("--screenshot-size=")
+                | s.starts_with("--screenshot-geometry=")
+                | s.starts_with("--virtual-display-size=") => {
+                    if let Some(eq) = s.find('=') {
+                        if let Some((w, h)) = parse_dimensions(s[eq + 1..].trim()) {
+                            out.screenshot_width = w;
+                            out.screenshot_height = h;
+                            out.screenshot = true;
+                            out.screenshot_virtual = true;
+                        }
+                    }
+                }
+                s if s.starts_with("--window-size=") | s.starts_with("--window-geometry=") => {
+                    if let Some(eq) = s.find('=') {
+                        if let Some((w, h)) = parse_dimensions(s[eq + 1..].trim()) {
+                            out.window_width = Some(w);
+                            out.window_height = Some(h);
+                        }
+                    }
+                }
+                s if s.starts_with("--screenshot-virtual") || s.starts_with("--virtual-display") => {
+                    // Covers `--screenshot-virtual`, `--screenshot-virtual=true`,
+                    // `--virtual-display`, `--virtual-display-size` (size parsed above).
+                    out.screenshot = true;
+                    out.screenshot_virtual = true;
                 }
                 s if s.starts_with("--screenshot") => {
                     // Tolerate `--screenshot=/path.png` and bare `--screenshot*`.
@@ -171,6 +239,10 @@ impl LaunchArgs {
         eprintln!("      --screenshot            Capture the screen after paint, then exit (debug)");
         eprintln!("      --screenshot-to <FILE>  Screenshot output path (implies --screenshot)");
         eprintln!("      --screenshot-delay-ms <MS>  Wait before capturing [default: 1500]");
+        eprintln!("      --screenshot-virtual    Run inside an isolated Xvfb virtual display");
+        eprintln!("                              (implies --screenshot; clean product shots, headless-safe)");
+        eprintln!("      --screenshot-size <WxH> Virtual display size [default: 1280x800]");
+        eprintln!("      --window-size <WxH>     Main-window size override (debugging / deterministic shots)");
         eprintln!("  -h, --help                Show this help");
         if !pages.is_empty() {
             eprintln!();
@@ -182,11 +254,30 @@ impl LaunchArgs {
     }
 
     /// If `--screenshot` was passed, spawn a background thread that waits for
-    /// first paint, captures via `grim` (falling back to `hyprshot`), prints
-    /// the output path, and exits the process. Returns true when armed.
+    /// first paint, captures via `grim` (falling back to `hyprshot`, then
+    /// `import -window root` for X11/Xvfb), prints the output path, and exits
+    /// the process. Returns true when armed.
+    ///
+    /// If `--screenshot-virtual` was passed (and this process is not already
+    /// inside the virtual display), this instead spawns an isolated Xvfb
+    /// server, re-executes the current binary under it, waits for the child
+    /// to capture and exit, tears down Xvfb, and exits with the child's
+    /// status. The child sees `FINICK_SCREENSHOT_VIRTUAL=1` and runs the
+    /// normal screenshot flow under X11.
     pub fn maybe_arm_screenshot(&self, app_name: &str) -> bool {
         if !self.screenshot {
             return false;
+        }
+        if self.screenshot_virtual && std::env::var("FINICK_SCREENSHOT_VIRTUAL").as_deref() != Ok("1") {
+            let out_path = self.screenshot_path.clone().unwrap_or_else(|| {
+                PathBuf::from(format!("/tmp/{app_name}-screenshot.png"))
+            });
+            let delay = self.screenshot_delay_ms;
+            let width = self.screenshot_width;
+            let height = self.screenshot_height;
+            let app_label = app_name.to_string();
+            run_virtual_screenshot_harness(&out_path, delay, width, height, &app_label);
+            return true;
         }
         let out_path = self.screenshot_path.clone().unwrap_or_else(|| {
             PathBuf::from(format!("/tmp/{app_name}-screenshot.png"))
@@ -208,6 +299,194 @@ impl LaunchArgs {
         });
         true
     }
+
+    /// Main-window size override from `--window-size`, if one was given.
+    /// Apps apply this to their root `WindowConfig::with_size` after the
+    /// default so debugging and product shots use deterministic geometry.
+    pub fn window_size_override(&self) -> Option<(f64, f64)> {
+        match (self.window_width, self.window_height) {
+            (Some(w), Some(h)) => Some((w as f64, h as f64)),
+            _ => None,
+        }
+    }
+}
+
+/// Parse `1280x800` (also `1280,800` / `1280 800`) into `(width, height)`.
+fn parse_dimensions(raw: &str) -> Option<(u32, u32)> {
+    let cleaned = raw.trim().replace([',', ' '], "x");
+    let mut parts = cleaned.split('x');
+    let w: u32 = parts.next()?.trim().parse().ok()?;
+    let h: u32 = parts.next()?.trim().parse().ok()?;
+    if parts.next().is_some() || w < 320 || h < 200 || w > 8192 || h > 8192 {
+        return None;
+    }
+    Some((w, h))
+}
+
+/// Marker env set inside the re-executed virtual-display child.
+const VIRTUAL_MARKER: &str = "FINICK_SCREENSHOT_VIRTUAL";
+
+/// Parent-side harness for `--screenshot-virtual`: boot Xvfb on a free
+/// display, re-run this binary under it, wait for the child (which performs
+/// its own `--screenshot` capture), then clean up and exit.
+fn run_virtual_screenshot_harness(
+    out_path: &std::path::Path,
+    delay_ms: u64,
+    width: u32,
+    height: u32,
+    app_label: &str,
+) {
+    match run_virtual_harness_inner(out_path, delay_ms, width, height, app_label) {
+        Ok(code) => std::process::exit(code),
+        Err(e) => {
+            eprintln!("[{app_label}] screenshot failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_virtual_harness_inner(
+    out_path: &std::path::Path,
+    delay_ms: u64,
+    width: u32,
+    height: u32,
+    app_label: &str,
+) -> Result<i32, String> {
+    let xvfb = find_tool("Xvfb")
+        .ok_or_else(|| "no virtual display tool found (install `xorg-xserver` for Xvfb)".to_string())?;
+    let display = find_free_display()
+        .ok_or_else(|| "no free X display found (tried :99-:139)".to_string())?;
+    let display_str = format!(":{display}");
+
+    // Boot Xvfb.
+    let mut xvfb_child = std::process::Command::new(&xvfb)
+        .args([
+            display_str.clone(),
+            "-screen".to_string(),
+            "0".to_string(),
+            format!("{width}x{height}x24"),
+            "-ac".to_string(),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to start Xvfb: {e}"))?;
+    if !wait_for_x_socket(display, std::time::Duration::from_secs(10)) {
+        let _ = xvfb_child.kill();
+        return Err(format!("Xvfb {display_str} did not become ready in time"));
+    }
+
+    // Re-execute this binary under the virtual display, stripping the
+    // virtual-display flags so the child does not recurse.
+    let exe =
+        std::env::current_exe().map_err(|e| format!("cannot find current executable: {e}"))?;
+    let mut child_args: Vec<String> = Vec::new();
+    let mut skip_next = false;
+    for arg in std::env::args().skip(1) {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        match arg.as_str() {
+            "--screenshot-virtual" | "--virtual-display" | "--screenshot-headless" => continue,
+            "--screenshot-size" | "--screenshot-geometry" | "--virtual-display-size" => {
+                skip_next = true;
+                continue;
+            }
+            s if s.starts_with("--screenshot-virtual")
+                || s.starts_with("--virtual-display")
+                || s.starts_with("--screenshot-size=")
+                || s.starts_with("--screenshot-geometry=")
+                || s.starts_with("--virtual-display-size=") =>
+            {
+                continue;
+            }
+            other => child_args.push(other.to_string()),
+        }
+    }
+    // Ensure the child still captures even if the user only passed the
+    // virtual flag (which implies --screenshot).
+    if !child_args.iter().any(|a| a.starts_with("--screenshot")) {
+        child_args.push("--screenshot".to_string());
+    }
+
+    // Bound total wait: capture delay + generous grace for launch/paint.
+    let timeout = std::time::Duration::from_millis(delay_ms.max(200) + 60_000);
+    let child_status = (|| {
+        let mut child = std::process::Command::new(&exe)
+            .args(&child_args)
+            .env("DISPLAY", &display_str)
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("HYPRLAND_INSTANCE_SIGNATURE")
+            .env("XDG_SESSION_TYPE", "x11")
+            .env(VIRTUAL_MARKER, "1")
+            .spawn()
+            .map_err(|e| format!("failed to re-execute under Xvfb: {e}"))?;
+        let start = std::time::Instant::now();
+        loop {
+            match child.try_wait().map_err(|e| format!("failed to wait for child: {e}"))? {
+                Some(status) => return Ok::<std::process::ExitStatus, String>(status),
+                None => {
+                    if start.elapsed() > timeout {
+                        let _ = child.kill();
+                        return Err(format!(
+                            "timed out waiting for screenshot child after {}s",
+                            timeout.as_secs()
+                        ));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        }
+    })();
+
+    let _ = xvfb_child.kill();
+    let _ = xvfb_child.wait();
+
+    match child_status {
+        Ok(status) => {
+            if status.success() && out_path.is_file() {
+                println!("[{app_label}] screenshot saved to {}", out_path.display());
+                Ok(0)
+            } else if status.success() {
+                Err(format!(
+                    "child exited 0 but {} was not created (check Xvfb/import output)",
+                    out_path.display()
+                ))
+            } else {
+                Err(format!(
+                    "screenshot child exited with {}",
+                    status.code().map(|c| c.to_string()).unwrap_or_else(|| "?".to_string())
+                ))
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn find_free_display() -> Option<u32> {
+    for n in 99..140 {
+        let socket = PathBuf::from(format!("/tmp/.X11-unix/X{n}"));
+        let lock = PathBuf::from(format!("/tmp/.X{n}-lock"));
+        if !socket.exists() && !lock.exists() {
+            return Some(n);
+        }
+    }
+    None
+}
+
+fn wait_for_x_socket(display: u32, timeout: std::time::Duration) -> bool {
+    let socket = PathBuf::from(format!("/tmp/.X11-unix/X{display}"));
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if socket.exists() {
+            // Give Xvfb a beat to accept connections.
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    false
 }
 
 fn ingest_page_value(out: &mut LaunchArgs, raw: &str) {
@@ -395,35 +674,79 @@ fn find_tool(name: &str) -> Option<PathBuf> {
 }
 
 /// Capture the full screen to `out_path` via `grim`, falling back to
-/// `hyprshot -m output`. Returns the written path on success.
+/// `hyprshot -m output`, then X11 tools (`import -window root`, `scrot`,
+/// `maim`) for Xvfb virtual displays. Returns the written path on success.
 fn capture_screen(out_path: &PathBuf) -> Result<PathBuf, String> {
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
         }
     }
-    if let Some(grim) = find_tool("grim") {
-        let status = std::process::Command::new(grim)
-            .arg(out_path)
-            .status()
-            .map_err(|e| format!("failed to run grim: {e}"))?;
-        if status.success() && out_path.is_file() {
-            return Ok(out_path.clone());
+    if wayland_display_present() {
+        if let Some(grim) = find_tool("grim") {
+            match std::process::Command::new(grim).arg(out_path).status() {
+                Ok(status) if status.success() && out_path.is_file() => {
+                    return Ok(out_path.clone());
+                }
+                Ok(status) => eprintln!("[screenshot] grim exited with {status}, trying fallback"),
+                Err(e) => eprintln!("[screenshot] failed to run grim: {e}, trying fallback"),
+            }
         }
-        return Err(format!("grim exited with {status}"));
-    }
-    if let Some(hyprshot) = find_tool("hyprshot") {
-        let status = std::process::Command::new(hyprshot)
-            .args(["-m", "output", "-o"])
-            .arg(out_path.to_string_lossy().as_ref())
-            .status()
-            .map_err(|e| format!("failed to run hyprshot: {e}"))?;
-        if status.success() && out_path.is_file() {
-            return Ok(out_path.clone());
+        if let Some(hyprshot) = find_tool("hyprshot") {
+            match std::process::Command::new(hyprshot)
+                .args(["-m", "output", "-o"])
+                .arg(out_path.to_string_lossy().as_ref())
+                .status()
+            {
+                Ok(status) if status.success() && out_path.is_file() => {
+                    return Ok(out_path.clone());
+                }
+                Ok(status) => eprintln!("[screenshot] hyprshot exited with {status}, trying fallback"),
+                Err(e) => eprintln!("[screenshot] failed to run hyprshot: {e}, trying fallback"),
+            }
         }
-        return Err(format!("hyprshot exited with {status}"));
     }
-    Err("no screenshot tool found (install `grim` or `hyprshot`)".to_string())
+    // X11 fallback (Xvfb virtual display): ImageMagick `import` ships with
+    // devenv already; `scrot`/`maim` are tried when present.
+    if std::env::var("DISPLAY").is_ok() {
+        if let Some(import) = find_tool("import") {
+            match std::process::Command::new(import)
+                .args(["-window", "root"])
+                .arg(out_path)
+                .status()
+            {
+                Ok(status) if status.success() && out_path.is_file() => {
+                    return Ok(out_path.clone());
+                }
+                Ok(status) => eprintln!("[screenshot] import exited with {status}, trying fallback"),
+                Err(e) => eprintln!("[screenshot] failed to run import: {e}, trying fallback"),
+            }
+        }
+        if let Some(scrot) = find_tool("scrot") {
+            match std::process::Command::new(scrot).arg(out_path).status() {
+                Ok(status) if status.success() && out_path.is_file() => {
+                    return Ok(out_path.clone());
+                }
+                Ok(status) => eprintln!("[screenshot] scrot exited with {status}, trying fallback"),
+                Err(e) => eprintln!("[screenshot] failed to run scrot: {e}, trying fallback"),
+            }
+        }
+        if let Some(maim) = find_tool("maim") {
+            match std::process::Command::new(maim).arg(out_path).status() {
+                Ok(status) if status.success() && out_path.is_file() => {
+                    return Ok(out_path.clone());
+                }
+                Ok(status) => eprintln!("[screenshot] maim exited with {status}"),
+                Err(e) => eprintln!("[screenshot] failed to run maim: {e}"),
+            }
+        }
+    }
+    Err("no screenshot tool found (install `grim` or `hyprshot` for Wayland, `imagemagick` for Xvfb)".to_string())
+}
+
+fn wayland_display_present() -> bool {
+    std::env::var("WAYLAND_DISPLAY").is_ok_and(|v| !v.is_empty())
+        || std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok_and(|v| !v.is_empty())
 }
 
 #[cfg(test)]
@@ -486,5 +809,83 @@ mod tests {
         let a = parsed(&["--screenshot-to", "/tmp/x.png"]);
         assert!(a.screenshot);
         assert_eq!(a.screenshot_path, Some(PathBuf::from("/tmp/x.png")));
+    }
+
+    #[test]
+    fn screenshot_virtual_implies_screenshot() {
+        let a = parsed(&["--screenshot-virtual"]);
+        assert!(a.screenshot);
+        assert!(a.screenshot_virtual);
+        assert_eq!((a.screenshot_width, a.screenshot_height), (1280, 800));
+    }
+
+    #[test]
+    fn virtual_display_alias_sets_virtual() {
+        let a = parsed(&["--virtual-display"]);
+        assert!(a.screenshot);
+        assert!(a.screenshot_virtual);
+    }
+
+    #[test]
+    fn screenshot_size_sets_virtual_and_geometry() {
+        let a = parsed(&["--screenshot-size", "1920x1080"]);
+        assert!(a.screenshot);
+        assert!(a.screenshot_virtual);
+        assert_eq!((a.screenshot_width, a.screenshot_height), (1920, 1080));
+    }
+
+    #[test]
+    fn screenshot_size_equals_form() {
+        let a = parsed(&["--screenshot-size=800x600"]);
+        assert!(a.screenshot_virtual);
+        assert_eq!((a.screenshot_width, a.screenshot_height), (800, 600));
+    }
+
+    #[test]
+    fn screenshot_size_invalid_ignored() {
+        let a = parsed(&["--screenshot-size", "bogus"]);
+        assert!(!a.screenshot_virtual);
+    }
+
+    #[test]
+    fn parse_screenshot_size_accepts_variants() {
+        assert_eq!(parse_dimensions("1280x800"), Some((1280, 800)));
+        assert_eq!(parse_dimensions("1280,800"), Some((1280, 800)));
+        assert_eq!(parse_dimensions("1920x1080"), Some((1920, 1080)));
+        assert_eq!(parse_dimensions("bogus"), None);
+        assert_eq!(parse_dimensions("10x10"), None);
+    }
+
+    #[test]
+    fn screenshot_and_size_combine() {
+        let a = parsed(&["--screenshot", "--screenshot-size=1920x1080"]);
+        assert!(a.screenshot);
+        assert!(a.screenshot_virtual);
+        assert_eq!((a.screenshot_width, a.screenshot_height), (1920, 1080));
+    }
+
+    #[test]
+    fn window_size_space_and_equals_forms() {
+        let a = parsed(&["--window-size", "1600x900"]);
+        assert_eq!((a.window_width, a.window_height), (Some(1600), Some(900)));
+        assert_eq!(a.window_size_override(), Some((1600.0, 900.0)));
+        assert!(!a.screenshot);
+        let b = parsed(&["--window-size=800x600"]);
+        assert_eq!((b.window_width, b.window_height), (Some(800), Some(600)));
+        let c = parsed(&["--window-geometry=1024x768"]);
+        assert_eq!((c.window_width, c.window_height), (Some(1024), Some(768)));
+    }
+
+    #[test]
+    fn window_size_invalid_ignored() {
+        let a = parsed(&["--window-size", "bogus"]);
+        assert_eq!(a.window_width, None);
+        assert_eq!(a.window_size_override(), None);
+    }
+
+    #[test]
+    fn window_size_default_is_none() {
+        let a = parsed(&["--screenshot"]);
+        assert_eq!(a.window_size_override(), None);
     }
 }

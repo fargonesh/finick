@@ -8,29 +8,61 @@
   overflow: auto;
 }
 
-.docs-sidebar a:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+/* nav_group_label: one small-grey-label treatment, never manual caps elsewhere. */
+.nav-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.docs-search:focus-within {
+  border-color: var(--accent);
+}
+
+.docs-search input {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.docs-search input::placeholder {
+  color: var(--text-dim);
+}
+
+.docs-link {
+  transition: none;
+}
+
+.docs-sidebar a.docs-link:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.docs-sidebar a.docs-link.is-active:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--text);
 }
 
 .docs-content h1 {
-  font-size: 30px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
   margin: 0 0 12px;
 }
 
 .docs-content h2 {
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   margin: 26px 0 8px;
 }
 
 .docs-content h3 {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   margin: 20px 0 6px;
 }
 
@@ -38,6 +70,11 @@
 .docs-content li {
   font-size: 14px;
   line-height: 1.65;
+  color: var(--text);
+}
+
+.docs-content p.hint,
+.docs-content li.hint {
   color: var(--text-dim);
 }
 
@@ -64,7 +101,7 @@
   font-size: 12.5px;
   background: var(--panel-raised);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 1px 5px;
 }
 

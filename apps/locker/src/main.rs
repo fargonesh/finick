@@ -740,6 +740,7 @@ fn main() {
             WindowConfig::new(locker_app)
                 .with_title(title)
                 .with_app_id("locker")
+                .with_shell(ShellSurface::lock())
                 .with_size(m.w as f64, m.h as f64)
                 .with_decorations(false)
                 .with_transparency(false)

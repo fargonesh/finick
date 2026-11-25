@@ -2,6 +2,7 @@
 
 pub mod clipboard_manager;
 pub mod launcher;
+pub mod pills;
 mod date_panel;
 mod notification_panel;
 mod notification_popup;
@@ -53,6 +54,7 @@ fn panel_window_config() -> WindowConfig {
     WindowConfig::new(control_panel_app)
         .with_title("control-panel")
         .with_app_id("overlay-panel")
+        .with_shell(ShellSurface::panel())
         .with_size(460., 700.)
         .with_min_size(460., 700.)
         .with_max_size(460., 700.)
@@ -553,8 +555,22 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
     let battery_pct = use_state(|| 0u8);
     let battery_status = use_state(|| "Unknown".to_string());
     let notifications = use_state(Vec::<state::Notification>::new);
-    let workspaces = use_state(system::get_workspaces);
-    let active_workspaces = use_state(system::get_active_workspaces);
+    let workspaces = use_state(|| system::get_workspaces());
+    let active_workspaces = use_state(|| system::get_active_workspaces());
+    let pill_outputs = use_state(Vec::<crate::pills::TopbarPillOutput>::new);
+    let pill_hover = use_state(|| None::<String>);
+
+    use_hook(move || {
+        let mut pills_live = pill_outputs;
+        spawn(async move {
+            loop {
+                let next =
+                    tokio::task::spawn_blocking(crate::pills::poll_pill_outputs).await.unwrap_or_default();
+                pills_live.set_if_modified(next);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        });
+    });
 
     use_hook(move || {
         let mut fmt = use_24h;
@@ -767,9 +783,65 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
     let show_sound_icon = tb_snapshot.show_sound;
     let show_batt = has_battery && tb_snapshot.show_battery;
     let show_notif_icon = tb_snapshot.show_notifications;
+    let show_pills = tb_snapshot.show_pills;
     let tb_icon_size = tb_snapshot.icon_size.clamp(12., 20.) as f32;
     let tb_icon_stroke = tb_snapshot.icon_stroke.clamp(1.0, 3.0) as f32;
     let tb_base = resolve_base(&tb_text_kind);
+    let pills_visible: Vec<crate::pills::TopbarPillOutput> = if show_pills {
+        pill_outputs.read().clone()
+    } else {
+        Vec::new()
+    };
+    let pills_center = rect()
+        .width(Size::flex(1.))
+        .horizontal()
+        .cross_align(Alignment::Center)
+        .main_align(Alignment::Center)
+        .content(Content::Flex)
+        .spacing(8.)
+        .children(pills_visible.into_iter().map(|p| {
+            let hovered = *pill_hover.read() == Some(p.id.clone());
+            let clickable = p.has_action();
+            let is_h = hovered && clickable;
+            let id_enter = p.id.clone();
+            let action = p.action.clone();
+            let text = p.text.clone();
+            let mut enter_state = pill_hover;
+            let mut leave_state = pill_hover;
+            rect()
+                .height(Size::px(28.))
+                .max_width(Size::px(320.))
+                .horizontal()
+                .cross_align(Alignment::Center)
+                .padding((4., 10.))
+                .corner_radius(RADIUS_PILL)
+                .background(if is_h { t.panel_raised } else { t.panel })
+                .border(Border::new().width(1.).fill(t.border))
+                .content(Content::Flex)
+                .cursor(if clickable { CursorIcon::Pointer } else { CursorIcon::Default })
+                .on_pointer_enter(move |_| {
+                    if clickable {
+                        enter_state.set(Some(id_enter.clone()));
+                    }
+                })
+                .on_pointer_leave(move |_| {
+                    leave_state.set(None);
+                })
+                .maybe(clickable, |el| {
+                    el.on_press(move |_| {
+                        if let Some(cmd) = action.clone() {
+                            crate::pills::run_pill_action(&cmd);
+                        }
+                    })
+                })
+                .child(
+                    label()
+                        .font_size(tb_text_size)
+                        .font_weight(FontWeight::MEDIUM)
+                        .color(tb_base)
+                        .text(text),
+                )
+        }));
     let status = rect()
         .height(Size::px(36.))
         .width(Size::fill())
@@ -780,7 +852,7 @@ fn topbar_app_for_monitor(mon_name: String) -> Element {
         .background(Color::TRANSPARENT)
         .content(Content::Flex)
         .child(workspaces_ui)
-        .child(rect().width(Size::flex(1.)))
+        .child(pills_center)
         .child(
             rect()
                 .horizontal()
@@ -1022,6 +1094,7 @@ pub fn get_topbar_width() -> f64 {
 }
 
 pub fn apply_hyprland_base_rules() {
+    apply_hyprland_layer_rules();
     let modal_rule = r#"
         hl.window_rule({ name = "finick-modal", match = { class = "^(overlay-modal)$" }, float = true, pin = true, border_size = 0, no_shadow = true, no_anim = true, no_blur = true, rounding = 0 })
         hl.window_rule({ name = "finick-modal-compat", match = { class = "^(overlay-modal)$", title = "^(overlay-modal)$" }, float = true, pin = true, border_size = 0, no_shadow = true, no_anim = true, no_blur = true })
@@ -1114,6 +1187,31 @@ pub fn apply_hyprland_base_rules() {
         })
     "#;
     let _ = std::process::Command::new("hyprctl").args(["eval", lua_rule]).output();
+}
+
+/// Forward-compatible `layerrule` declarations for real wlr-layer-shell surfaces.
+///
+/// These target the `ShellSurface` namespaces declared in freya-winit. Current
+/// windows are still winit toplevel plus `window_rule` fallback, so these are
+/// no-ops today. Once the native Freya layer runner lands they enforce the
+/// correct layers without app-side changes.
+pub fn apply_hyprland_layer_rules() {
+    for namespace in [
+        "finick-topbar",
+        "finick-panel",
+        "finick-notifications",
+        "finick-calendar",
+        "finick-clipboard",
+        "finick-screenshot",
+        "finick-launcher",
+        "finick-session",
+        "finick-osd",
+        "finick-toasts",
+    ] {
+        let _ = std::process::Command::new("hyprctl")
+            .args(["keyword", "layerrule", &format!("no_anim,{namespace}")])
+            .output();
+    }
 }
 
 pub fn apply_hyprland_monitor_rules(mon: &MonitorState) {
@@ -1396,9 +1494,11 @@ pub fn register_hyprland_rules() {
 fn make_topbar_window_config(mon: &MonitorState) -> WindowConfig {
     let mon_name = mon.name.clone();
     let title: &'static str = Box::leak(format!("overlay-{}", mon.name).into_boxed_str());
+    let output: &'static str = Box::leak(mon.name.clone().into_boxed_str());
     WindowConfig::new(move || topbar_app_for_monitor(mon_name.clone()))
         .with_title(title)
         .with_app_id("overlay")
+        .with_shell(ShellSurface::topbar(output))
         .with_size(mon.width, 36.)
         .with_decorations(false)
         .with_transparency(true)
@@ -2095,10 +2195,10 @@ pub fn run() {
                             }).await;
                             let mon = get_monitor_states().into_iter().find(|m| m.x == 0).unwrap_or(MonitorState { name: "default".to_string(), x: 0, y: 0, width: 1920.0, height: 1080.0 });
                             let w = 500;
-                            let hgt = 264;
+                            let hgt = 640;
                             let px = mon.x + mon.width as i32 - w - 12;
                             let py = mon.y + PANEL_TOP_OFFSET;
-                            crate::state::arm_travel_guard(px as f64, py as f64, 500., 264., (px + 440) as f64);
+                            crate::state::arm_travel_guard(px as f64, py as f64, 500., 640., (px + 440) as f64);
                             let mon_name = mon.name.clone();
                             let _ = std::process::Command::new("hyprctl").args(["eval", &format!(r#"hl.window_rule({{ name = "finick-screenshot-live-{mon_name}", match = {{ class = "^(overlay-screenshot)$" }}, monitor = "{mon_name}", float = true, pin = true, move = {{ {px}, {py} }}, size = {{ {w}, {hgt} }}, border_size = 0, no_shadow = true, no_anim = true, no_blur = true, rounding = 20 }})"#, mon_name=mon_name, px=px, py=py, w=w, hgt=hgt)]).output();
                             tokio::time::sleep(std::time::Duration::from_millis(35)).await;
@@ -2150,6 +2250,7 @@ pub fn run() {
                                     WindowConfig::new(modal::fullscreen_modal_app)
                                         .with_title("overlay-modal")
                                         .with_app_id("overlay-modal")
+                                        .with_shell(ShellSurface::screenshot_ui())
                                         .with_size(mw, mh)
                                         .with_decorations(false)
                                         .with_transparency(true)

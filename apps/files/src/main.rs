@@ -2099,47 +2099,69 @@ fn files_root(initial_path: Option<String>) -> Element {
     let watch_sig = use_state(|| Option::<String>::None);
     use_hook(move || {
         let mut t = watch_tick;
-        spawn(async move {
+        let start_dir = current_path.read().clone();
+        // The notify/poll loop blocks on I/O, so it runs on its own OS
+        // thread and forwards wakeups over a channel. Blocking inside a
+        // Freya-spawned future would stall the task runner (polled on the
+        // UI thread) and freeze the window before first paint.
+        let (dir_tx, dir_rx) = std::sync::mpsc::channel::<String>();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let _ = dir_tx.send(start_dir.clone());
+        std::thread::spawn(move || {
             use {
                 notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher},
                 std::sync::atomic::Ordering,
             };
-            let path_now = current_path.read().clone();
-            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            let (ntx, nrx) = std::sync::mpsc::channel::<()>();
             let mut watcher: Option<RecommendedWatcher> = notify::recommended_watcher(move |res| {
                 if let Ok(ev) = res {
                     let ev: notify::Event = ev;
                     match ev.kind {
                         EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
-                            let _ = tx.send(());
+                            let _ = ntx.send(());
                         }
                         _ => {}
                     }
                 }
             })
             .ok();
-            if let Some(w) = watcher.as_mut() {
-                let _ = w.watch(Path::new(&path_now), RecursiveMode::NonRecursive);
+            if watcher.is_some() {
                 WATCH_SEQ.store(1, Ordering::SeqCst);
             }
+            let mut watched: Option<String> = None;
             let mut last_poll = std::time::Instant::now();
             loop {
-                let got = rx.recv_timeout(std::time::Duration::from_millis(400)).is_ok();
-                let seq = WATCH_SEQ.load(Ordering::SeqCst);
-                if got {
-                    let next = *t.read();
-                    t.set(next + 1);
-                    last_poll = std::time::Instant::now();
-                } else if last_poll.elapsed().as_secs() >= 5 {
-                    let next = *t.read();
-                    t.set(next + 1);
-                    last_poll = std::time::Instant::now();
+                // Re-target the watcher after navigation.
+                while let Ok(dir) = dir_rx.try_recv() {
+                    if watched.as_deref() != Some(&dir) {
+                        if let Some(w) = watcher.as_mut() {
+                            let _ = w.watch(Path::new(&dir), RecursiveMode::NonRecursive);
+                        }
+                        watched = Some(dir);
+                    }
                 }
-                let _ = seq;
+                let got = nrx.recv_timeout(std::time::Duration::from_millis(400)).is_ok();
+                if got || last_poll.elapsed().as_secs() >= 5 {
+                    last_poll = std::time::Instant::now();
+                    // Receiver gone means the app is tearing down.
+                    if tx.send(()).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        let mut last_sent = start_dir;
+        spawn(async move {
+            while rx.recv().await.is_some() {
+                // Forward navigation to the watcher thread. The periodic
+                // poll guarantees a retarget within ~5s even while idle.
                 let cur = current_path.read().clone();
-                if let Some(w) = watcher.as_mut() {
-                    let _ = w.watch(Path::new(&cur), RecursiveMode::NonRecursive);
+                if cur != last_sent {
+                    last_sent = cur.clone();
+                    let _ = dir_tx.send(cur);
                 }
+                let next = *t.read();
+                t.set(next + 1);
             }
         });
     });
@@ -5557,11 +5579,16 @@ fn main() {
     let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
     let _guard = _rt.as_ref().map(|rt| rt.enter());
 
-    launch(
-        LaunchConfig::new().with_window(
-            WindowConfig::new_app(FilesApp { initial_path }).with_title("Files").with_size(1100., 700.).with_min_size(640., 480.),
-        ),
-    )
+    launch(LaunchConfig::new().with_window({
+        let mut window = WindowConfig::new_app(FilesApp { initial_path })
+            .with_title("Files")
+            .with_size(1100., 700.)
+            .with_min_size(640., 480.);
+        if let Some((w, h)) = args.window_size_override() {
+            window = window.with_size(w, h);
+        }
+        window
+    }))
 }
 
 #[cfg(test)]

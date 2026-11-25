@@ -397,6 +397,7 @@ pub fn clipboard_window_config() -> WindowConfig {
     WindowConfig::new(clipboard_app)
         .with_title("clipboard")
         .with_app_id("overlay-clipboard")
+        .with_shell(ShellSurface::clipboard())
         .with_size(520., 380.)
         .with_min_size(520., 340.)
         .with_max_size(520., 600.)

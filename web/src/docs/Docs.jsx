@@ -36,28 +36,30 @@ export default function Docs({ slug }) {
   return (
     <div className="docs mx-auto grid max-w-[1120px] gap-4 px-5 py-8 md:grid-cols-[240px_1fr]">
       <aside className="docs-sidebar rounded-[20px] border p-3">
-        <div className="mb-2 flex items-center gap-2 px-2 text-sm font-semibold">
+        <div className="mb-2 flex items-center gap-2 px-2 text-[15px] font-semibold">
           <BookOpen size={14} style={{ color: "var(--accent)" }} /> Docs
         </div>
-        <label className="mb-3 flex items-center gap-2 rounded-full border px-3 py-2 text-[13px]" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}>
-          <Search size={13} style={{ color: "var(--text-dim)" }} />
+        <label className="docs-search mb-3 flex items-center gap-2 rounded-full border px-3 py-2 text-[13px]" style={{ background: "var(--panel-raised)", borderColor: "var(--border)" }}>
+          <Search size={13} style={{ color: "var(--text-dim)" }} aria-hidden="true" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search docs…"
+            aria-label="Search docs"
             className="w-full bg-transparent outline-none"
           />
         </label>
         {results ? (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1" role="listbox" aria-label="Search results">
             {results.length === 0 && (
-              <p className="px-2 py-3 text-[13px]" style={{ color: "var(--text-dim)" }}>No matches. Try fewer words.</p>
+              <p className="px-2 py-3 text-xs" style={{ color: "var(--text-dim)" }}>No matches. Try fewer words.</p>
             )}
             {results.map((p) => (
               <a
                 key={p.slug}
                 href={`#/docs/${p.slug}`}
-                className={`rounded-xl px-2.5 py-2 text-[13px] ${p.slug === page.slug ? "font-semibold" : ""}`}
+                aria-current={p.slug === page.slug ? "page" : undefined}
+                className={`docs-link rounded-xl px-2.5 py-2 text-[13px] ${p.slug === page.slug ? "font-semibold is-active" : ""}`}
                 style={p.slug === page.slug
                   ? { background: "color-mix(in srgb, var(--accent) 14%, transparent)", color: "var(--text)" }
                   : { color: "var(--text-dim)" }}
@@ -69,13 +71,14 @@ export default function Docs({ slug }) {
         ) : (
           SECTIONS.map((s) => (
             <div key={s.title} className="mb-3">
-              <h4 className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--text-dim)" }}>{s.title}</h4>
+              <h4 className="nav-group-label px-2 pb-1">{s.title}</h4>
               <div className="flex flex-col gap-0.5">
                 {s.pages.map((p) => (
                   <a
                     key={p.slug}
                     href={`#/docs/${p.slug}`}
-                    className={`rounded-xl px-2.5 py-[7px] text-[13px] ${p.slug === page.slug ? "font-semibold" : ""}`}
+                    aria-current={p.slug === page.slug ? "page" : undefined}
+                    className={`docs-link flex min-h-[36px] items-center rounded-xl px-2.5 py-2 text-[13px] ${p.slug === page.slug ? "font-semibold is-active" : ""}`}
                     style={p.slug === page.slug
                       ? { background: "color-mix(in srgb, var(--accent) 14%, transparent)", color: "var(--text)" }
                       : { color: "var(--text-dim)" }}

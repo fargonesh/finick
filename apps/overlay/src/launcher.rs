@@ -970,6 +970,7 @@ pub fn launcher_window_config_with_query(initial_query: String) -> WindowConfig 
     WindowConfig::new_app(LauncherApp { initial_query })
         .with_title("launcher")
         .with_app_id("launcher")
+        .with_shell(ShellSurface::launcher())
         .with_size(700., 540.)
         .with_min_size(640., 460.)
         .with_decorations(false)

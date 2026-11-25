@@ -389,6 +389,7 @@ pub fn date_panel_window_config() -> WindowConfig {
     WindowConfig::new(date_panel_app)
         .with_title("calendar-panel")
         .with_app_id("overlay-calendar")
+        .with_shell(ShellSurface::calendar())
         .with_size(400., 620.)
         .with_min_size(380., 360.)
         .with_max_size(400., 760.)

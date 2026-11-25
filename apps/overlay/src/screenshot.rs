@@ -38,7 +38,13 @@ fn run_capture(
                     if let Some(p) = v.file_path.clone() {
                         last_file.set(Some(p.clone()));
                     }
-                    format!("Saved {}", v.file_path.map(|p| p.display().to_string()).unwrap_or_default())
+                    let shown = v
+                        .file_path
+                        .as_ref()
+                        .and_then(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    format!("Saved {shown}")
                 } else {
                     v.message
                 }
@@ -68,7 +74,15 @@ fn run_recording_toggle(
         spawn(async move {
             let r = tokio::task::spawn_blocking(system::capture::stop_screencast).await.unwrap_or(Err("task failed".to_string()));
             let msg = match r {
-                Ok(v) => format!("Saved {}", v.file_path.map(|p| p.display().to_string()).unwrap_or_default()),
+                Ok(v) => {
+                    let shown = v
+                        .file_path
+                        .as_ref()
+                        .and_then(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    format!("Saved {shown}")
+                }
                 Err(e) => e,
             };
             status.set(Some(msg.clone()));
@@ -91,7 +105,12 @@ fn run_recording_toggle(
             .unwrap_or(Err("task failed".to_string()));
         match r {
             Ok(st) => {
-                status.set(Some(format!("Recording {} — {}", st.tool, st.file_path.display())));
+                let shown = st
+                    .file_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                status.set(Some(format!("Recording {shown}")));
                 rec.set(Some(st));
             }
             Err(e) => status.set(Some(e)),
@@ -281,9 +300,14 @@ impl Component for ScreenshotUtility {
             );
             if let Some(r) = active_rec.clone() {
                 let elapsed = r.duration_secs;
+                let shown = r
+                    .file_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 body = body.child(setting_row(
-                    format!("Recording {} {:02}:{:02}", r.tool, elapsed / 60, elapsed % 60),
-                    Some(r.file_path.display().to_string()),
+                    format!("Recording {:02}:{:02}", elapsed / 60, elapsed % 60),
+                    Some(shown),
                     false,
                     status_chip("REC", true, None),
                 ));
@@ -305,7 +329,7 @@ impl Component for ScreenshotUtility {
                 segmented_control(vec![("None", 0), ("3s", 1), ("5s", 2)], *delay_idx.read(), move |i| di.set(i)),
             )).child(setting_row(
                 "Include cursor".to_string(),
-                Some("grim -c, wl-screenrec cursor".to_string()),
+                Some("Show the pointer in the capture".to_string()),
                 false,
                 {
                     let mut c = include_cursor;
@@ -313,7 +337,7 @@ impl Component for ScreenshotUtility {
                 },
             )).child(setting_row(
                 "Record audio".to_string(),
-                Some("wl-screenrec --audio".to_string()),
+                Some("Include sound with recordings".to_string()),
                 true,
                 {
                     let mut a = record_audio;
@@ -321,7 +345,7 @@ impl Component for ScreenshotUtility {
                 },
             )).child(setting_row(
                 "Save to".to_string(),
-                Some(system::capture::default_screenshot_dir().display().to_string()),
+                Some("Pictures/Screenshots".to_string()),
                 true,
                 label().font_size(11.).color(t.text_dim).text("Pictures/Screenshots"),
             )));
@@ -335,7 +359,10 @@ impl Component for ScreenshotUtility {
             )).child(setting_row(
                 "Open last capture".to_string(),
                 Some(match &last {
-                    Some(p) => p.display().to_string(),
+                    Some(p) => p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "Captured".to_string()),
                     None => "Capture something first".to_string(),
                 }),
                 false,
@@ -422,6 +449,7 @@ pub fn screenshot_window_config() -> WindowConfig {
     WindowConfig::new(screenshot_app)
         .with_title("screenshot")
         .with_app_id("overlay-screenshot")
+        .with_shell(ShellSurface::screenshot_ui())
         .with_size(500., 640.)
         .with_min_size(500., 400.)
         .with_max_size(500., 760.)

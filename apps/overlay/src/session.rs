@@ -73,6 +73,7 @@ pub fn session_window_config() -> WindowConfig {
     WindowConfig::new(session_app)
         .with_title("session")
         .with_app_id("overlay-session")
+        .with_shell(ShellSurface::session_dialog())
         .with_size(480., 320.)
         .with_decorations(false)
         .with_transparency(true)

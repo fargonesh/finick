@@ -7,7 +7,7 @@ use {
     regex::Regex,
     rusqlite::params,
     std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         env::{self, var},
         fs::{self, read_dir},
         os::unix::fs::PermissionsExt,
@@ -32,22 +32,26 @@ struct ChannelData {
 }
 
 pub mod ty;
-const MAX_DEPTH: usize = 5;
 /// If a file was indexed less than this many seconds ago, skip re-indexing.
 const REINDEX_THRESHOLD: i64 = 60;
 
-fn folders() -> Vec<PathBuf> {
-    let mut folders = vec![
-        Path::new("/usr/share/applications/").to_path_buf(),
-        Path::new("/usr/local/share/applications/").to_path_buf(),
-        Path::new(&var("HOME").unwrap()).to_path_buf(),
+fn roots() -> Vec<(PathBuf, usize)> {
+    let mut roots = vec![
+        (Path::new("/usr/share/applications/").to_path_buf(), 1),
+        (Path::new("/usr/local/share/applications/").to_path_buf(), 1),
     ];
+    let home = PathBuf::from(var("HOME").unwrap_or_default());
+    for (name, depth) in [("Desktop", 3), ("Documents", 4), ("Downloads", 3), (".local/share/applications", 2)] {
+        roots.push((home.join(name), depth));
+    }
     if let Ok(path) = var("PATH") {
         for folder in env::split_paths(&path) {
-            folders.push(folder);
+            roots.push((folder, 0));
         }
     }
-    folders
+    let mut seen = HashSet::new();
+    roots.retain(|(path, _)| seen.insert(path.clone()));
+    roots
 }
 
 fn ignore() -> Vec<Regex> {
@@ -62,64 +66,93 @@ fn is_binary_file(path: &Path) -> bool {
     false
 }
 
+const FLUSH_BATCH: usize = 500;
+
+fn flush(pool: &Pool<SqliteConnectionManager>, batch: &mut Vec<ChannelData>) {
+    if batch.is_empty() {
+        return;
+    }
+    let Ok(mut conn) = pool.get() else {
+        return;
+    };
+    let Ok(tx) = conn.transaction() else {
+        return;
+    };
+    let mut stmt = tx
+        .prepare(
+            "REPLACE INTO files (name, path, parent_path, depth, last_accessed, executable, desktop, icon, is_dir, size) \
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        )
+        .unwrap();
+    for data in batch.drain(..) {
+        stmt.execute(params![
+            data.name,
+            data.path_str,
+            data.parent_path,
+            data.depth,
+            data.timestamp,
+            data.executable,
+            data.is_desktop,
+            data.icon,
+            data.is_dir,
+            data.size.map(|s| s as i64),
+        ])
+        .unwrap();
+    }
+    drop(stmt);
+    tx.commit().unwrap();
+}
+
 pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
-    let folders = dirs.unwrap_or(folders());
+    let targeted = dirs.is_some();
+    let targets: Vec<(PathBuf, usize)> = match dirs {
+        Some(paths) => paths.into_iter().map(|p| (p, 0)).collect(),
+        None => roots(),
+    };
     let ignore = Arc::new(ignore());
-    // Use a sync_channel with a fixed capacity to prevent unbounded memory usage.
     let (tx, rx) = mpsc::sync_channel::<ChannelData>(1000);
 
-    // Spawn a thread to process file entries.
-    std::thread::spawn(move || {
-        let pool = pool.clone();
-        while let Ok(data) = rx.recv() {
-            let conn = pool.get().unwrap();
-            println!("{:?}", data.icon);
-            // Check if the file already exists and if it was indexed recently.
-            let should_index =
-                match conn.query_row("SELECT last_accessed FROM files WHERE path = ?1", params![&data.path_str], |row| {
-                    row.get::<_, i64>(0)
-                }) {
-                    Ok(last_accessed) => {
-                        // Only re-index if the stored timestamp is older than our threshold.
-                        data.timestamp >= last_accessed + REINDEX_THRESHOLD
-                    }
-                    Err(_) => true, // File not indexed yet.
-                };
-
-            if should_index {
-                // Using REPLACE here so that we update if it already exists.
-                conn.execute(
-                    "REPLACE INTO files (name, path, parent_path, depth, last_accessed, executable, desktop, icon, is_dir, \
-                     size) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                    params![
-                        data.name,
-                        data.path_str,
-                        data.parent_path,
-                        data.depth,
-                        data.timestamp,
-                        data.executable,
-                        data.is_desktop,
-                        data.icon,
-                        data.is_dir,
-                        data.size.map(|s| s as i64),
-                    ],
-                )
-                .unwrap();
+    let known: Arc<HashMap<String, i64>> = if targeted {
+        Arc::new(HashMap::new())
+    } else {
+        let conn = pool.get().unwrap();
+        let mut map = HashMap::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT path, last_accessed FROM files") {
+            if let Ok(rows) = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))) {
+                for row in rows.flatten() {
+                    map.insert(row.0, row.1);
+                }
             }
+        }
+        Arc::new(map)
+    };
+
+    std::thread::spawn({
+        let pool = pool.clone();
+        move || {
+            let mut batch = Vec::with_capacity(FLUSH_BATCH);
+            while let Ok(data) = rx.recv() {
+                let fresh = known.get(&data.path_str).map_or(true, |&last| data.timestamp >= last + REINDEX_THRESHOLD);
+                if fresh {
+                    batch.push(data);
+                }
+                if batch.len() >= FLUSH_BATCH {
+                    flush(&pool, &mut batch);
+                }
+            }
+            flush(&pool, &mut batch);
         }
     });
 
-    folders.into_iter().for_each(|f| {
-        std::thread::spawn({
-            let ignore = ignore.clone();
-            let tx = tx.clone();
-            move || task(f, ignore.clone(), tx.clone(), 0)
-        });
+    std::thread::spawn(move || {
+        for (folder, max_depth) in targets {
+            task(folder, ignore.clone(), tx.clone(), 0, max_depth);
+        }
     });
 }
 
-fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>, depth: usize) {
-    if depth > MAX_DEPTH {
+fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>, depth: usize, max_depth: usize) {
+    if depth > max_depth {
         return;
     }
 
@@ -150,7 +183,7 @@ fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>
                     size: None,
                 });
 
-                task(path, ignore.clone(), tx.clone(), depth + 1);
+                task(path, ignore.clone(), tx.clone(), depth + 1, max_depth);
             } else if ft.is_file() && !is_binary_file(&path) {
                 let timestamp = entry
                     .metadata()
@@ -663,23 +696,39 @@ pub fn watch(pool: Pool<SqliteConnectionManager>) {
 
     let mut watcher: RecommendedWatcher = Watcher::new(tx, Config::default()).unwrap();
 
-    for folder in folders() {
-        let _ = watcher.watch(&folder, RecursiveMode::Recursive);
+    for (folder, _) in roots() {
+        if folder.is_dir() {
+            let _ = watcher.watch(&folder, RecursiveMode::NonRecursive);
+        }
     }
 
-    std::thread::spawn(move || loop {
-        if let Ok(Ok(event)) = rx.recv() {
-            match event.kind {
-                EventKind::Create(_) => {
-                    index(Some(event.paths), pool.clone());
+    std::thread::spawn(move || {
+        let mut pending: Vec<PathBuf> = Vec::new();
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_millis(150)) {
+                Ok(Ok(event)) => match event.kind {
+                    EventKind::Create(_) => pending.extend(event.paths),
+                    EventKind::Remove(_) => {
+                        for p in &event.paths {
+                            let param = format!("{}%", p.display());
+                            if let Ok(conn) = pool.get() {
+                                let _ = conn.execute("DELETE FROM files WHERE path LIKE ?1", params![param]);
+                            }
+                        }
+                    }
+                    _ => {}
+                },
+                Ok(Err(_)) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if !pending.is_empty() {
+                        index(Some(std::mem::take(&mut pending)), pool.clone());
+                    }
+                    continue;
                 }
-                EventKind::Remove(_) => {
-                    event.paths.iter().for_each(|p| {
-                        let param = format!("{}%", p.display());
-                        pool.get().unwrap().execute("DELETE FROM files WHERE path LIKE ?1", params![param]).unwrap();
-                    });
-                }
-                _ => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+            if pending.len() >= 500 {
+                index(Some(std::mem::take(&mut pending)), pool.clone());
             }
         }
     });

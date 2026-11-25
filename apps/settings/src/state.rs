@@ -60,6 +60,7 @@ pub struct SettingsStore {
     pub topbar_show_sound: State<bool>,
     pub topbar_show_battery: State<bool>,
     pub topbar_show_notifications: State<bool>,
+    pub topbar_show_pills: State<bool>,
 
     // System & General
     pub time_24h: State<bool>,
@@ -622,6 +623,7 @@ impl SettingsStore {
                     "topbar.show_sound" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_sound; s.set(b); },
                     "topbar.show_battery" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_battery; s.set(b); },
                     "topbar.show_notifications" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_notifications; s.set(b); },
+                    "topbar.show_pills" => if let Some(b) = val.as_bool() { let mut s = self.topbar_show_pills; s.set(b); },
                     "topbar.show_brightness" | "topbar.show_focus" => {}
                     "screentime.downtime_enabled" => if let Some(b) = val.as_bool() { let mut s = self.downtime_enabled; s.set(b); },
                     "screentime.app_limits_enabled" => if let Some(b) = val.as_bool() { let mut s = self.app_limits_enabled; s.set(b); },
@@ -702,6 +704,7 @@ pub fn use_init_settings_store() -> SettingsStore {
     let topbar_show_sound = use_state(|| true);
     let topbar_show_battery = use_state(|| true);
     let topbar_show_notifications = use_state(|| true);
+    let topbar_show_pills = use_state(|| true);
 
     let time_24h = use_state(|| true);
     let auto_updates = use_state(|| true);
@@ -822,6 +825,7 @@ pub fn use_init_settings_store() -> SettingsStore {
         topbar_show_sound,
         topbar_show_battery,
         topbar_show_notifications,
+        topbar_show_pills,
     };
 
     provide_context(store);

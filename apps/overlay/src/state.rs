@@ -268,6 +268,7 @@ pub struct TopbarSettings {
     pub show_battery: bool,
     pub show_wired: bool,
     pub show_notifications: bool,
+    pub show_pills: bool,
     pub text_size: f64,
     pub text_color: String,
     pub text_color_light: String,
@@ -286,6 +287,7 @@ impl Default for TopbarSettings {
             show_battery: true,
             show_wired: true,
             show_notifications: true,
+            show_pills: true,
             text_size: 13.0,
             text_color: "Default".to_string(),
             text_color_light: String::new(),
@@ -317,6 +319,7 @@ fn apply_topbar_custom(ts: &mut TopbarSettings, k: &str, value: &SettingValue) -
         "topbar.show_wired" => if let Some(b) = value.as_bool() { ts.show_wired = b; return true; },
         "topbar.show_brightness" => return true,
         "topbar.show_notifications" => if let Some(b) = value.as_bool() { ts.show_notifications = b; return true; },
+        "topbar.show_pills" => if let Some(b) = value.as_bool() { ts.show_pills = b; return true; },
         "topbar.show_focus" => return true,
         "topbar.text_size" => if let Some(f) = value.as_f64() { ts.text_size = f.clamp(10.0, 18.0); return true; },
         "topbar.text_color" => if let Some(s) = value.as_str() { ts.text_color = s.to_string(); return true; },
@@ -553,6 +556,162 @@ pub fn clear_notifications() {
     let notifs = fetch_notifications_blocking();
     for n in notifs {
         dismiss_notification(n.id);
+    }
+}
+
+fn norm_activation_text(s: &str) -> String {
+    s.to_lowercase().chars().filter(|c| c.is_alphanumeric() || *c == ' ').collect()
+}
+
+fn activation_tokens(s: &str) -> Vec<String> {
+    norm_activation_text(s)
+        .split_whitespace()
+        .filter(|w| w.len() > 2)
+        .map(|w| w.to_string())
+        .collect()
+}
+
+fn stripped_lower(s: &str) -> String { s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect() }
+
+pub fn focus_notification_source_blocking(app_name: &str, summary: &str) -> bool {
+    let out = std::process::Command::new("hyprctl").args(["clients", "-j"]).output();
+    let Ok(o) = out else { return false };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&o.stdout) else { return false };
+    let Some(clients) = v.as_array() else { return false };
+    let app = norm_activation_text(app_name);
+    let sum = norm_activation_text(summary);
+    let app_stripped = stripped_lower(app_name);
+    let app_tokens = activation_tokens(app_name);
+    if app.len() < 2 && sum.len() < 2 && app_tokens.is_empty() {
+        return false;
+    }
+    let mut best: Option<(i32, String)> = None;
+    for c in clients {
+        let class = c.get("class").and_then(|v| v.as_str()).unwrap_or("");
+        if class.starts_with("overlay") || class.starts_with("topbar") {
+            continue;
+        }
+        let addr = c.get("address").and_then(|v| v.as_str()).unwrap_or("");
+        if addr.is_empty() {
+            continue;
+        }
+        let lc = norm_activation_text(class);
+        let lc_stripped = stripped_lower(class);
+        let lt = norm_activation_text(c.get("title").and_then(|v| v.as_str()).unwrap_or(""));
+        let mut score = 0;
+        if app.len() > 2 && !lc.is_empty() && (lc.contains(&app) || app.contains(&lc)) {
+            score += 2;
+        } else if !app_stripped.is_empty()
+            && !lc_stripped.is_empty()
+            && (lc_stripped.contains(&app_stripped) || app_stripped.contains(&lc_stripped))
+        {
+            score += 2;
+        } else {
+            for tok in &app_tokens {
+                if lc.contains(tok) || lc_stripped.contains(tok) {
+                    score += 2;
+                    break;
+                }
+            }
+        }
+        if sum.len() > 2 && !lt.is_empty() && (lt.contains(&sum) || sum.contains(&lt)) {
+            score += 1;
+        }
+        if score > 0 && best.as_ref().is_none_or(|(s, _)| score > *s) {
+            best = Some((score, addr.to_string()));
+        }
+    }
+    if let Some((_, addr)) = best {
+        system::hypr_focus_window(&format!("address:{addr}"))
+    } else {
+        false
+    }
+}
+
+fn desktop_launch_for_app(app_name: &str) -> Option<String> {
+    let needle = stripped_lower(app_name);
+    if needle.len() < 2 {
+        return None;
+    }
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        let h = std::path::PathBuf::from(home);
+        dirs.push(h.join(".local/share/applications"));
+        dirs.push(h.join(".nix-profile/share/applications"));
+    }
+    for base in ["/usr/share/applications", "/usr/local/share/applications", "/run/current-system/sw/share/applications"] {
+        dirs.push(std::path::PathBuf::from(base));
+    }
+    if let Some(xdg) = std::env::var_os("XDG_DATA_DIRS") {
+        for p in std::env::split_paths(&xdg) {
+            dirs.push(p.join("applications"));
+        }
+    }
+    let mut best: Option<(i32, String)> = None;
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().is_none_or(|x| x != "desktop") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&p) else { continue };
+            let mut name = String::new();
+            let mut exec = String::new();
+            for line in content.lines() {
+                let line = line.trim();
+                if let Some(v) = line.strip_prefix("Name=") {
+                    if name.is_empty() {
+                        name = v.trim().to_string();
+                    }
+                } else if let Some(v) = line.strip_prefix("Exec=") {
+                    if exec.is_empty() {
+                        exec = v.trim().to_string();
+                    }
+                }
+                if !name.is_empty() && !exec.is_empty() {
+                    break;
+                }
+            }
+            if name.is_empty() || exec.is_empty() {
+                continue;
+            }
+            let name_stripped = stripped_lower(&name);
+            let mut score = 0;
+            if name_stripped == needle {
+                score = 4;
+            } else if name_stripped.contains(&needle) || needle.contains(&name_stripped) {
+                score = 3;
+            } else {
+                for tok in activation_tokens(app_name) {
+                    if name_stripped.contains(&tok) {
+                        score = 2;
+                        break;
+                    }
+                }
+            }
+            if score > 0 && best.as_ref().is_none_or(|(s, _)| score > *s) {
+                let cmd = exec.split_whitespace().next().unwrap_or("").trim_matches('"').to_string();
+                if !cmd.is_empty() && !cmd.starts_with('%') {
+                    best = Some((score, cmd));
+                }
+            }
+        }
+    }
+    best.map(|(_, cmd)| cmd)
+}
+
+pub fn activate_notification_source(app_name: &str, summary: &str) {
+    if focus_notification_source_blocking(app_name, summary) {
+        return;
+    }
+    if let Some(cmd) = desktop_launch_for_app(app_name) {
+        system::hypr_exec(&cmd);
+    } else {
+        let fallback = app_name.trim().to_lowercase();
+        if fallback.len() >= 2 {
+            system::hypr_exec(&fallback);
+        }
     }
 }
 

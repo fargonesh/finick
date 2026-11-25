@@ -1518,7 +1518,10 @@ impl SystemBackend for HyprlandBackend {
         for name in ordered_names {
             if let Some(d) = disp_map.get(name) {
                 let (w, h) = parse_display_dimensions(&d.resolution);
+                let sc: f64 = d.scale.parse().unwrap_or(1.0);
+                let sc = if sc <= 0.0 { 1.0 } else { sc };
                 let effective_w = if d.transform == 1 || d.transform == 3 { h } else { w };
+                let effective_w = (effective_w as f64 / sc).round() as i32;
                 let pos = format!("{x}x0");
                 let mode = if !d.resolution.is_empty() && !d.refresh_rate.is_empty() {
                     if let Ok(hz) = d.refresh_rate.parse::<f64>() {
@@ -1570,50 +1573,10 @@ impl SystemBackend for HyprlandBackend {
         }
         let displays = self.get_displays();
         let disp_map: HashMap<String, DisplayInfo> = displays.into_iter().map(|d| (d.name.clone(), d)).collect();
-        let mut adjusted: Vec<(String, i32, i32)> = Vec::new();
-        for (name, mut x, mut y) in positions.iter().cloned() {
-            if adjusted.is_empty() {
-                x = 0;
-                y = 0;
-            } else if let Some(d) = disp_map.get(&name) {
-                let (rw, rh) = parse_display_dimensions(&d.resolution);
-                let sc: f64 = d.scale.parse().unwrap_or(1.0);
-                let sc = if sc <= 0.0 { 1.0 } else { sc };
-                let mut sw = (rw as f64 / sc).round() as i32;
-                let mut sh = (rh as f64 / sc).round() as i32;
-                if d.transform == 1 || d.transform == 3 {
-                    std::mem::swap(&mut sw, &mut sh);
-                }
-                let mut best: Option<(i32, i32, i32)> = None;
-                for (on, ox, oy) in &adjusted {
-                    if let Some(od) = disp_map.get(on) {
-                        let (orw, orh) = parse_display_dimensions(&od.resolution);
-                        let osc: f64 = od.scale.parse().unwrap_or(1.0);
-                        let osc = if osc <= 0.0 { 1.0 } else { osc };
-                        let mut ow = (orw as f64 / osc).round() as i32;
-                        let mut oh = (orh as f64 / osc).round() as i32;
-                        if od.transform == 1 || od.transform == 3 {
-                            std::mem::swap(&mut ow, &mut oh);
-                        }
-                        for (cx, cy) in [(*ox + ow, *oy), (*ox - sw, *oy), (*ox, *oy + oh), (*ox, *oy - sh)] {
-                            let dx = x - cx;
-                            let dy = y - cy;
-                            let dist = dx * dx + dy * dy;
-                            if best.is_none() || dist < best.unwrap().0 {
-                                best = Some((dist, cx, cy));
-                            }
-                        }
-                    }
-                }
-                if let Some((_, bx, by)) = best {
-                    x = bx;
-                    y = by;
-                }
-            }
-            x = x.clamp(-3000, 3000);
-            y = y.clamp(-2000, 2000);
-            adjusted.push((name, x, y));
-        }
+        let adjusted: Vec<(String, i32, i32)> = positions
+            .iter()
+            .map(|(name, x, y)| (name.clone(), (*x).clamp(-3000, 3000), (*y).clamp(-2000, 2000)))
+            .collect();
         for (name, x, y) in &adjusted {
             if let Some(d) = disp_map.get(name) {
                 let pos = format!("{x}x{y}");

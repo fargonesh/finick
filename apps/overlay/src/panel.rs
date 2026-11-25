@@ -8,15 +8,6 @@ use {
     system::{BluetoothDevice, CurrentWifiInfo, HyprlandBackend, SystemBackend, WifiNetworkDetail, WiredInfo},
     ui::*,
 };
-fn trunc(s: &str, n: usize) -> String {
-    if s.chars().count() <= n {
-        s.to_string()
-    } else {
-        let mut t: String = s.chars().take(n - 1).collect();
-        t.push('…');
-        t
-    }
-}
 
 pub fn control_panel_app() -> Element {
     let theme_state = use_init_app_theme(get_theme());
@@ -230,7 +221,7 @@ pub fn control_panel_app() -> Element {
             if let Some(ssid) = current_wifi.ssid.clone()
                 && current_wifi.connected {
                     let iface = current_wifi.interface.clone();
-                    let display = trunc(&ssid, 18);
+                    let display = ssid;
                     card = card.child(
                         rect()
                             .width(Size::fill())
@@ -268,7 +259,7 @@ pub fn control_panel_app() -> Element {
                 }
                 let ssid = net.ssid.clone();
                 let ssid2 = ssid.clone();
-                let display = trunc(&ssid, 20);
+                let display = ssid.clone();
                 let is_connected = current_wifi.ssid.as_ref() == Some(&ssid);
                 let iface_for_row = iface_clone.clone();
                 let is_secured = !net.is_saved
@@ -331,13 +322,7 @@ pub fn control_panel_app() -> Element {
                 rows.push(tile_sub("No networks found").into_element());
             }
             let list_h = row1_list_h;
-            card = card.child(
-                ScrollView::new()
-                    .width(Size::fill())
-                    .height(Size::px(list_h))
-                    .show_scrollbar(rows.len() > 4)
-                    .child(rect().width(Size::fill()).vertical().spacing(2.).content(Content::Flex).children(rows)),
-            );
+            card = card.child(FadeScrollList::new(list_h).fade_height(18.).children(rows));
         }
         card
     };
@@ -374,7 +359,7 @@ pub fn control_panel_app() -> Element {
                 for dev in connected_devs.iter() {
                     let mac = dev.mac.clone();
                     let name = dev.name.clone();
-                    let display = trunc(&name, 20);
+                    let display = name;
                     rows.push(
                         rect()
                             .width(Size::fill())
@@ -402,7 +387,7 @@ pub fn control_panel_app() -> Element {
             }
             for dev in other_devs.iter().take(8) {
                 let name = dev.name.clone();
-                let display = trunc(&name, 20);
+                let display = name;
                 let dev_for_click = dev.clone();
                 rows.push(
                     rect()
@@ -430,18 +415,12 @@ pub fn control_panel_app() -> Element {
                 rows.push(tile_sub("No devices found — scanning...").into_element());
             }
             let list_h = row1_list_h;
-            card = card.child(
-                ScrollView::new()
-                    .width(Size::fill())
-                    .height(Size::px(list_h))
-                    .show_scrollbar(rows.len() > 4)
-                    .child(rect().width(Size::fill()).vertical().spacing(2.).content(Content::Flex).children(rows)),
-            );
+            card = card.child(FadeScrollList::new(list_h).fade_height(18.).children(rows));
         }
         card
     };
     let wired_card = tile()
-        .height(Size::px(row2_h))
+        .min_height(Size::px(row2_h))
         .child(tile_head(Some(WIRED), "Wired", None::<Element>)).child(if let Some(ref info) = wired_info {
             if info.ip_address.is_empty() {
                 dot_status_row(
@@ -473,7 +452,7 @@ pub fn control_panel_app() -> Element {
         let sched = dnd_sched.read().clone();
         let sched_meta = format!("{}–{}", sched.start, sched.end);
         let sched_on = sched.enabled;
-        tile().height(Size::px(row2_h)).child(tile_head(
+        tile().min_height(Size::px(row2_h)).child(tile_head(
             Some(FOCUS),
             "Focus",
             Some({

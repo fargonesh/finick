@@ -1862,47 +1862,34 @@ impl Component for DisplayDetailPage {
         let refresh_btn = {
             let mut ds = displays;
             let mut status = order_status;
-            rect()
-                .cursor(CursorIcon::Pointer)
-                .padding((4., 8.))
-                .corner_radius(6.)
-                .background(t.panel_raised)
-                .border(Border::new().width(1.).fill(t.border))
-                .on_press(move |_| {
-                    status.set(None);
-                    freya::prelude::spawn(async move {
-                        let d = tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays())
-                            .await
-                            .unwrap_or_default();
-                        ds.set(d);
-                    });
-                })
-                .child(label().font_size(11.).color(t.text_dim).text("Detect Displays"))
+            ghost_button("Detect Displays", move || {
+                status.set(None);
+                freya::prelude::spawn(async move {
+                    let d = tokio::task::spawn_blocking(move || system::HyprlandBackend.get_displays())
+                        .await
+                        .unwrap_or_default();
+                    ds.set(d);
+                });
+            })
         };
         let identify_btn = {
             let mut active = identify_active;
             let mut status = order_status;
-            rect()
-                .cursor(CursorIcon::Pointer)
-                .padding((4., 8.))
-                .corner_radius(6.)
-                .background(t.accent)
-                .on_press(move |_| {
-                    active.set(true);
-                    status.set(Some(Ok("Identifying displays…".to_string())));
-                    let mut a = active;
-                    let mut s = status;
-                    freya::prelude::spawn(async move {
-                        let _ = tokio::task::spawn_blocking(|| {
-                            system::hypr_exec("notify-send 'Display Identify' 'Overlay shown'");
-                        })
-                        .await;
-                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        a.set(false);
-                        s.set(Some(Ok("Identify finished".to_string())));
-                    });
-                })
-                .child(label().font_size(11.).color(t.bg).text("Identify"))
+            secondary_button("Identify", move || {
+                active.set(true);
+                status.set(Some(Ok("Identifying displays…".to_string())));
+                let mut a = active;
+                let mut s = status;
+                freya::prelude::spawn(async move {
+                    let _ = tokio::task::spawn_blocking(|| {
+                        system::hypr_exec("notify-send 'Display Identify' 'Overlay shown'");
+                    })
+                    .await;
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    a.set(false);
+                    s.set(Some(Ok("Identify finished".to_string())));
+                });
+            })
         };
         let header_right: Option<Element> = {
             let lock = res_lock.clone().map(|l| lock_badge(l).into_element());
@@ -1981,25 +1968,6 @@ impl Component for DisplayDetailPage {
                         })
                     };
 
-                    let on_swap = {
-                        let mut displays_state = displays;
-                        let locked = is_arrangement_locked;
-                        EventHandler::new(move |(from_name, to_name): (String, String)| {
-                            if locked {
-                                return;
-                            }
-                            let current_list = displays_state.read().clone();
-                            if let (Some(pos1), Some(pos2)) = (
-                                current_list.iter().position(|d| d.name == from_name),
-                                current_list.iter().position(|d| d.name == to_name),
-                            ) {
-                                let mut new_order = current_list;
-                                new_order.swap(pos1, pos2);
-                                displays_state.set(new_order);
-                            }
-                        })
-                    };
-
                     let on_drag_end = {
                         let mut displays_state = displays;
                         let mut status_state = order_status;
@@ -2074,69 +2042,10 @@ impl Component for DisplayDetailPage {
 
                     let on_position = {
                         let mut offs = position_offsets;
-                        let mut displays_state = displays;
-                        EventHandler::new(move |(name, nx, ny): (String, i32, i32)| {
-                            let list_snapshot = displays_state.read().clone();
-                            let self_info = list_snapshot.iter().find(|d| d.name == name);
-                            let (sw, sh) = if let Some(d) = self_info {
-                                let (rw, rh) = system::parse_display_dimensions(&d.resolution);
-                                let sc: f64 = d.scale.parse().unwrap_or(1.0);
-                                let sc = if sc <= 0.0 { 1.0 } else { sc };
-                                let mut w = (rw as f64 / sc).round() as i32;
-                                let mut h = (rh as f64 / sc).round() as i32;
-                                if d.transform == 1 || d.transform == 3 {
-                                    std::mem::swap(&mut w, &mut h);
-                                }
-                                (w, h)
-                            } else {
-                                (1920, 1080)
-                            };
-                            let (mut snap_x, mut snap_y) = (nx, ny);
-                            if list_snapshot.len() > 1 {
-                                let mut best: Option<(i32, i32, i32)> = None;
-                                for d in &list_snapshot {
-                                    if d.name == name {
-                                        continue;
-                                    }
-                                    let (ox, oy) = (d.x, d.y);
-                                    let (rw, rh) = system::parse_display_dimensions(&d.resolution);
-                                    let sc: f64 = d.scale.parse().unwrap_or(1.0);
-                                    let sc = if sc <= 0.0 { 1.0 } else { sc };
-                                    let mut ow = (rw as f64 / sc).round() as i32;
-                                    let mut oh = (rh as f64 / sc).round() as i32;
-                                    if d.transform == 1 || d.transform == 3 {
-                                        std::mem::swap(&mut ow, &mut oh);
-                                    }
-                                    for (cx, cy) in [(ox + ow, oy), (ox - sw, oy), (ox, oy + oh), (ox, oy - sh)] {
-                                        let dx = nx - cx;
-                                        let dy = ny - cy;
-                                        let dist = dx * dx + dy * dy;
-                                        if best.is_none() || dist < best.unwrap().0 {
-                                            best = Some((dist, cx, cy));
-                                        }
-                                    }
-                                }
-                                if let Some((_, bx, by)) = best {
-                                    snap_x = bx;
-                                    snap_y = by;
-                                }
-                            } else {
-                                snap_x = 0;
-                                snap_y = 0;
-                            }
-                            snap_x = snap_x.clamp(-3000, 3000);
-                            snap_y = snap_y.clamp(-2000, 2000);
+                        EventHandler::new(move |(name, x, y): (String, i32, i32)| {
                             let mut map = offs.read().clone();
-                            map.insert(name.clone(), (snap_x, snap_y));
-                            offs.set(map.clone());
-                            let mut list = displays_state.read().clone();
-                            for d in list.iter_mut() {
-                                if d.name == name {
-                                    d.x = snap_x;
-                                    d.y = snap_y;
-                                }
-                            }
-                            displays_state.set(list);
+                            map.insert(name, (x, y));
+                            offs.set(map);
                         })
                     };
                     rect()
@@ -2146,7 +2055,7 @@ impl Component for DisplayDetailPage {
                         .child(draggable_displays_mock_with_position(
                             items,
                             dragged_name,
-                            on_swap,
+                            is_arrangement_locked,
                             Some(on_select),
                             Some(on_drag_end),
                             on_position,
@@ -4828,7 +4737,15 @@ impl Component for DesktopDetailPage {
                                 pill_switch(cur, move |v| {
                                     store.set(SettingKey::Custom("topbar.show_notifications".to_string()), v)
                                 })
-                            })),
+                            }))
+                            .child(setting_row("Custom pills", None::<String>, true, {
+                                let store = store;
+                                let cur = *store.topbar_show_pills.read();
+                                pill_switch(cur, move |v| {
+                                    store.set(SettingKey::Custom("topbar.show_pills".to_string()), v)
+                                })
+                            }))
+                            .child(tile_sub("Pills are JSON files in ~/.config/finick/topbar-pills/ — each runs a command like playerctl or node")),
                     ),
             )
     }

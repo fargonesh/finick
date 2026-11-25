@@ -29,9 +29,11 @@ Open Details, Copy log, fix the named attr, Retry. `search` first to confirm the
 
 If `finick-lock` drops to the Freya fallback unexpectedly, check `FINICK_LOCKER_BIN`/`PATH` and `/etc/pam.d/finick-lock`. Never ship a lock change you haven't unlocked from.
 
+Stuck after a lock client died: run `devenv shell unlock` for a read-only status check, then `devenv shell unlock --force` to send SIGTERM to any stray `finick-lock`/`locker` PIDs, clear a stale `finick-locker.lock` only after its PID is verified dead, wake the display via `hyprctl dpms on` (Lua-first, with `-i 0` fallback for TTY use), and start `finick-overlay` again. Note: `hyprctl keyword misc:allow_session_lock_restore 1` no longer recovers these sessions upstream, so the script deliberately does not use it.
+
 ## Screenshots
 
-`[settings] screenshot failed: no screenshot tool found (install grim or hyprshot)` means neither binary was on `PATH`. Inside the repo run it through `devenv shell` (`devenv shell settings --screenshot`; see [Architecture](./architecture.md) for the full flag), which provides `grim`, `slurp`, `wl-screenrec`, `hyprshot`, and `wl-clipboard`. Outside devenv, `which grim` should print something; on NixOS add the tools to your system or home packages.
+`[settings] screenshot failed: no screenshot tool found (...)` means no capture binary was on `PATH`. Inside the repo run it through `devenv shell` (`devenv shell settings --screenshot`; see [Architecture](./architecture.md) for the full flag), which provides `grim`, `slurp`, `wl-screenrec`, `hyprshot`, and `wl-clipboard`. Outside devenv, `which grim` should print something; on NixOS add the tools to your system or home packages. Under `--screenshot-virtual` (Xvfb/X11) the capture uses `import` (`imagemagick`), `scrot`, or `maim` instead; missing Xvfb reports as `no virtual display tool found (install xorg-xserver for Xvfb)`.
 
 The overlay screenshot utility fails the same way, with more specific errors: `grim is required for screenshots but was not found` (stills), `slurp is required for region selection but was not found` (Region button only; Fullscreen keeps working), `No screencast recorder found (install wl-screenrec or wf-recorder)`. Region cancelling with Escape is not an error; it reports `Region selection cancelled` and saves nothing. If the clipboard copy silently skips, `wl-copy` is missing; the PNG in `~/Pictures/Screenshots` is still fine.
 

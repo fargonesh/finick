@@ -72,8 +72,8 @@ This document tracks the implementation status of all settings pages and feature
 - [ ] **Control Center**: Panel/bar icon visibility toggles.
 - [ ] **Desktop & Dock**: Window manager layout configurations, dock sizing, workspaces layout, and widget placement.
 - [~] **Displays**:
-  - **Working**: Queries real connected monitors, display model names, resolutions, refresh rates, and active scale factors using `hyprctl monitors -j`.
-  - **Not Implemented**: Changing display resolution, refresh rate, orientation, or virtual layout arrangement from the UI.
+  - **Working**: Queries real connected monitors, display model names, resolutions, refresh rates, and active scale factors using `hyprctl monitors -j`. The arrangement tile drags monitors into place and applies positions through `hyprctl`. Resolution, mode (resolution and refresh rate together), orientation, scale, and primary display controls write live changes and persist them to `monitors.json`.
+  - **Partial**: Refresh rate is changed by picking a mode, not by a standalone rate control. When a monitor reports no available modes, resolution presets fall back to a fixed list.
 - [ ] **Wallpaper**: Wallpaper selection, directory browser, and transition timers.
 - [ ] **Screen Saver / Lock**: Idle timeout delays, visualizers, lock screen messages.
 
@@ -120,7 +120,7 @@ This document tracks the implementation status of all settings pages and feature
 | **Language & Region** | Locale, localectl status, keyboard layout, installed locales | Preferred languages order, format toggles | `localectl set-locale` persistence |
 | **Date & Time** | Date, 12h/24h time, timezone, RTC, NTP sync status & NTP toggle (`timedatectl`) | 24h display format preference | Timezone picker, custom NTP server |
 | **Appearance** | Hyprland gaps & border size (`hyprctl getoption` / `keyword`) | App dark mode & accent color (in-memory) | GTK/Qt theme writing, auto-theme schedule |
-| **Displays** | Connected monitors, resolutions, refresh rates, scale (`hyprctl monitors`) | *None* | Resolution / refresh rate configuration UI |
+| **Displays** | Monitor query, arrangement dragging, resolution and mode, rotation, scale, and primary selection via `hyprctl`; configs saved to `monitors.json` | *None* | Dedicated refresh-rate-only control |
 | **Power** | Battery percentage & charging state (`/sys/class/power_supply`) | Power profile selection | Sleep timers, power profiles daemon |
 | **Accounts** | Local human users list, UIDs, shells (`/etc/passwd`) | *None* | Add user, change password, sudo privileges |
 | **Privacy & Security** | Firewall detection (`ufw`/`iptables`), camera & mic presence | Camera/mic/location permission toggles | LUKS disk encryption, portal enforcement |

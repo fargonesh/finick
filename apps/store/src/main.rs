@@ -2092,10 +2092,14 @@ pub fn main() {
 
     let _rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().ok();
     let _guard = _rt.as_ref().map(|rt| rt.enter());
-    launch(LaunchConfig::new().with_window(
-        WindowConfig::new_app(StoreApp { initial_tab, initial_query })
+    launch(LaunchConfig::new().with_window({
+        let mut window = WindowConfig::new_app(StoreApp { initial_tab, initial_query })
             .with_title("Finick Apps")
             .with_size(1080., 740.)
-            .with_min_size(640., 480.),
-    ))
+            .with_min_size(640., 480.);
+        if let Some((w, h)) = args.window_size_override() {
+            window = window.with_size(w, h);
+        }
+        window
+    }))
 }

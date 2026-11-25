@@ -1,8 +1,8 @@
 use {
     crate::state::{
-        clear_notifications, dismiss_notification, fetch_notifications_blocking, group_notifications, is_app_muted,
-        load_muted_apps, load_reduced_motion_blocking, set_app_muted, subscribe_notifications_live,
-        subscribe_reduced_motion,
+        activate_notification_source, clear_notifications, dismiss_notification, fetch_notifications_blocking,
+        group_notifications, is_app_muted, load_muted_apps, load_reduced_motion_blocking, set_app_muted,
+        subscribe_notifications_live, subscribe_reduced_motion,
     },
     freya::prelude::*,
     std::collections::HashSet,
@@ -133,6 +133,7 @@ pub fn notification_panel_app() -> Element {
                 let mut col = rect().width(Size::fill()).vertical().spacing(8.).padding(4.).content(Content::Flex);
                 for n in items.iter().cloned() {
                     let mut ns = notifications;
+                    let mut press_ns = notifications;
                     let card = crate::notification_popup::NotificationPopup::from_notification(&n)
                         .with_auto_dismiss(false)
                         .with_width(Size::fill())
@@ -144,7 +145,25 @@ pub fn notification_panel_app() -> Element {
                             }
                             dismiss_notification(id);
                         });
-                    col = col.child(FadeSlideIn::new().reduced(is_reduced).child(card));
+                    let press_app = n.app_name.clone();
+                    let press_summary = n.summary.clone();
+                    let press_id = n.id;
+                    let pressable = rect()
+                        .width(Size::fill())
+                        .cursor(CursorIcon::Pointer)
+                        .content(Content::Flex)
+                        .on_press(move |_| {
+                            let (a, s) = (press_app.clone(), press_summary.clone());
+                            std::thread::spawn(move || activate_notification_source(&a, &s));
+                            let mut list = press_ns.read().clone();
+                            if let Some(pos) = list.iter().position(|item| item.id == press_id) {
+                                list.remove(pos);
+                                press_ns.set(list);
+                            }
+                            dismiss_notification(press_id);
+                        })
+                        .child(card);
+                    col = col.child(FadeSlideIn::new().reduced(is_reduced).child(pressable));
                 }
                 group = group.child(col);
             }
@@ -207,6 +226,7 @@ pub fn notification_panel_window_config() -> WindowConfig {
     WindowConfig::new(notification_panel_app)
         .with_title("notifications-panel")
         .with_app_id("overlay-notifications")
+        .with_shell(ShellSurface::notifications())
         .with_size(400., 620.)
         .with_min_size(380., 360.)
         .with_max_size(400., 760.)

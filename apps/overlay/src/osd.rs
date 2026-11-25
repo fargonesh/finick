@@ -361,6 +361,7 @@ pub fn osd_window_config() -> WindowConfig {
     WindowConfig::new(osd_app)
         .with_title("osd")
         .with_app_id("osd")
+        .with_shell(ShellSurface::osd())
         .with_size(420., 160.)
         .with_decorations(false)
         .with_transparency(true)

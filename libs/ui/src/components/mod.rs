@@ -1,6 +1,7 @@
 pub mod battery_ring;
 pub mod button;
 pub mod color_picker;
+pub mod fade_scroll;
 pub mod layout;
 pub mod chart;
 pub mod chip;
@@ -25,6 +26,7 @@ pub mod wallpapers;
 pub use battery_ring::*;
 pub use button::*;
 pub use color_picker::*;
+pub use fade_scroll::*;
 pub use layout::*;
 pub use chart::*;
 pub use chip::*;
